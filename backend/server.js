@@ -7,6 +7,7 @@ const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static');
+const Replicate = require('replicate');
 if (ffmpegPath) {
   ffmpeg.setFfmpegPath(ffmpegPath);
 }
@@ -14,6 +15,7 @@ if (ffprobePath && ffprobePath.path) {
   ffmpeg.setFfprobePath(ffprobePath.path);
 }
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const Replicate = require('replicate');
 
 const app = express();
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -241,7 +243,7 @@ app.post('/faceswap', upload.fields([{ name: 'photo' }, { name: 'video' }]), asy
     const output = await replicate.run("lucataco/faceswap:9b847c5a94de1e8129b3da549d5ce1a4c6c1a883d8106901b16a86e5c8c1b33", {
       input: {
         target_image: fs.createReadStream(videoPath || photoPath),
-        swap_image: fs.createReadStream(photoPath),
+        swap_image: fs.createReadStream(photoPath)
       }
     });
     res.json({ result: output, points: u.points });
@@ -331,8 +333,7 @@ async function runFaceswap(u, photoPath, videoPath) {
   if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
   user.points -= cost;
   saveData(data);
-  const ReplicateMod = await import('replicate');
-  const replicate = new ReplicateMod.default({ auth: process.env.REPLICATE_API_TOKEN });
+  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
   const output = await replicate.run("lucataco/faceswap:9b847c5a94de1e8129b3da549d5ce1a4c6c1a883d8106901b16a86e5c8c1b33", {
     input: { target_image: fs.createReadStream(videoPath || photoPath), swap_image: fs.createReadStream(photoPath) }
   });
