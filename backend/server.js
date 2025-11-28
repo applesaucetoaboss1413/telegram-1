@@ -715,10 +715,40 @@ bot.on('video', async ctx => {
   }
 });
 
+bot.on('message', async ctx => {
+  const type = ctx.chat && ctx.chat.type;
+  if (type === 'group' || type === 'supergroup') {
+    const kb = Markup.inlineKeyboard([
+      [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
+      [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
+      [Markup.button.callback('Menu', 'menu')]
+    ]);
+    const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+    await ctx.reply(`Welcome! Use the buttons below or type commands.\nPrices:\n${lines.join('\n')}`, kb);
+  }
+});
+
+bot.on('chat_member', async ctx => {
+  const type = ctx.chat && ctx.chat.type;
+  if (type === 'group' || type === 'supergroup' || type === 'channel') {
+    const kb = Markup.inlineKeyboard([
+      [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
+      [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
+      [Markup.button.callback('Menu', 'menu')]
+    ]);
+    const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+    await ctx.reply(`Welcome! Use the buttons below or type commands.\nPrices:\n${lines.join('\n')}`, kb);
+  }
+});
+
 bot.on('channel_post', async ctx => {
-  const u = process.env.BOT_USERNAME || '';
-  const link = u ? `https://t.me/${u}` : 'https://t.me';
-  await ctx.reply(`Bot active. DM ${link} to use features.`);
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
+    [Markup.button.callback('Menu', 'menu')]
+  ]);
+  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+  await ctx.reply(`Welcome! Use the buttons below or type commands.\nPrices:\n${lines.join('\n')}`, kb);
 });
 
 bot.catch(err => console.error('Bot error:', err));
