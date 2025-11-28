@@ -449,14 +449,15 @@ bot.action(/buy:(.+)/, async ctx => {
   const id = String(ctx.from.id);
   const tier = PRICING.find(t => t.id === tierId);
   if (!tier) return ctx.reply('Not found');
-  const origin = process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me');
+  const origin = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me'));
+  const chatMeta = (ctx.chat && ctx.chat.type === 'channel') ? String(ctx.from.id) : String(ctx.chat.id);
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ['card'],
     line_items: [{ price_data: { currency: 'usd', product_data: { name: `${tier.points} Points` }, unit_amount: Math.round(tier.usd * 100) }, quantity: 1 }],
     mode: 'payment',
     success_url: `${origin}/?success=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/?cancel=1`,
-    metadata: { userId: String(id), tierId, chatId: String(ctx.chat.id), promoterId: String(getOrCreateUser(id).promoter_id || '') }
+    metadata: { userId: String(id), tierId, chatId: chatMeta, promoterId: String(getOrCreateUser(id).promoter_id || '') }
   });
   const kb = Markup.inlineKeyboard([
     [Markup.button.url(`Pay $${tier.usd}`, session.url || 'https://stripe.com')],
@@ -542,6 +543,26 @@ bot.action('clone', async ctx => {
   const kb = Markup.inlineKeyboard([
     [Markup.button.url('Promo Link', promoLink || refLink)],
     [Markup.button.url('Invite Link', refLink)],
+    [Markup.button.callback('Main Menu', 'menu')]
+  ]);
+  await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
+});
+
+bot.action('pricing', async ctx => {
+  await ctx.answerCbQuery();
+  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+  await ctx.reply(`Prices:\n${lines.join('\n')}`);
+});
+
+bot.action('promote', async ctx => {
+  await ctx.answerCbQuery();
+  const id = String(ctx.from.id);
+  const u = process.env.BOT_USERNAME || '';
+  const promo = u ? `https://t.me/${u}?start=promo_${id}` : '';
+  const ref = u ? `https://t.me/${u}?start=ref_${id}` : '';
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url('Promo Link', promo || ref)],
+    [Markup.button.url('Invite Link', ref || promo)],
     [Markup.button.callback('Main Menu', 'menu')]
   ]);
   await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
@@ -729,6 +750,14 @@ if (process.env.BOT_TOKEN) {
 console.log('Server is about to start...');
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const ch = process.env.CHANNEL_ID || '';
+if (ch) {
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')]
+  ]);
+  bot.telegram.sendMessage(ch, 'Welcome! Use the buttons below to view prices, buy points, or get promo links.', { reply_markup: kb.reply_markup }).catch(() => {});
+}
 bot.action('help', async ctx => {
   await ctx.answerCbQuery();
   const kb = Markup.inlineKeyboard([
