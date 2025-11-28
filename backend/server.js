@@ -742,6 +742,7 @@ bot.on('chat_member', async ctx => {
 });
 
 bot.on('channel_post', async ctx => {
+  if (ctx.from && ctx.from.is_bot) return;
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
     [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
@@ -764,11 +765,19 @@ if (process.env.BOT_TOKEN) {
   ]);
   if ((process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN)) {
     try {
-      app.use((process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook'), express.json(), bot.webhookCallback(process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook'));
+      const pathHook = (process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook');
+      app.use(pathHook, express.json(), bot.webhookCallback(pathHook));
       const base = process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN;
-      bot.telegram.setWebhook(`${base}${process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook'}`).then(() => console.log('Webhook set')).catch(e => console.error('Webhook set error', e));
+      bot.telegram.setWebhook(`${base}${pathHook}`).then(() => {
+        console.log('Webhook set');
+      }).catch(e => {
+        console.error('Webhook set error', e);
+        bot.telegram.deleteWebhook().catch(() => {});
+        bot.launch().then(() => console.log('Bot launched (fallback)')).catch(err => console.error('Bot launch error', err));
+      });
     } catch (e) {
       console.error('Webhook init error', e);
+      bot.launch().then(() => console.log('Bot launched (fallback)')).catch(err => console.error('Bot launch error', err));
     }
   } else {
     bot.launch().then(() => console.log('Bot launched')).catch(e => console.error('Bot launch error', e));
@@ -780,14 +789,48 @@ if (process.env.BOT_TOKEN) {
 console.log('Server is about to start...');
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-const ch = process.env.CHANNEL_ID || '';
-if (ch) {
-  const kb = Markup.inlineKeyboard([
+let ch = process.env.CHANNEL_ID || '';
+function channelKeyboard() {
+  return Markup.inlineKeyboard([
     [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')]
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
+    [Markup.button.callback('Menu', 'menu')]
   ]);
-  bot.telegram.sendMessage(ch, 'Welcome! Use the buttons below to view prices, buy points, or get promo links.', { reply_markup: kb.reply_markup }).catch(() => {});
 }
+function channelGreetText() {
+  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+  return `Welcome! Use the buttons below or type commands.\nPrices:\n${lines.join('\n')}`;
+}
+async function postChannelGreet(chatId) {
+  const kb = channelKeyboard();
+  const msg = await bot.telegram.sendMessage(chatId, channelGreetText(), { reply_markup: kb.reply_markup });
+  try { await bot.telegram.pinChatMessage(chatId, msg.message_id); } catch (e) {}
+  const data = loadData();
+  data.channel = data.channel || {};
+  data.channel.last_greet_at = Date.now();
+  data.channel.last_greet_message_id = msg.message_id;
+  saveData(data);
+}
+async function resolveChannelId() {
+  try {
+    if (ch && ch.startsWith('@')) {
+      const info = await bot.telegram.getChat(ch);
+      if (info && info.id) ch = String(info.id);
+    }
+  } catch (e) {}
+}
+resolveChannelId().then(() => {
+  if (ch) {
+    postChannelGreet(ch).catch(() => {});
+    setInterval(() => {
+      try {
+        const data = loadData();
+        const last = (data.channel && data.channel.last_greet_at) || 0;
+        if (Date.now() - last > 45 * 60 * 1000) postChannelGreet(ch).catch(() => {});
+      } catch (e) {}
+    }, 5 * 60 * 1000);
+  }
+}).catch(() => {});
 bot.action('help', async ctx => {
   await ctx.answerCbQuery();
   const kb = Markup.inlineKeyboard([
