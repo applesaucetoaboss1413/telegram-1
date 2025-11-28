@@ -272,6 +272,7 @@ app.post('/create-video', upload.fields([{ name: 'photo' }, { name: 'video' }]),
 
 const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
+bot.use(async (ctx, next) => { try { console.log('update', ctx.updateType, ctx.updateSubTypes || [], (ctx.from && ctx.from.id) || null); } catch (_) {} return next(); });
 
 function getOrCreateUser(id, fields) {
   const data = loadData();
@@ -706,9 +707,21 @@ if (process.env.BOT_TOKEN) {
     { command: 'menu', description: 'Open main menu' },
     { command: 'faceswap', description: 'Swap face using your photo/video' },
     { command: 'confirm', description: 'Confirm Stripe session id' },
+    { command: 'pricing', description: 'Show prices' },
+    { command: 'promote', description: 'Share promo/invite links' },
     { command: 'help', description: 'Show help' }
   ]);
-  bot.launch().then(() => console.log('Bot launched')).catch(e => console.error('Bot launch error', e));
+  if ((process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN)) {
+    try {
+      app.use((process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook'), express.json(), bot.webhookCallback(process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook'));
+      const base = process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN;
+      bot.telegram.setWebhook(`${base}${process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook'}`).then(() => console.log('Webhook set')).catch(e => console.error('Webhook set error', e));
+    } catch (e) {
+      console.error('Webhook init error', e);
+    }
+  } else {
+    bot.launch().then(() => console.log('Bot launched')).catch(e => console.error('Bot launch error', e));
+  }
 } else {
   console.error('Missing BOT_TOKEN');
 }
@@ -735,4 +748,22 @@ bot.command('help', async ctx => {
     [Markup.button.callback('Check-In', 'checkin'), Markup.button.callback('Leaderboard', 'leaderboard')]
   ]);
   await ctx.reply('Use the buttons below to perform actions. No typing needed. Buy points to unlock features, then try Faceswap or Create Video. Check-In daily for bonuses. Share Clone links to earn 20% rewards.', kb);
+});
+
+bot.command('pricing', async ctx => {
+  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+  await ctx.reply(`Prices:\n${lines.join('\n')}`);
+});
+
+bot.command('promote', async ctx => {
+  const id = String(ctx.from.id);
+  const botUsername = process.env.BOT_USERNAME || '';
+  const promoLink = botUsername ? `https://t.me/${botUsername}?start=promo_${id}` : '';
+  const refLink = botUsername ? `https://t.me/${botUsername}?start=ref_${id}` : '';
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url('Promo Link', promoLink || refLink)],
+    [Markup.button.url('Invite Link', refLink || promoLink)],
+    [Markup.button.callback('Main Menu', 'menu')]
+  ]);
+  await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
 });
