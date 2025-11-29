@@ -910,7 +910,7 @@ if (process.env.BOT_TOKEN) {
     { command: 'resolve', description: 'Resolve @username to chat id' },
     { command: 'chatid', description: 'Show current chat id' },
     { command: 'status', description: 'Show webhook/polling status' }
-  ]);
+  ]).catch(err => console.error('setMyCommands error', err));
   const forcePolling = String(process.env.TELEGRAM_FORCE_POLLING || '').toLowerCase();
   const shouldForcePolling = forcePolling === '1' || forcePolling === 'true' || forcePolling === 'yes';
   global.__botLaunchMode = 'none';
@@ -920,8 +920,10 @@ if (process.env.BOT_TOKEN) {
   } else if ((process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN)) {
     try {
       const pathHook = (process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook');
+      const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN);
+      const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
+      app.get(pathHook, (req, res) => res.send('ok'));
       app.use(pathHook, express.json(), bot.webhookCallback(pathHook));
-      const base = process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN;
       const invalidBase = /(^https?:\/\/t\.me)/i.test(base) || /(^https?:\/\/localhost)/i.test(base) || /(^https?:\/\/127\.0\.0\.1)/i.test(base);
       if (invalidBase) {
         console.error('Invalid PUBLIC_URL/PUBLIC_ORIGIN for webhook:', base);
