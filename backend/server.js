@@ -448,17 +448,22 @@ bot.action('leaderboard', async ctx => {
 });
 
 bot.action('buy', async ctx => {
-  await ctx.answerCbQuery();
+  try { await ctx.answerCbQuery('Opening packages…'); } catch (_) {}
   const rows = PRICING.map(t => [Markup.button.callback(`${t.points} / $${t.usd}`, `buy:${t.id}`)]);
   try {
     await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
   } catch (e) {
-    try { await bot.telegram.sendMessage(ctx.from.id, 'Select a package:', Markup.inlineKeyboard(rows)); } catch (_) {}
+    try { await bot.telegram.sendMessage(ctx.from.id, 'Select a package:', Markup.inlineKeyboard(rows)); }
+    catch (_) {
+      const botUsername = process.env.BOT_USERNAME || '';
+      const hint = botUsername ? `Start a chat: https://t.me/${botUsername}` : 'Start a chat with the bot to receive payment link';
+      try { await ctx.answerCbQuery(hint); } catch (_) {}
+    }
   }
 });
 
 bot.action(/buy:(.+)/, async ctx => {
-  await ctx.answerCbQuery();
+  try { await ctx.answerCbQuery('Preparing checkout…'); } catch (_) {}
   try {
     const tierId = ctx.match[1];
     const id = String(ctx.from.id);
@@ -489,7 +494,12 @@ bot.action(/buy:(.+)/, async ctx => {
     try {
       await ctx.reply('Complete your purchase, then tap Confirm:', kb);
     } catch (e) {
-      try { await bot.telegram.sendMessage(id, 'Complete your purchase, then tap Confirm:', kb); } catch (_) {}
+      try { await bot.telegram.sendMessage(id, 'Complete your purchase, then tap Confirm:', kb); }
+      catch (_) {
+        const botUsername = process.env.BOT_USERNAME || '';
+        const hint = botUsername ? `Start a chat: https://t.me/${botUsername}` : 'Start a chat with the bot to receive payment link';
+        try { await ctx.answerCbQuery(hint); } catch (_) {}
+      }
     }
   } catch (e) {
     try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
