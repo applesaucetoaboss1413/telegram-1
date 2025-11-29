@@ -15,6 +15,7 @@ if (ffprobePath && ffprobePath.path) {
   ffmpeg.setFfprobePath(ffprobePath.path);
 }
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+console.log('Env', { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, CHANNEL_ID: process.env.CHANNEL_ID ? process.env.CHANNEL_ID : '' });
 
 const app = express();
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -272,7 +273,16 @@ app.post('/create-video', upload.fields([{ name: 'photo' }, { name: 'video' }]),
 
 const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
-bot.use(async (ctx, next) => { try { console.log('update', ctx.updateType, ctx.updateSubTypes || [], (ctx.from && ctx.from.id) || null); } catch (_) {} return next(); });
+bot.use(async (ctx, next) => { try { console.log('update', ctx.updateType, ctx.updateSubTypes || [], (ctx.from && ctx.from.id) || null, (ctx.chat && ctx.chat.type) || null, (ctx.chat && ctx.chat.id) || null, (ctx.chat && ctx.chat.title) || null); } catch (_) {} return next(); });
+
+app.get('/healthz', async (req, res) => {
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    res.json({ mode: global.__botLaunchMode || 'none', webhook_info: info, env: { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN } });
+  } catch (e) {
+    res.json({ mode: global.__botLaunchMode || 'none', error: e.message });
+  }
+});
 
 function getOrCreateUser(id, fields) {
   const data = loadData();
@@ -368,7 +378,7 @@ bot.start(async ctx => {
     [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
     [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Faceswap', 'faceswap')],
     [Markup.button.callback('Create Video', 'createvideo'), Markup.button.callback('Leaderboard', 'leaderboard')],
-    [Markup.button.callback('Clone', 'clone'), Markup.button.callback('Help', 'help')]
+    [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
   ]);
   await ctx.reply(`Hello ${u.first_name || ''}. Points: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
 });
@@ -384,7 +394,7 @@ bot.action('menu', async ctx => {
     [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
     [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Faceswap', 'faceswap')],
     [Markup.button.callback('Create Video', 'createvideo'), Markup.button.callback('Leaderboard', 'leaderboard')],
-    [Markup.button.callback('Clone', 'clone'), Markup.button.callback('Help', 'help')]
+    [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
   ]);
   await ctx.reply(`Main Menu\nPoints: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
 });
@@ -611,107 +621,133 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
 });
 
 const pending = {};
+const pendingChannel = {};
 
 bot.command('faceswap', async ctx => {
-  pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
+  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
+  if (isChannel) {
+    pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', swap: null, target: null };
+  } else {
+    pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
+  }
   await ctx.reply('Send a photo of the face to swap, then a target video (optional).');
 });
 
 bot.action('faceswap', async ctx => {
   await ctx.answerCbQuery();
-  pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
+  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
+  if (isChannel) {
+    pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', swap: null, target: null };
+  } else {
+    pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
+  }
   await ctx.reply('Send a photo of the face to swap, then a target video (optional).');
 });
 
 bot.action('createvideo', async ctx => {
   await ctx.answerCbQuery();
-  pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
+  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
+  if (isChannel) {
+    pendingChannel[String(ctx.chat.id)] = { mode: 'createvideo', photo: null, video: null };
+  } else {
+    pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
+  }
   await ctx.reply('Send overlay photo, then base video.');
 });
 
 bot.on('photo', async ctx => {
-  const pid = String(ctx.from.id);
-  if (!pending[pid]) return;
-  const p = pending[pid];
-  const photos = ctx.message.photo;
-  const fileId = photos[photos.length - 1].file_id;
-  const link = await ctx.telegram.getFileLink(fileId);
-  const dest = path.join(uploadsDir, `photo_${pid}_${Date.now()}.jpg`);
-  await downloadTo(String(link), dest);
-  if (p.mode === 'faceswap') {
-    p.swap = dest;
-    if (p.target) {
-      const u = getOrCreateUser(pid);
-      const r = await runFaceswap(u, p.swap, p.target);
-      delete pending[pid];
-      if (r.error) {
-        const kb = Markup.inlineKeyboard([
-          [Markup.button.callback('Buy Points', 'buy')],
-          [Markup.button.callback('Main Menu', 'menu')]
-        ]);
-        return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+  try {
+    const pid = String(ctx.from.id);
+    if (!pending[pid]) return;
+    const p = pending[pid];
+    const photos = ctx.message.photo;
+    const fileId = photos[photos.length - 1].file_id;
+    const link = await ctx.telegram.getFileLink(fileId);
+    const dest = path.join(uploadsDir, `photo_${pid}_${Date.now()}.jpg`);
+    await downloadTo(String(link), dest);
+    if (p.mode === 'faceswap') {
+      p.swap = dest;
+      if (p.target) {
+        const u = getOrCreateUser(pid);
+        let r;
+        try { r = await runFaceswap(u, p.swap, p.target); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        delete pending[pid];
+        if (r.error) {
+          const kb = Markup.inlineKeyboard([
+            [Markup.button.callback('Buy Points', 'buy')],
+            [Markup.button.callback('Main Menu', 'menu')]
+          ]);
+          return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+        }
+        await ctx.reply(`Done. Points: ${r.points}`);
+        await ctx.reply(String(r.result));
+      } else {
+        await ctx.reply('Now send target video.');
       }
-      await ctx.reply(`Done. Points: ${r.points}`);
-      await ctx.reply(String(r.result));
-    } else {
-      await ctx.reply('Now send target video.');
+    } else if (p.mode === 'createvideo') {
+      p.photo = dest;
+      await ctx.reply('Now send base video.');
     }
-  } else if (p.mode === 'createvideo') {
-    p.photo = dest;
-    await ctx.reply('Now send base video.');
+  } catch (e) {
+    try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
   }
 });
 
 bot.on('video', async ctx => {
-  const pid = String(ctx.from.id);
-  if (!pending[pid]) return;
-  const p = pending[pid];
-  const fileId = ctx.message.video.file_id;
-  const link = await ctx.telegram.getFileLink(fileId);
-  const dest = path.join(uploadsDir, `video_${pid}_${Date.now()}.mp4`);
-  await downloadTo(String(link), dest);
-  if (p.mode === 'faceswap') {
-    p.target = dest;
-    if (p.swap) {
-      const u = getOrCreateUser(pid);
-      const r = await runFaceswap(u, p.swap, p.target);
-      delete pending[pid];
-      if (r.error) {
-        const kb = Markup.inlineKeyboard([
-          [Markup.button.callback('Buy Points', 'buy')],
-          [Markup.button.callback('Main Menu', 'menu')]
-        ]);
-        return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+  try {
+    const pid = String(ctx.from.id);
+    if (!pending[pid]) return;
+    const p = pending[pid];
+    const fileId = ctx.message.video.file_id;
+    const link = await ctx.telegram.getFileLink(fileId);
+    const dest = path.join(uploadsDir, `video_${pid}_${Date.now()}.mp4`);
+    await downloadTo(String(link), dest);
+    if (p.mode === 'faceswap') {
+      p.target = dest;
+      if (p.swap) {
+        const u = getOrCreateUser(pid);
+        let r;
+        try { r = await runFaceswap(u, p.swap, p.target); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        delete pending[pid];
+        if (r.error) {
+          const kb = Markup.inlineKeyboard([
+            [Markup.button.callback('Buy Points', 'buy')],
+            [Markup.button.callback('Main Menu', 'menu')]
+          ]);
+          return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+        }
+        await ctx.reply(`Done. Points: ${r.points}`);
+        await ctx.reply(String(r.result));
+      } else {
+        await ctx.reply('Now send swap photo.');
       }
-      await ctx.reply(`Done. Points: ${r.points}`);
-      await ctx.reply(String(r.result));
-    } else {
-      await ctx.reply('Now send swap photo.');
+    } else if (p.mode === 'createvideo') {
+      p.video = dest;
+      if (p.photo) {
+        const outputPath = path.join(outputsDir, `short-${Date.now()}.mp4`);
+        ffmpeg(p.video)
+          .setDuration(10)
+          .addInput(p.photo)
+          .complexFilter('overlay=0:0')
+          .save(outputPath)
+          .on('end', async () => {
+            delete pending[pid];
+            try {
+              await ctx.replyWithVideo({ source: fs.createReadStream(outputPath) });
+            } catch (e) {
+              await ctx.reply(`Video ready at /outputs/${path.basename(outputPath)}`);
+            }
+          })
+          .on('error', async (err) => {
+            delete pending[pid];
+            await ctx.reply(`Error: ${err.message}`);
+          });
+      } else {
+        await ctx.reply('Now send overlay photo.');
+      }
     }
-  } else if (p.mode === 'createvideo') {
-    p.video = dest;
-    if (p.photo) {
-      const outputPath = path.join(outputsDir, `short-${Date.now()}.mp4`);
-      ffmpeg(p.video)
-        .setDuration(10)
-        .addInput(p.photo)
-        .complexFilter('overlay=0:0')
-        .save(outputPath)
-        .on('end', async () => {
-          delete pending[pid];
-          try {
-            await ctx.replyWithVideo({ source: fs.createReadStream(outputPath) });
-          } catch (e) {
-            await ctx.reply(`Video ready at /outputs/${path.basename(outputPath)}`);
-          }
-        })
-        .on('error', async (err) => {
-          delete pending[pid];
-          await ctx.reply(`Error: ${err.message}`);
-        });
-    } else {
-      await ctx.reply('Now send overlay photo.');
-    }
+  } catch (e) {
+    try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
   }
 });
 
@@ -741,15 +777,105 @@ bot.on('chat_member', async ctx => {
   }
 });
 
+bot.on('my_chat_member', async ctx => {
+  const id = ctx.chat && ctx.chat.id;
+  if (!id) return;
+  try { await postChannelGreet(String(id)); } catch (_) {}
+});
+
 bot.on('channel_post', async ctx => {
   if (ctx.from && ctx.from.is_bot) return;
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
-    [Markup.button.callback('Menu', 'menu')]
-  ]);
-  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
-  await ctx.reply(`Welcome! Use the buttons below or type commands.\nPrices:\n${lines.join('\n')}`, kb);
+  const chatId = String(ctx.chat.id);
+  const post = ctx.channelPost || {};
+  const text = post.text || '';
+  if (text && /^\/chatid/i.test(text)) {
+    try { await ctx.reply(`chat.id: ${chatId}\nchat.type: ${ctx.chat.type}\nchat.title: ${ctx.chat.title || ''}`); } catch (_) {}
+    return;
+  }
+  if (text && /^\/resolve\b/i.test(text)) {
+    const parts = text.split(' ').filter(Boolean);
+    const target = parts[1];
+    if (!target) { try { await ctx.reply('Provide @username or id'); } catch (_) {} return; }
+    try {
+      const info = await bot.telegram.getChat(target);
+      try { await ctx.reply(`chat.id: ${String(info.id)}\nchat.type: ${info.type || ''}\nchat.title: ${info.title || ''}`); } catch (_) {}
+    } catch (e) {
+      try { await ctx.reply('Unable to resolve'); } catch (_) {}
+    }
+    return;
+  }
+  try {
+    if (post.photo && pendingChannel[chatId]) {
+      const photos = post.photo;
+      const fileId = photos[photos.length - 1].file_id;
+      const link = await ctx.telegram.getFileLink(fileId);
+      const dest = path.join(uploadsDir, `photo_${chatId}_${Date.now()}.jpg`);
+      await downloadTo(String(link), dest);
+      const p = pendingChannel[chatId];
+      if (p.mode === 'faceswap') {
+        p.swap = dest;
+        await ctx.reply('Now send target video.');
+      } else if (p.mode === 'createvideo') {
+        p.photo = dest;
+        await ctx.reply('Now send base video.');
+      }
+      return;
+    }
+    if (post.video && pendingChannel[chatId]) {
+      const fileId = post.video.file_id;
+      const link = await ctx.telegram.getFileLink(fileId);
+      const dest = path.join(uploadsDir, `video_${chatId}_${Date.now()}.mp4`);
+      await downloadTo(String(link), dest);
+      const p = pendingChannel[chatId];
+      if (p.mode === 'faceswap') {
+        p.target = dest;
+        if (p.swap) {
+          const uid = ctx.from && ctx.from.id ? String(ctx.from.id) : null;
+          if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to run faceswap.'); return; }
+          const u = getOrCreateUser(uid);
+          let r;
+          try { r = await runFaceswap(u, p.swap, p.target); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pendingChannel[chatId]; return; }
+          delete pendingChannel[chatId];
+          if (r.error) {
+            const kb = Markup.inlineKeyboard([
+              [Markup.button.callback('Buy Points', 'buy')],
+              [Markup.button.callback('Main Menu', 'menu')]
+            ]);
+            await ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+          } else {
+            await ctx.reply(`Done. Points: ${r.points}`);
+            await ctx.reply(String(r.result));
+          }
+        } else {
+          await ctx.reply('Now send swap photo.');
+        }
+      } else if (p.mode === 'createvideo') {
+        p.video = dest;
+        if (p.photo) {
+          const outputPath = path.join(outputsDir, `short-${Date.now()}.mp4`);
+          ffmpeg(p.video)
+            .setDuration(10)
+            .addInput(p.photo)
+            .complexFilter('overlay=0:0')
+            .save(outputPath)
+            .on('end', async () => {
+              delete pendingChannel[chatId];
+              try { await ctx.replyWithVideo({ source: fs.createReadStream(outputPath) }); } catch (e) { await ctx.reply(`Video ready at /outputs/${path.basename(outputPath)}`); }
+            })
+            .on('error', async (err) => {
+              delete pendingChannel[chatId];
+              await ctx.reply(`Error: ${err.message}`);
+            });
+        } else {
+          await ctx.reply('Now send overlay photo.');
+        }
+      }
+      return;
+    }
+  } catch (e) {
+    try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
+  }
+  try { await postChannelGreet(chatId); } catch (_) {}
 });
 
 bot.catch(err => console.error('Bot error:', err));
@@ -761,26 +887,44 @@ if (process.env.BOT_TOKEN) {
     { command: 'confirm', description: 'Confirm Stripe session id' },
     { command: 'pricing', description: 'Show prices' },
     { command: 'promote', description: 'Share promo/invite links' },
-    { command: 'help', description: 'Show help' }
+    { command: 'help', description: 'Show help' },
+    { command: 'resolve', description: 'Resolve @username to chat id' },
+    { command: 'chatid', description: 'Show current chat id' },
+    { command: 'status', description: 'Show webhook/polling status' }
   ]);
-  if ((process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN)) {
+  const forcePolling = String(process.env.TELEGRAM_FORCE_POLLING || '').toLowerCase();
+  const shouldForcePolling = forcePolling === '1' || forcePolling === 'true' || forcePolling === 'yes';
+  global.__botLaunchMode = 'none';
+  if (shouldForcePolling) {
+    bot.telegram.deleteWebhook().catch(() => {});
+    bot.launch().then(() => { global.__botLaunchMode = 'polling'; console.log('Bot launched (forced polling)'); bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(err => console.error('Bot launch error', err));
+  } else if ((process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN)) {
     try {
       const pathHook = (process.env.TELEGRAM_WEBHOOK_PATH || '/telegram/webhook');
       app.use(pathHook, express.json(), bot.webhookCallback(pathHook));
       const base = process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN;
-      bot.telegram.setWebhook(`${base}${pathHook}`).then(() => {
-        console.log('Webhook set');
-      }).catch(e => {
-        console.error('Webhook set error', e);
+      const invalidBase = /(^https?:\/\/t\.me)/i.test(base) || /(^https?:\/\/localhost)/i.test(base) || /(^https?:\/\/127\.0\.0\.1)/i.test(base);
+      if (invalidBase) {
+        console.error('Invalid PUBLIC_URL/PUBLIC_ORIGIN for webhook:', base);
         bot.telegram.deleteWebhook().catch(() => {});
-        bot.launch().then(() => console.log('Bot launched (fallback)')).catch(err => console.error('Bot launch error', err));
-      });
+        bot.launch().then(() => { global.__botLaunchMode = 'polling'; console.log('Bot launched (invalid webhook base)'); bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(err => console.error('Bot launch error', err));
+      } else {
+        bot.telegram.setWebhook(`${base}${pathHook}`).then(() => {
+          global.__botLaunchMode = 'webhook';
+          console.log('Webhook set');
+          bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err));
+        }).catch(e => {
+          console.error('Webhook set error', e);
+          bot.telegram.deleteWebhook().catch(() => {});
+          bot.launch().then(() => { global.__botLaunchMode = 'polling'; console.log('Bot launched (fallback)'); bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(err => console.error('Bot launch error', err));
+        });
+      }
     } catch (e) {
       console.error('Webhook init error', e);
-      bot.launch().then(() => console.log('Bot launched (fallback)')).catch(err => console.error('Bot launch error', err));
+      bot.launch().then(() => { global.__botLaunchMode = 'polling'; console.log('Bot launched (fallback)'); bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(err => console.error('Bot launch error', err));
     }
   } else {
-    bot.launch().then(() => console.log('Bot launched')).catch(e => console.error('Bot launch error', e));
+    bot.launch().then(() => { global.__botLaunchMode = 'polling'; console.log('Bot launched'); bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(e => console.error('Bot launch error', e));
   }
 } else {
   console.error('Missing BOT_TOKEN');
@@ -789,7 +933,25 @@ if (process.env.BOT_TOKEN) {
 console.log('Server is about to start...');
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-let ch = process.env.CHANNEL_ID || '';
+let chs = (process.env.CHANNEL_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+let __webhookMonitorStarted = false;
+function startWebhookMonitor() {
+  if (__webhookMonitorStarted) return;
+  __webhookMonitorStarted = true;
+  setInterval(async () => {
+    if ((global.__botLaunchMode || '') !== 'webhook') return;
+    try {
+      const info = await bot.telegram.getWebhookInfo();
+      const errMsg = info && info.last_error_message;
+      if (errMsg) {
+        console.error('Webhook delivery error', errMsg);
+        bot.telegram.deleteWebhook().catch(() => {});
+        bot.launch().then(() => { global.__botLaunchMode = 'polling'; console.log('Bot launched (fallback)'); bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(err => console.error('Bot launch error', err));
+      }
+    } catch (e) {}
+  }, 30000);
+}
+startWebhookMonitor();
 function channelKeyboard() {
   return Markup.inlineKeyboard([
     [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
@@ -807,26 +969,39 @@ async function postChannelGreet(chatId) {
   try { await bot.telegram.pinChatMessage(chatId, msg.message_id); } catch (e) {}
   const data = loadData();
   data.channel = data.channel || {};
-  data.channel.last_greet_at = Date.now();
-  data.channel.last_greet_message_id = msg.message_id;
+  data.channel[chatId] = data.channel[chatId] || {};
+  data.channel[chatId].last_greet_at = Date.now();
+  data.channel[chatId].last_greet_message_id = msg.message_id;
   saveData(data);
 }
-async function resolveChannelId() {
+async function resolveChannelIds() {
   try {
-    if (ch && ch.startsWith('@')) {
-      const info = await bot.telegram.getChat(ch);
-      if (info && info.id) ch = String(info.id);
+    const resolved = [];
+    for (const id of chs) {
+      if (id.startsWith('@')) {
+        try {
+          const info = await bot.telegram.getChat(id);
+          if (info && info.id) resolved.push(String(info.id)); else resolved.push(id);
+        } catch (_) { resolved.push(id); }
+      } else {
+        resolved.push(id);
+      }
     }
+    chs = Array.from(new Set(resolved)).filter(Boolean);
   } catch (e) {}
 }
-resolveChannelId().then(() => {
-  if (ch) {
-    postChannelGreet(ch).catch(() => {});
+resolveChannelIds().then(() => {
+  if (chs.length) {
+    for (const id of chs) postChannelGreet(id).catch(() => {});
     setInterval(() => {
       try {
         const data = loadData();
-        const last = (data.channel && data.channel.last_greet_at) || 0;
-        if (Date.now() - last > 45 * 60 * 1000) postChannelGreet(ch).catch(() => {});
+        for (const id of chs) {
+          const lastMap = (data.channel && data.channel[id] && data.channel[id].last_greet_at) || 0;
+          const lastLegacy = (data.channel && data.channel.last_greet_at) || 0;
+          const last = Math.max(lastMap, lastLegacy);
+          if (Date.now() - last > 45 * 60 * 1000) postChannelGreet(id).catch(() => {});
+        }
       } catch (e) {}
     }, 5 * 60 * 1000);
   }
@@ -868,4 +1043,34 @@ bot.command('promote', async ctx => {
     [Markup.button.callback('Main Menu', 'menu')]
   ]);
   await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
+});
+
+bot.command('chatid', async ctx => {
+  const id = String(ctx.chat.id);
+  await ctx.reply(`chat.id: ${id}\nchat.type: ${ctx.chat.type}\nchat.title: ${ctx.chat.title || ''}`);
+});
+
+bot.command('status', async ctx => {
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    const mode = global.__botLaunchMode || 'none';
+    const url = info && info.url ? String(info.url) : '';
+    const pending = info && typeof info.pending_update_count === 'number' ? info.pending_update_count : 0;
+    const lastErr = info && info.last_error_message ? String(info.last_error_message) : '';
+    await ctx.reply(`mode: ${mode}\nwebhook.url: ${url}\npending: ${pending}\nerror: ${lastErr}`);
+  } catch (e) {
+    await ctx.reply(`mode: ${global.__botLaunchMode || 'none'}\nerror: ${e.message}`);
+  }
+});
+
+bot.command('resolve', async ctx => {
+  const parts = (ctx.message.text || '').split(' ').filter(Boolean);
+  const target = parts[1];
+  if (!target) return ctx.reply('Provide @username or id');
+  try {
+    const info = await bot.telegram.getChat(target);
+    await ctx.reply(`chat.id: ${String(info.id)}\nchat.type: ${info.type || ''}\nchat.title: ${info.title || ''}`);
+  } catch (e) {
+    await ctx.reply('Unable to resolve');
+  }
 });
