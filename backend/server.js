@@ -999,7 +999,6 @@ bot.on('channel_post', async ctx => {
   } catch (e) {
     try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
   }
-  try { await postChannelGreet(chatId); } catch (_) {}
 });
 
 bot.catch(err => console.error('Bot error:', err));
