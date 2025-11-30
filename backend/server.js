@@ -533,7 +533,7 @@ bot.action(/buy:(.+)/, async ctx => {
     if (!tier) return ctx.reply('Not found');
     const originRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me'));
     const origin = String(originRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
-    const chatMeta = (ctx.chat && ctx.chat.type === 'channel') ? String(ctx.from.id) : String(ctx.chat.id);
+    const chatMeta = String(ctx.chat && ctx.chat.id);
     let session;
     try {
       session = await stripe.checkout.sessions.create({
