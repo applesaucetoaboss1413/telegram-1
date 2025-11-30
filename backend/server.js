@@ -546,6 +546,11 @@ bot.action(/buy:(.+)/, async ctx => {
       });
     } catch (e) {
       try { await bot.telegram.sendMessage(id, `Payment error: ${e.message}`); } catch (_) {}
+      try {
+        const botUsername = process.env.BOT_USERNAME || '';
+        const hint = botUsername ? `Start a chat: https://t.me/${botUsername}` : 'Start a chat with the bot to receive payment link';
+        await ctx.answerCbQuery(hint);
+      } catch (_) {}
       return;
     }
     const kb = Markup.inlineKeyboard([
