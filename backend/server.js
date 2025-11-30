@@ -7,7 +7,8 @@ const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static');
-const Replicate = require('replicate');
+const https = require('https');
+const querystring = require('querystring');
 if (ffmpegPath) {
   ffmpeg.setFfmpegPath(ffmpegPath);
 }
@@ -43,6 +44,7 @@ app.use((req, res, next) => {
 });
 app.use(express.urlencoded({ extended: true }));
 app.use('/outputs', express.static(outputsDir));
+app.use('/uploads', express.static(uploadsDir));
 
 function loadData() {
   try {
@@ -66,6 +68,45 @@ function today() {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const da = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${da}`;
+}
+
+function startMagicResultPoll(requestId, chatId) {
+  let tries = 0;
+  const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
+  const poll = () => {
+    tries++;
+    const form = querystring.stringify({ request_id: String(requestId) });
+    const reqOpts = { hostname: 'api.magicapi.dev', path: '/api/v1/capix/faceswap/result/', method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
+    const r = https.request(reqOpts, res2 => {
+      let buf='';
+      res2.on('data', c => buf+=c);
+      res2.on('end', async () => {
+        let j;
+        try { j = JSON.parse(buf); } catch (_) { j = null; }
+        const status = j && (j.status || j.state || j.result_status || '');
+        if (status && /succeeded|successful|completed|done/i.test(String(status))) {
+          const out = j.output || j.result || j.url || j.image_url || j.video_url;
+          const url = Array.isArray(out) ? out[out.length - 1] : out;
+          if (chatId && url) {
+            try {
+              const dest = path.join(outputsDir, `faceswap_${Date.now()}${path.extname(String(url)) || ''}`);
+              await downloadTo(String(url), dest);
+              try { await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) }); }
+              catch (_) { try { await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) }); } catch (e2) { try { await bot.telegram.sendDocument(chatId, { source: fs.createReadStream(dest) }); } catch (e3) { try { await bot.telegram.sendMessage(chatId, String(url)); } catch (e4) {} } } }
+            } catch (_) {}
+          }
+        } else if (status && /failed|error|canceled/i.test(String(status))) {
+          if (chatId) { try { await bot.telegram.sendMessage(chatId, 'Faceswap failed'); } catch (_) {} }
+        } else {
+          if (tries < 40) setTimeout(poll, 3000);
+        }
+      });
+    });
+    r.on('error', () => { if (tries < 40) setTimeout(poll, 3000); });
+    r.write(form);
+    r.end();
+  };
+  if (key) setTimeout(poll, 2000);
 }
 
 app.post('/init-user', async (req, res) => {
@@ -239,14 +280,22 @@ app.post('/faceswap', upload.fields([{ name: 'photo' }, { name: 'video' }]), asy
   u.points -= cost;
   saveData(data);
   try {
-    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-    const output = await replicate.run("lucataco/faceswap:9b847c5a94de1e8129b3da549d5ce1a4c6c1a883d8106901b16a86e5c8c1b33", {
-      input: {
-        target_image: fs.createReadStream(videoPath || photoPath),
-        swap_image: fs.createReadStream(photoPath)
-      }
+    const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || '');
+    const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
+    if (!base) return res.status(500).json({ error: 'missing PUBLIC_URL/PUBLIC_ORIGIN' });
+    const swapUrl = `${base}/uploads/${path.basename(photoPath)}`;
+    const targetUrl = `${base}/uploads/${path.basename(videoPath || photoPath)}`;
+    const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
+    if (!key) return res.status(500).json({ error: 'missing API key' });
+    const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
+    const pth = videoPath ? '/api/v1/capix/faceswap/faceswap/v1/video' : '/api/v1/capix/faceswap/faceswap/v1/image';
+    const reqOpts = { hostname: 'api.magicapi.dev', path: pth, method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
+    const result = await new Promise((resolve, reject) => {
+      const r = https.request(reqOpts, res2 => { let buf=''; res2.on('data', c => buf+=c); res2.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(e); } }); }); r.on('error', reject); r.write(form); r.end();
     });
-    res.json({ result: output, points: u.points });
+    const requestId = result && (result.request_id || result.requestId || result.id);
+    if (!requestId) return res.status(500).json({ error: 'no request id' });
+    res.json({ queued: true, request_id: requestId, points: u.points });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -271,6 +320,8 @@ app.post('/create-video', upload.fields([{ name: 'photo' }, { name: 'video' }]),
     });
 });
 
+ 
+
 const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 bot.use(async (ctx, next) => { try { console.log('update', ctx.updateType, ctx.updateSubTypes || [], (ctx.from && ctx.from.id) || null, (ctx.chat && ctx.chat.type) || null, (ctx.chat && ctx.chat.id) || null, (ctx.chat && ctx.chat.title) || null); } catch (_) {} return next(); });
@@ -278,7 +329,7 @@ bot.use(async (ctx, next) => { try { console.log('update', ctx.updateType, ctx.u
 app.get('/healthz', async (req, res) => {
   try {
     const info = await bot.telegram.getWebhookInfo();
-    res.json({ mode: global.__botLaunchMode || 'none', webhook_info: info, env: { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, STRIPE_SECRET_KEY: !!process.env.STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET: !!process.env.STRIPE_WEBHOOK_SECRET, REPLICATE_API_TOKEN: !!process.env.REPLICATE_API_TOKEN } });
+    res.json({ mode: global.__botLaunchMode || 'none', webhook_info: info, env: { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, STRIPE_SECRET_KEY: !!process.env.STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET: !!process.env.STRIPE_WEBHOOK_SECRET, API_MARKET_KEY: !!(process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY) } });
   } catch (e) {
     res.json({ mode: global.__botLaunchMode || 'none', error: e.message });
   }
@@ -332,7 +383,7 @@ async function ffprobeDuration(p) {
   });
 }
 
-async function runFaceswap(u, photoPath, videoPath) {
+async function runFaceswap(u, photoPath, videoPath, chatId) {
   let cost = 3;
   if (videoPath) {
     const duration = await ffprobeDuration(videoPath);
@@ -343,11 +394,22 @@ async function runFaceswap(u, photoPath, videoPath) {
   if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
   user.points -= cost;
   saveData(data);
-  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-  const output = await replicate.run("lucataco/faceswap:9b847c5a94de1e8129b3da549d5ce1a4c6c1a883d8106901b16a86e5c8c1b33", {
-    input: { target_image: fs.createReadStream(videoPath || photoPath), swap_image: fs.createReadStream(photoPath) }
+  const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || '');
+  const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
+  const swapUrl = base ? `${base}/uploads/${path.basename(photoPath)}` : '';
+  const targetUrl = base ? `${base}/uploads/${path.basename(videoPath || photoPath)}` : '';
+  const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
+  if (!base || !key) return { error: 'missing config', required: 0, points: user.points };
+  const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
+  const pth = videoPath ? '/api/v1/capix/faceswap/faceswap/v1/video' : '/api/v1/capix/faceswap/faceswap/v1/image';
+  const reqOpts = { hostname: 'api.magicapi.dev', path: pth, method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
+  const result = await new Promise((resolve, reject) => {
+    const r = https.request(reqOpts, res2 => { let buf=''; res2.on('data', c => buf+=c); res2.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(e); } }); }); r.on('error', reject); r.write(form); r.end();
   });
-  return { result: output, points: user.points };
+  const requestId = result && (result.request_id || result.requestId || result.id);
+  if (!requestId) return { error: 'submit error', required: 0, points: user.points };
+  startMagicResultPoll(String(requestId), String(chatId || ''));
+  return { started: true, points: user.points };
 }
 
 bot.start(async ctx => {
@@ -409,7 +471,7 @@ bot.command('menu', async ctx => {
     [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
     [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Faceswap', 'faceswap')],
     [Markup.button.callback('Create Video', 'createvideo'), Markup.button.callback('Leaderboard', 'leaderboard')],
-    [Markup.button.callback('Clone', 'clone'), Markup.button.callback('Help', 'help')]
+    [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
   ]);
   await ctx.reply(`Main Menu\nPoints: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
 });
@@ -470,7 +532,7 @@ bot.action(/buy:(.+)/, async ctx => {
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Not found');
     const originRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me'));
-    const origin = String(originRaw).trim().replace(/^`+|`+$/g, '');
+    const origin = String(originRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
     const chatMeta = (ctx.chat && ctx.chat.type === 'channel') ? String(ctx.from.id) : String(ctx.chat.id);
     let session;
     try {
@@ -510,18 +572,20 @@ bot.action(/confirm:(.+)/, async ctx => {
   await ctx.answerCbQuery();
   const sessionId = ctx.match[1];
   const r = await stripe.checkout.sessions.retrieve(sessionId);
-  if (!r || (r.payment_status !== 'paid' && r.status !== 'complete')) return ctx.reply('Payment not completed');
+  if (!r || (r.payment_status !== 'paid' && r.status !== 'complete')) {
+    try { return await ctx.reply('Payment not completed'); } catch (_) { try { await bot.telegram.sendMessage(ctx.from.id, 'Payment not completed'); } catch (e2) {} return; }
+  }
   const data = loadData();
   if (data.purchases[sessionId]) {
     const uid = r.metadata && r.metadata.userId;
     const u = uid ? data.users[uid] : null;
-    return ctx.reply(`Already processed. Points: ${u ? u.points : ''}`);
+    try { return await ctx.reply(`Already processed. Points: ${u ? u.points : ''}`); } catch (_) { try { await bot.telegram.sendMessage(ctx.from.id, `Already processed. Points: ${u ? u.points : ''}`); } catch (e2) {} return; }
   }
   const uid = r.metadata && r.metadata.userId;
   const tierId = r.metadata && r.metadata.tierId;
   const u = uid ? data.users[uid] : null;
   const tier = PRICING.find(t => t.id === tierId);
-  if (!u || !tier) return ctx.reply('Not found');
+  if (!u || !tier) { try { return await ctx.reply('Not found'); } catch (_) { try { await bot.telegram.sendMessage(ctx.from.id, 'Not found'); } catch (e2) {} return; } }
   const firstBonus = u.has_recharged ? 0 : 0.20;
   const loyaltyBonus = tier.tierBonus;
   const addPoints = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
@@ -536,7 +600,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   }
   data.purchases[sessionId] = true;
   saveData(data);
-  await ctx.reply(`Credited ${addPoints} points. Balance: ${u.points}`);
+  try { await ctx.reply(`Credited ${addPoints} points. Balance: ${u.points}`); } catch (_) { try { await bot.telegram.sendMessage(ctx.from.id, `Credited ${addPoints} points. Balance: ${u.points}`); } catch (e2) {} }
 });
 
 bot.command('confirm', async ctx => {
@@ -699,7 +763,7 @@ bot.on('photo', async ctx => {
       if (p.target) {
         const u = getOrCreateUser(pid);
         let r;
-        try { r = await runFaceswap(u, p.swap, p.target); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        try { r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
         delete pending[pid];
         if (r.error) {
           const kb = Markup.inlineKeyboard([
@@ -708,8 +772,23 @@ bot.on('photo', async ctx => {
           ]);
           return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
         }
-        await ctx.reply(`Done. Points: ${r.points}`);
-        await ctx.reply(String(r.result));
+        if (r.started) {
+          await ctx.reply(`Processing started. Points: ${r.points}`);
+        } else {
+          await ctx.reply(`Done. Points: ${r.points}`);
+          try {
+            const url = (r.result && typeof r.result.url === 'function') ? await r.result.url() : (Array.isArray(r.result) ? r.result[r.result.length - 1] : String(r.result));
+            if (url && /^https?:\/\//.test(url)) {
+              const dest = path.join(outputsDir, `faceswap_${Date.now()}` + path.extname(url));
+              await downloadTo(String(url), dest);
+              try { await ctx.replyWithVideo({ source: fs.createReadStream(dest) }); } catch (_) { try { await ctx.replyWithPhoto({ source: fs.createReadStream(dest) }); } catch (e2) { await ctx.reply(String(url)); } }
+            } else {
+              await ctx.reply('No output URL');
+            }
+          } catch (_) {
+            await ctx.reply('Error delivering output');
+          }
+        }
       } else {
         await ctx.reply('Now send target video.');
       }
@@ -736,7 +815,7 @@ bot.on('video', async ctx => {
       if (p.swap) {
         const u = getOrCreateUser(pid);
         let r;
-        try { r = await runFaceswap(u, p.swap, p.target); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        try { r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
         delete pending[pid];
         if (r.error) {
           const kb = Markup.inlineKeyboard([
@@ -745,8 +824,23 @@ bot.on('video', async ctx => {
           ]);
           return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
         }
-        await ctx.reply(`Done. Points: ${r.points}`);
-        await ctx.reply(String(r.result));
+        if (r.started) {
+          await ctx.reply(`Processing started. Points: ${r.points}`);
+        } else {
+          await ctx.reply(`Done. Points: ${r.points}`);
+          try {
+            const url = (r.result && typeof r.result.url === 'function') ? await r.result.url() : (Array.isArray(r.result) ? r.result[r.result.length - 1] : String(r.result));
+            if (url && /^https?:\/\//.test(url)) {
+              const dest = path.join(outputsDir, `faceswap_${Date.now()}` + path.extname(url));
+              await downloadTo(String(url), dest);
+              try { await ctx.replyWithVideo({ source: fs.createReadStream(dest) }); } catch (_) { try { await ctx.replyWithPhoto({ source: fs.createReadStream(dest) }); } catch (e2) { await ctx.reply(String(url)); } }
+            } else {
+              await ctx.reply('No output URL');
+            }
+          } catch (_) {
+            await ctx.reply('Error delivering output');
+          }
+        }
       } else {
         await ctx.reply('Now send swap photo.');
       }
@@ -863,7 +957,7 @@ bot.on('channel_post', async ctx => {
           if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to run faceswap.'); return; }
           const u = getOrCreateUser(uid);
           let r;
-          try { r = await runFaceswap(u, p.swap, p.target); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pendingChannel[chatId]; return; }
+          try { r = await runFaceswap(u, p.swap, p.target, String(chatId)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pendingChannel[chatId]; return; }
           delete pendingChannel[chatId];
           if (r.error) {
             const kb = Markup.inlineKeyboard([
@@ -872,8 +966,23 @@ bot.on('channel_post', async ctx => {
             ]);
             await ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
           } else {
-            await ctx.reply(`Done. Points: ${r.points}`);
-            await ctx.reply(String(r.result));
+            if (r.started) {
+              await ctx.reply(`Processing started. Points: ${r.points}`);
+            } else {
+              await ctx.reply(`Done. Points: ${r.points}`);
+              try {
+                const url = (r.result && typeof r.result.url === 'function') ? await r.result.url() : (Array.isArray(r.result) ? r.result[r.result.length - 1] : String(r.result));
+                if (url && /^https?:\/\//.test(url)) {
+                  const dest = path.join(outputsDir, `faceswap_${Date.now()}` + path.extname(url));
+                  await downloadTo(String(url), dest);
+                  try { await ctx.replyWithVideo({ source: fs.createReadStream(dest) }); } catch (_) { try { await ctx.replyWithPhoto({ source: fs.createReadStream(dest) }); } catch (e2) { await ctx.reply(String(url)); } }
+                } else {
+                  await ctx.reply('No output URL');
+                }
+              } catch (_) {
+                await ctx.reply('Error delivering output');
+              }
+            }
           }
         } else {
           await ctx.reply('Now send swap photo.');
