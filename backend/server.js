@@ -417,6 +417,30 @@ async function runFaceswap(u, photoPath, videoPath, chatId) {
   return { started: true, points: user.points };
 }
 
+async function runFaceswapImage(u, swapPhotoPath, targetPhotoPath, chatId) {
+  const cost = 9;
+  const data = loadData();
+  const user = data.users[u.id];
+  if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
+  user.points -= cost;
+  saveData(data);
+  const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || '');
+  const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
+  const swapUrl = base ? `${base}/uploads/${path.basename(swapPhotoPath)}` : '';
+  const targetUrl = base ? `${base}/uploads/${path.basename(targetPhotoPath)}` : '';
+  const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
+  if (!base || !key) return { error: 'missing config', required: 0, points: user.points };
+  const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
+  const reqOpts = { hostname: 'api.magicapi.dev', path: '/api/v1/capix/faceswap/faceswap/v1/image', method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
+  const result = await new Promise((resolve, reject) => {
+    const r = https.request(reqOpts, res2 => { let buf=''; res2.on('data', c => buf+=c); res2.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(e); } }); }); r.on('error', reject); r.write(form); r.end();
+  });
+  const requestId = result && (result.request_id || result.requestId || result.id);
+  if (!requestId) return { error: 'submit error', required: 0, points: user.points };
+  startMagicResultPoll(String(requestId), String(chatId || ''));
+  return { started: true, points: user.points };
+}
+
 bot.start(async ctx => {
   const payload = ctx.startPayload || '';
   const u = getOrCreateUser(String(ctx.from.id), { username: ctx.from.username || '', first_name: ctx.from.first_name || '', last_name: ctx.from.last_name || '' });
@@ -443,8 +467,8 @@ bot.start(async ctx => {
   const promo_link = botUsername ? `https://t.me/${botUsername}?start=promo_${u.id}` : '';
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Faceswap', 'faceswap')],
-    [Markup.button.callback('Create Video', 'createvideo'), Markup.button.callback('Leaderboard', 'leaderboard')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Image Face Swap', 'imageswap')],
+    [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
     [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
   ]);
   await ctx.reply(`Hello ${u.first_name || ''}. Points: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
@@ -459,8 +483,8 @@ bot.action('menu', async ctx => {
   const promo_link = botUsername ? `https://t.me/${botUsername}?start=promo_${u.id}` : '';
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Faceswap', 'faceswap')],
-    [Markup.button.callback('Create Video', 'createvideo'), Markup.button.callback('Leaderboard', 'leaderboard')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Image Face Swap', 'imageswap')],
+    [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
     [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
   ]);
   await ctx.reply(`Main Menu\nPoints: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
@@ -474,8 +498,8 @@ bot.command('menu', async ctx => {
   const promo_link = botUsername ? `https://t.me/${botUsername}?start=promo_${u.id}` : '';
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Faceswap', 'faceswap')],
-    [Markup.button.callback('Create Video', 'createvideo'), Markup.button.callback('Leaderboard', 'leaderboard')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Image Face Swap', 'imageswap')],
+    [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
     [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
   ]);
   await ctx.reply(`Main Menu\nPoints: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
@@ -733,7 +757,7 @@ bot.command('faceswap', async ctx => {
   } else {
     pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
   }
-  await ctx.reply('Send a photo of the face to swap, then a target video (optional).');
+  await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.');
 });
 
 bot.action('faceswap', async ctx => {
@@ -744,7 +768,28 @@ bot.action('faceswap', async ctx => {
   } else {
     pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
   }
-  try { await ctx.reply('Send a photo of the face to swap, then a target video (optional).'); } catch (_) {}
+  try { await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.'); } catch (_) {}
+});
+
+bot.command('imageswap', async ctx => {
+  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
+  if (isChannel) {
+    pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', swap: null, target: null };
+  } else {
+    pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null };
+  }
+  await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.');
+});
+
+bot.action('imageswap', async ctx => {
+  await ctx.answerCbQuery();
+  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
+  if (isChannel) {
+    pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', swap: null, target: null };
+  } else {
+    pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null };
+  }
+  try { await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.'); } catch (_) {}
 });
 
 bot.action('createvideo', async ctx => {
@@ -755,7 +800,7 @@ bot.action('createvideo', async ctx => {
   } else {
     pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
   }
-  try { await ctx.reply('Send overlay photo, then base video.'); } catch (_) {}
+  try { await ctx.reply('Create Video: Send overlay photo, then base video. Cost: 10 points (10 seconds @ 1 point/sec).'); } catch (_) {}
 });
 
 bot.on('photo', async ctx => {
@@ -786,21 +831,28 @@ bot.on('photo', async ctx => {
           await ctx.reply(`Processing started. Points: ${r.points}`);
         } else {
           await ctx.reply(`Done. Points: ${r.points}`);
-          try {
-            const url = (r.result && typeof r.result.url === 'function') ? await r.result.url() : (Array.isArray(r.result) ? r.result[r.result.length - 1] : String(r.result));
-            if (url && /^https?:\/\//.test(url)) {
-              const dest = path.join(outputsDir, `faceswap_${Date.now()}` + path.extname(url));
-              await downloadTo(String(url), dest);
-              try { await ctx.replyWithVideo({ source: fs.createReadStream(dest) }); } catch (_) { try { await ctx.replyWithPhoto({ source: fs.createReadStream(dest) }); } catch (e2) { await ctx.reply(String(url)); } }
-            } else {
-              await ctx.reply('No output URL');
-            }
-          } catch (_) {
-            await ctx.reply('Error delivering output');
-          }
         }
       } else {
         await ctx.reply('Now send target video.');
+      }
+    } else if (p.mode === 'imageswap') {
+      if (!p.swap) {
+        p.swap = dest;
+        await ctx.reply('Now send target photo.');
+      } else if (!p.target) {
+        p.target = dest;
+        const u = getOrCreateUser(pid);
+        let r;
+        try { r = await runFaceswapImage(u, p.swap, p.target, String(ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        delete pending[pid];
+        if (r.error) {
+          const kb = Markup.inlineKeyboard([
+            [Markup.button.callback('Buy Points', 'buy')],
+            [Markup.button.callback('Main Menu', 'menu')]
+          ]);
+          return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+        }
+        await ctx.reply(`Processing started. Points: ${r.points}`);
       }
     } else if (p.mode === 'createvideo') {
       p.photo = dest;
@@ -857,6 +909,22 @@ bot.on('video', async ctx => {
     } else if (p.mode === 'createvideo') {
       p.video = dest;
       if (p.photo) {
+        const u = getOrCreateUser(pid);
+        const data = loadData();
+        const user = data.users[u.id];
+        const createSeconds = 10;
+        const createRate = 1;
+        const cost = createSeconds * createRate;
+        if ((user.points || 0) < cost) {
+          const kb = Markup.inlineKeyboard([
+            [Markup.button.callback('Buy Points', 'buy')],
+            [Markup.button.callback('Main Menu', 'menu')]
+          ]);
+          return await ctx.reply(`Not enough points. Required: ${cost}, Your Points: ${user.points}`, kb);
+        }
+        user.points = (user.points || 0) - cost;
+        saveData(data);
+        await ctx.reply(`Processing started. Cost: ${cost} points. Remaining: ${user.points}`);
         const outputPath = path.join(outputsDir, `short-${Date.now()}.mp4`);
         ffmpeg(p.video)
           .setDuration(10)
@@ -948,6 +1016,27 @@ bot.on('channel_post', async ctx => {
       if (p.mode === 'faceswap') {
         p.swap = dest;
         await ctx.reply('Now send target video.');
+      } else if (p.mode === 'imageswap') {
+        if (!p.swap) {
+          p.swap = dest;
+          await ctx.reply('Now send target photo.');
+        } else if (!p.target) {
+          p.target = dest;
+          const uid = ctx.from && ctx.from.id ? String(ctx.from.id) : null;
+          if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to run faceswap.'); return; }
+          const u = getOrCreateUser(uid);
+          let r;
+          try { r = await runFaceswapImage(u, p.swap, p.target, String(chatId)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pendingChannel[chatId]; return; }
+          delete pendingChannel[chatId];
+          if (r.error) {
+            const kb = Markup.inlineKeyboard([
+              [Markup.button.callback('Buy Points', 'buy')],
+              [Markup.button.callback('Main Menu', 'menu')]
+            ]);
+            await ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
+          } else {
+            await ctx.reply(`Processing started. Points: ${r.points}`);
+          }
       } else if (p.mode === 'createvideo') {
         p.photo = dest;
         await ctx.reply('Now send base video.');
@@ -998,8 +1087,27 @@ bot.on('channel_post', async ctx => {
           await ctx.reply('Now send swap photo.');
         }
       } else if (p.mode === 'createvideo') {
+        const uid = ctx.from && ctx.from.id ? String(ctx.from.id) : null;
+        if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to create video.'); return; }
+        const u = getOrCreateUser(uid);
         p.video = dest;
         if (p.photo) {
+          const data = loadData();
+          const user = data.users[uid];
+          const createSeconds = 10;
+          const createRate = 1;
+          const cost = createSeconds * createRate;
+          if ((user.points || 0) < cost) {
+            delete pendingChannel[chatId];
+            const kb = Markup.inlineKeyboard([
+              [Markup.button.callback('Buy Points', 'buy')],
+              [Markup.button.callback('Main Menu', 'menu')]
+            ]);
+            return await ctx.reply(`Not enough points. Required: ${cost}, Your Points: ${user.points}`, kb);
+          }
+          user.points = (user.points || 0) - cost;
+          saveData(data);
+          await ctx.reply(`Processing started. Cost: ${cost} points. Remaining: ${user.points}`);
           const outputPath = path.join(outputsDir, `short-${Date.now()}.mp4`);
           ffmpeg(p.video)
             .setDuration(10)
@@ -1030,7 +1138,8 @@ bot.catch(err => console.error('Bot error:', err));
 if (process.env.BOT_TOKEN) {
   bot.telegram.setMyCommands([
     { command: 'menu', description: 'Open main menu' },
-    { command: 'faceswap', description: 'Swap face using your photo/video' },
+    { command: 'faceswap', description: 'Video face swap (photo + video)' },
+    { command: 'imageswap', description: 'Image face swap (photo + photo)' },
     { command: 'confirm', description: 'Confirm Stripe session id' },
     { command: 'pricing', description: 'Show prices' },
     { command: 'promote', description: 'Share promo/invite links' },
@@ -1103,14 +1212,15 @@ function startWebhookMonitor() {
 startWebhookMonitor();
 function channelKeyboard() {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('Prices', 'pricing'), Markup.button.callback('Help', 'help')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Promote', 'promote')],
+    [Markup.button.callback('Image Face Swap', 'imageswap'), Markup.button.callback('Video Face Swap', 'faceswap')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
+    [Markup.button.callback('Help', 'help'), Markup.button.callback('Promote', 'promote')],
     [Markup.button.callback('Menu', 'menu')]
   ]);
 }
 function channelGreetText() {
   const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
-  return `Welcome! Use the buttons below or type commands.\nPrices:\n${lines.join('\n')}`;
+  return `Faceswap Service\nImage Face Swap: send swap photo, then target photo. Cost: 9 points.\nVideo Face Swap: send swap photo, then target video trimmed to the length you want. Cost: 3 points per second.\n\nPrices (point packages):\n${lines.join('\n')}`;
 }
 async function postChannelGreet(chatId) {
   const kb = channelKeyboard();
@@ -1159,21 +1269,21 @@ bot.action('help', async ctx => {
   await ctx.answerCbQuery();
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('Main Menu', 'menu')],
-    [Markup.button.callback('Buy Points', 'buy')],
     [Markup.button.callback('Faceswap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
     [Markup.button.callback('Check-In', 'checkin'), Markup.button.callback('Leaderboard', 'leaderboard')]
   ]);
-  await ctx.reply('Use the buttons below to perform actions. No typing needed. Buy points to unlock features, then try Faceswap or Create Video. Check-In daily for bonuses. Share Clone links to earn 20% rewards.', kb);
+  await ctx.reply('Faceswap: Tap Faceswap, send a swap photo, then a target video trimmed to the length you want. Cost: 3 points per second. Buy Points to unlock features. Use Create Video for simple overlays. Check-In daily for bonuses.', kb);
 });
 
 bot.command('help', async ctx => {
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('Main Menu', 'menu')],
-    [Markup.button.callback('Buy Points', 'buy')],
     [Markup.button.callback('Faceswap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
     [Markup.button.callback('Check-In', 'checkin'), Markup.button.callback('Leaderboard', 'leaderboard')]
   ]);
-  await ctx.reply('Use the buttons below to perform actions. No typing needed. Buy points to unlock features, then try Faceswap or Create Video. Check-In daily for bonuses. Share Clone links to earn 20% rewards.', kb);
+  await ctx.reply('Faceswap: Tap Faceswap, send a swap photo, then a target video trimmed to the length you want. Cost: 3 points per second. Buy Points to unlock features. Use Create Video for simple overlays. Check-In daily for bonuses.', kb);
 });
 
 bot.command('buy', async ctx => {
@@ -1188,7 +1298,7 @@ bot.command('createvideo', async ctx => {
   } else {
     pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
   }
-  await ctx.reply('Send overlay photo, then base video.');
+  await ctx.reply('Create Video: Send overlay photo, then base video. Cost: 10 points (10 seconds @ 1 point/sec).');
 });
 
 bot.command('pricing', async ctx => {
@@ -1196,7 +1306,32 @@ bot.command('pricing', async ctx => {
   await ctx.reply(`Prices:\n${lines.join('\n')}`);
 });
 
+bot.action('pricing', async ctx => {
+  await ctx.answerCbQuery();
+  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Video Face Swap', 'faceswap')],
+    [Markup.button.callback('Image Face Swap', 'imageswap'), Markup.button.callback('Create Video', 'createvideo')],
+    [Markup.button.callback('Main Menu', 'menu')]
+  ]);
+  await ctx.reply(`Prices (point packages):\n${lines.join('\n')}\nVideo Face Swap: 3 points per second.\nImage Face Swap: 9 points flat.\nCreate Video: 10 points (10s @ 1 point/sec).`, kb);
+});
+
 bot.command('promote', async ctx => {
+  const id = String(ctx.from.id);
+  const botUsername = process.env.BOT_USERNAME || '';
+  const promoLink = botUsername ? `https://t.me/${botUsername}?start=promo_${id}` : '';
+  const refLink = botUsername ? `https://t.me/${botUsername}?start=ref_${id}` : '';
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url('Promo Link', promoLink || refLink)],
+    [Markup.button.url('Invite Link', refLink || promoLink)],
+    [Markup.button.callback('Main Menu', 'menu')]
+  ]);
+  await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
+});
+
+bot.action('promote', async ctx => {
+  await ctx.answerCbQuery();
   const id = String(ctx.from.id);
   const botUsername = process.env.BOT_USERNAME || '';
   const promoLink = botUsername ? `https://t.me/${botUsername}?start=promo_${id}` : '';
