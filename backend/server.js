@@ -753,7 +753,7 @@ const pendingChannel = {};
 bot.command('faceswap', async ctx => {
   const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
   if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', swap: null, target: null };
+    pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', uid: String(ctx.from.id), swap: null, target: null };
   } else {
     pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
   }
@@ -774,7 +774,7 @@ bot.action('faceswap', async ctx => {
 bot.command('imageswap', async ctx => {
   const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
   if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', swap: null, target: null };
+    pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', uid: String(ctx.from.id), swap: null, target: null };
   } else {
     pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null };
   }
@@ -796,7 +796,7 @@ bot.action('createvideo', async ctx => {
   await ctx.answerCbQuery();
   const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
   if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'createvideo', photo: null, video: null };
+    pendingChannel[String(ctx.chat.id)] = { mode: 'createvideo', uid: String(ctx.from.id), photo: null, video: null };
   } else {
     pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
   }
@@ -1022,8 +1022,8 @@ bot.on('channel_post', async ctx => {
           await ctx.reply('Now send target photo.');
         } else if (!p.target) {
           p.target = dest;
-          const uid = ctx.from && ctx.from.id ? String(ctx.from.id) : null;
-          if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to run faceswap.'); return; }
+          const uid = p.uid || (ctx.from && ctx.from.id ? String(ctx.from.id) : null);
+          if (!uid) { delete pendingChannel[chatId]; await ctx.reply('Tap Image Face Swap again to start.'); return; }
           const u = getOrCreateUser(uid);
           let r;
           try { r = await runFaceswapImage(u, p.swap, p.target, String(chatId)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pendingChannel[chatId]; return; }
@@ -1052,8 +1052,8 @@ bot.on('channel_post', async ctx => {
       if (p.mode === 'faceswap') {
         p.target = dest;
         if (p.swap) {
-          const uid = ctx.from && ctx.from.id ? String(ctx.from.id) : null;
-          if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to run faceswap.'); return; }
+          const uid = p.uid || (ctx.from && ctx.from.id ? String(ctx.from.id) : null);
+          if (!uid) { delete pendingChannel[chatId]; await ctx.reply('Tap Video Face Swap again to start.'); return; }
           const u = getOrCreateUser(uid);
           let r;
           try { r = await runFaceswap(u, p.swap, p.target, String(chatId)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pendingChannel[chatId]; return; }
@@ -1087,8 +1087,8 @@ bot.on('channel_post', async ctx => {
           await ctx.reply('Now send swap photo.');
         }
       } else if (p.mode === 'createvideo') {
-        const uid = ctx.from && ctx.from.id ? String(ctx.from.id) : null;
-        if (!uid) { delete pendingChannel[chatId]; await ctx.reply('DM the bot to create video.'); return; }
+        const uid = p.uid || (ctx.from && ctx.from.id ? String(ctx.from.id) : null);
+        if (!uid) { delete pendingChannel[chatId]; await ctx.reply('Tap Create Video again to start.'); return; }
         const u = getOrCreateUser(uid);
         p.video = dest;
         if (p.photo) {
