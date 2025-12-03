@@ -15,7 +15,13 @@ if (ffmpegPath) {
 if (ffprobePath && ffprobePath.path) {
   ffmpeg.setFfprobePath(ffprobePath.path);
 }
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
+let stripe = null;
+if (stripeSecretKey) {
+  stripe = require('stripe')(stripeSecretKey);
+} else {
+  console.warn('Missing STRIPE_SECRET_KEY. Stripe payments disabled until configured.');
+}
 console.log('Env', { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, CHANNEL_ID: process.env.CHANNEL_ID ? process.env.CHANNEL_ID : '' });
 
 const app = express();
@@ -30,6 +36,39 @@ const PRICING = [
   { id: 'p1500', points: 1500, usd: 29.99, stars: 1500, tierBonus: 0.10 },
   { id: 'p7500', points: 7500, usd: 99.0, stars: 5000, tierBonus: 0.12 },
 ];
+
+function normalizePublicBase(value) {
+  if (!value) return '';
+  return String(value).trim().replace(/^['"`]+|['"`]+$/g, '').replace(/\/+$/, '');
+}
+
+function resolvePublicBase(url, origin) {
+  const raw = normalizePublicBase(url || origin || '');
+  if (!raw) {
+    return { base: '', error: 'Set PUBLIC_URL or PUBLIC_ORIGIN to your public https domain (serving /uploads & /outputs).' };
+  }
+  if (!/^https:\/\//i.test(raw)) {
+    return { base: '', error: 'PUBLIC_URL/PUBLIC_ORIGIN must start with https:// (Stripe and MagicAPI require HTTPS).' };
+  }
+  if (/https?:\/\/(?:localhost|127\.0\.0\.1)/i.test(raw)) {
+    return { base: '', error: 'PUBLIC_URL/PUBLIC_ORIGIN cannot point to localhost. Use your public server hostname.' };
+  }
+  if (/https?:\/\/t\.me/i.test(raw)) {
+    return { base: '', error: 'PUBLIC_URL/PUBLIC_ORIGIN cannot be https://t.me. Configure your own domain that hosts uploads.' };
+  }
+  return { base: raw };
+}
+
+const PUBLIC_BASE_INFO = resolvePublicBase(process.env.PUBLIC_URL, process.env.PUBLIC_ORIGIN);
+const PUBLIC_BASE = PUBLIC_BASE_INFO.base;
+const PUBLIC_BASE_ERROR = PUBLIC_BASE_INFO.error || '';
+
+function computeTierPayout(tier, user) {
+  const firstBonus = user && user.has_recharged ? 0 : 0.20;
+  const loyaltyBonus = tier.tierBonus || 0;
+  const total = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
+  return { total, firstBonus, loyaltyBonus };
+}
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.mkdirSync(outputsDir, { recursive: true });
@@ -174,6 +213,7 @@ app.get('/pricing', (req, res) => {
 });
 
 app.post('/create-point-session', async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
   const { userId, tierId } = req.body || {};
   if (!userId || !tierId) return res.status(400).json({ error: 'missing params' });
   const tier = PRICING.find(t => t.id === tierId);
@@ -201,6 +241,7 @@ app.post('/create-point-session', async (req, res) => {
 });
 
 app.post('/confirm-point-session', async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
   const { sessionId } = req.body || {};
   if (!sessionId) return res.status(400).json({ error: 'missing sessionId' });
   try {
@@ -234,6 +275,7 @@ app.post('/confirm-point-session', async (req, res) => {
 });
 
 app.post('/create-payment', async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -280,11 +322,9 @@ app.post('/faceswap', upload.fields([{ name: 'photo' }, { name: 'video' }]), asy
   u.points -= cost;
   saveData(data);
   try {
-    const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || '');
-    const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
-    if (!base) return res.status(500).json({ error: 'missing PUBLIC_URL/PUBLIC_ORIGIN' });
-    const swapUrl = `${base}/uploads/${path.basename(photoPath)}`;
-    const targetUrl = `${base}/uploads/${path.basename(videoPath || photoPath)}`;
+    if (!PUBLIC_BASE) return res.status(500).json({ error: PUBLIC_BASE_ERROR || 'missing PUBLIC_URL/PUBLIC_ORIGIN' });
+    const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(photoPath)}`;
+    const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(videoPath || photoPath)}`;
     const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
     if (!key) return res.status(500).json({ error: 'missing API key' });
     const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
@@ -326,10 +366,78 @@ const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 bot.use(async (ctx, next) => { try { console.log('update', ctx.updateType, ctx.updateSubTypes || [], (ctx.from && ctx.from.id) || null, (ctx.chat && ctx.chat.type) || null, (ctx.chat && ctx.chat.id) || null, (ctx.chat && ctx.chat.title) || null); } catch (_) {} return next(); });
 
+let cachedBotId = null;
+bot.telegram.getMe().then(me => { cachedBotId = me.id; }).catch(() => {});
+const CHANNEL_PERMISSION_CACHE_MS = 60 * 1000;
+const channelPermissionCache = new Map();
+
+async function toast(ctx, text, { alert = false } = {}) {
+  if (!text) return;
+  if (ctx && ctx.callbackQuery) {
+    try {
+      await ctx.answerCbQuery(text, { show_alert: alert });
+      return;
+    } catch (_) {}
+  }
+  try { await ctx.reply(text); } catch (err) { console.error('toast send failed', err.message); }
+}
+
+function canBotPost(member) {
+  if (!member) return false;
+  if (member.status === 'creator') return true;
+  if (member.status !== 'administrator') return false;
+  const canPostMessages = member.can_post_messages !== false;
+  const canPostMedia = member.can_post_media_messages !== false;
+  return canPostMessages && canPostMedia;
+}
+
+async function ensureChannelCanPost(ctx, actionLabel) {
+  if (!ctx || !ctx.chat) return true;
+  const type = ctx.chat.type;
+  if (type !== 'channel' && type !== 'supergroup') return true;
+  const botId = (ctx.botInfo && ctx.botInfo.id) || cachedBotId;
+  if (!botId) return true;
+  const chatId = String(ctx.chat.id);
+  const cached = channelPermissionCache.get(chatId);
+  const now = Date.now();
+  if (cached && now - cached.checkedAt < CHANNEL_PERMISSION_CACHE_MS) {
+    if (!cached.canPost) {
+      await toast(ctx, `Grant the bot "Post messages" and "Post media" to ${actionLabel || 'continue'} inside the channel.`, { alert: true });
+    }
+    return cached.canPost;
+  }
+  try {
+    const member = await ctx.telegram.getChatMember(chatId, botId);
+    const canPost = canBotPost(member);
+    channelPermissionCache.set(chatId, { canPost, checkedAt: now });
+    if (!canPost) {
+      await toast(ctx, `Grant the bot "Post messages" and "Post media" to ${actionLabel || 'continue'} inside the channel.`, { alert: true });
+    }
+    return canPost;
+  } catch (error) {
+    console.error('channel permission check failed', error.message);
+    return true;
+  }
+}
+
 app.get('/healthz', async (req, res) => {
   try {
     const info = await bot.telegram.getWebhookInfo();
-    res.json({ mode: global.__botLaunchMode || 'none', webhook_info: info, env: { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, STRIPE_SECRET_KEY: !!process.env.STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET: !!process.env.STRIPE_WEBHOOK_SECRET, API_MARKET_KEY: !!(process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY) } });
+    res.json({
+      mode: global.__botLaunchMode || 'none',
+      webhook_info: info,
+      env: {
+        BOT_TOKEN: !!process.env.BOT_TOKEN,
+        PUBLIC_URL: !!process.env.PUBLIC_URL,
+        PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN,
+        STRIPE_SECRET_KEY: !!process.env.STRIPE_SECRET_KEY,
+        STRIPE_WEBHOOK_SECRET: !!process.env.STRIPE_WEBHOOK_SECRET,
+        API_MARKET_KEY: !!(process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY),
+        PUBLIC_BASE_OK: !!PUBLIC_BASE,
+        PUBLIC_BASE_ERROR: PUBLIC_BASE_ERROR || null,
+        STRIPE_READY: !!stripe
+      }
+    });
   } catch (e) {
     res.json({ mode: global.__botLaunchMode || 'none', error: e.message });
   }
@@ -394,12 +502,11 @@ async function runFaceswap(u, photoPath, videoPath, chatId) {
   if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
   user.points -= cost;
   saveData(data);
-  const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || '');
-  const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
-  const swapUrl = base ? `${base}/uploads/${path.basename(photoPath)}` : '';
-  const targetUrl = base ? `${base}/uploads/${path.basename(videoPath || photoPath)}` : '';
+  if (!PUBLIC_BASE) return { error: PUBLIC_BASE_ERROR || 'Missing PUBLIC_URL/PUBLIC_ORIGIN', required: 0, points: user.points };
+  const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(photoPath)}`;
+  const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(videoPath || photoPath)}`;
   const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
-  if (!base || !key) return { error: 'missing config', required: 0, points: user.points };
+  if (!key) return { error: 'missing API key', required: 0, points: user.points };
   const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
   const pth = videoPath ? '/api/v1/capix/faceswap/faceswap/v1/video' : '/api/v1/capix/faceswap/faceswap/v1/image';
   const reqOpts = { hostname: 'api.magicapi.dev', path: pth, method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
@@ -511,21 +618,35 @@ bot.action('leaderboard', async ctx => {
 
 bot.action('buy', async ctx => {
   try { await ctx.answerCbQuery('Opening packages…'); } catch (_) {}
-  const rows = PRICING.map(t => [Markup.button.callback(`${t.points} / $${t.usd}`, `buy:${t.id}`)]);
+  if (!stripe) return toast(ctx, 'Stripe not configured. Add STRIPE_SECRET_KEY to enable payments.', { alert: true });
+  if (!(await ensureChannelCanPost(ctx, 'show the packages'))) return;
+  const id = ctx.from ? String(ctx.from.id) : null;
+  const viewer = id ? getOrCreateUser(id) : null;
+  const rows = PRICING.map(t => {
+    const payout = viewer ? computeTierPayout(t, viewer) : { total: t.points };
+    return [Markup.button.callback(`${t.points} ➜ ${payout.total} pts · $${t.usd}`, `buy:${t.id}`)];
+  });
   try {
-    await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
-  } catch (_) {}
+    await ctx.reply('Select a package to generate a checkout link. You will receive the base points plus any first recharge & loyalty bonuses shown.', Markup.inlineKeyboard(rows));
+  } catch (error) {
+    console.error('buy menu reply failed', error.message);
+    await toast(ctx, 'Unable to post packages. Give the bot Post messages + Post media rights.', { alert: true });
+  }
 });
 
 bot.action(/buy:(.+)/, async ctx => {
   try { await ctx.answerCbQuery('Preparing checkout…'); } catch (_) {}
   try {
+    if (!stripe) { await toast(ctx, 'Stripe is not configured. Set STRIPE_SECRET_KEY & STRIPE_WEBHOOK_SECRET.', { alert: true }); return; }
+    if (!PUBLIC_BASE) { await toast(ctx, PUBLIC_BASE_ERROR || 'Set PUBLIC_URL/PUBLIC_ORIGIN to your public https origin.', { alert: true }); return; }
+    if (!(await ensureChannelCanPost(ctx, 'post the payment link'))) return;
     const tierId = ctx.match[1];
     const id = String(ctx.from.id);
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Not found');
-    const originRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me'));
-    const origin = String(originRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
+    const user = getOrCreateUser(id);
+    const payout = computeTierPayout(tier, user);
+    const origin = PUBLIC_BASE;
     const chatMeta = String(ctx.chat && ctx.chat.id);
     let session;
     try {
@@ -535,7 +656,7 @@ bot.action(/buy:(.+)/, async ctx => {
         mode: 'payment',
         success_url: `${origin}/?success=1&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/?cancel=1`,
-        metadata: { userId: String(id), tierId, chatId: chatMeta, promoterId: String(getOrCreateUser(id).promoter_id || '') }
+        metadata: { userId: String(id), tierId, chatId: chatMeta, promoterId: String(user.promoter_id || '') }
       });
     } catch (e) {
       try { await ctx.reply(`Payment error: ${e.message}`); } catch (_) {}
@@ -544,17 +665,27 @@ bot.action(/buy:(.+)/, async ctx => {
     const kb = Markup.inlineKeyboard([
       [Markup.button.url(`Pay $${tier.usd}`, session.url || 'https://stripe.com')],
       [Markup.button.callback('Confirm Payment', `confirm:${session.id}`)],
-      [Markup.button.callback('Main Menu', 'menu')]
+      [Markup.button.callback('Main Menu', 'menu'), Markup.button.callback('Help', 'help')]
     ]);
+    const bonusParts = [];
+    if (payout.firstBonus) bonusParts.push(`${Math.round(payout.firstBonus * 100)}% first recharge`);
+    if (payout.loyaltyBonus) bonusParts.push(`${Math.round(payout.loyaltyBonus * 100)}% loyalty`);
+    const bonusText = bonusParts.length ? ` (+${bonusParts.join(' + ')})` : '';
+    const message = `Pay $${tier.usd} to receive ${payout.total} points${bonusText}.\n1️⃣ Tap Pay\n2️⃣ Complete checkout\n3️⃣ Tap Confirm Payment here to credit instantly.\nNeed assistance? Hit Help for setup tips.`;
     try {
-      await ctx.reply('Complete your purchase, then tap Confirm:', kb);
-    } catch (_) {}
+      await ctx.reply(message, kb);
+    } catch (error) {
+      console.error('payment post failed', error.message);
+      await toast(ctx, 'Cannot post payment link in channel. Give the bot Post messages + Post media rights.', { alert: true });
+    }
   } catch (e) {
     try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
   }
 });
 
 bot.action(/confirm:(.+)/, async ctx => {
+  if (!stripe) return toast(ctx, 'Stripe not configured. Set STRIPE_SECRET_KEY before confirming payments.', { alert: true });
+  if (!(await ensureChannelCanPost(ctx, 'announce the confirmation'))) return;
   await ctx.answerCbQuery();
   const sessionId = ctx.match[1];
   const r = await stripe.checkout.sessions.retrieve(sessionId);
@@ -590,6 +721,7 @@ bot.action(/confirm:(.+)/, async ctx => {
 });
 
 bot.command('confirm', async ctx => {
+  if (!stripe) return ctx.reply('Stripe not configured. Set STRIPE_SECRET_KEY before confirming payments.');
   const parts = (ctx.message.text || '').split(' ').filter(Boolean);
   const sessionId = parts[1];
   if (!sessionId) return ctx.reply('Provide session id');
@@ -658,6 +790,7 @@ bot.action('promote', async ctx => {
 });
 
 app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  if (!stripe) return res.status(503).send('Stripe not configured');
   const sig = req.headers['stripe-signature'];
   const secret = process.env.STRIPE_WEBHOOK_SECRET || '';
   let event;
@@ -1197,9 +1330,9 @@ bot.command('status', async ctx => {
     const url = info && info.url ? String(info.url) : '';
     const pending = info && typeof info.pending_update_count === 'number' ? info.pending_update_count : 0;
     const lastErr = info && info.last_error_message ? String(info.last_error_message) : '';
-    await ctx.reply(`mode: ${mode}\nwebhook.url: ${url}\npending: ${pending}\nerror: ${lastErr}`);
+    await ctx.reply(`mode: ${mode}\nwebhook.url: ${url}\npending: ${pending}\nerror: ${lastErr}\nstripe: ${stripe ? 'ready' : 'missing key'}\npublic_base: ${PUBLIC_BASE || PUBLIC_BASE_ERROR || 'unset'}`);
   } catch (e) {
-    await ctx.reply(`mode: ${global.__botLaunchMode || 'none'}\nerror: ${e.message}`);
+    await ctx.reply(`mode: ${global.__botLaunchMode || 'none'}\nerror: ${e.message}\nstripe: ${stripe ? 'ready' : 'missing key'}\npublic_base: ${PUBLIC_BASE || PUBLIC_BASE_ERROR || 'unset'}`);
   }
 });
 
