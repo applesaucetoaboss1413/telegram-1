@@ -689,8 +689,7 @@ bot.action('buy', async ctx => {
   const id = ctx.from ? String(ctx.from.id) : null;
   const viewer = id ? getOrCreateUser(id) : null;
   const rows = PRICING.map(t => {
-    const payout = viewer ? computeTierPayout(t, viewer) : { total: t.points };
-    return [Markup.button.callback(`${t.points} ➜ ${payout.total} pts · $${t.usd}`, `buy:${t.id}`)];
+    return [Markup.button.callback(`${t.points} pts · $${t.usd}`, `buy:${t.id}`)];
   });
   try {
     await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
@@ -701,7 +700,6 @@ bot.action(/buy:(.+)/, async ctx => {
   try { await ctx.answerCbQuery('Preparing checkout…'); } catch (_) {}
   try {
     if (!stripe) { await toast(ctx, 'Stripe is not configured. Set STRIPE_SECRET_KEY & STRIPE_WEBHOOK_SECRET.', { alert: true }); return; }
-    if (!PUBLIC_BASE) { await toast(ctx, PUBLIC_BASE_ERROR || 'Set PUBLIC_URL/PUBLIC_ORIGIN to your public https origin.', { alert: true }); return; }
     if (!(await ensureChannelCanPost(ctx, 'post the payment link'))) return;
     const tierId = ctx.match[1];
     const id = String(ctx.from.id);
