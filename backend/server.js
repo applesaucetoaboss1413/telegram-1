@@ -75,11 +75,9 @@ const PUBLIC_BASE_INFO = resolvePublicBase(process.env.PUBLIC_URL, process.env.P
 const PUBLIC_BASE = PUBLIC_BASE_INFO.base;
 const PUBLIC_BASE_ERROR = PUBLIC_BASE_INFO.error || '';
 
-function computeTierPayout(tier, user) {
-  const firstBonus = user && user.has_recharged ? 0 : 0.20;
-  const loyaltyBonus = tier.tierBonus || 0;
-  const total = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
-  return { total, firstBonus, loyaltyBonus };
+function computeTierPayout(tier) {
+  const total = Math.floor(tier.points);
+  return { total };
 }
 
 function isFreeUserId(id) {
@@ -282,15 +280,13 @@ app.post('/confirm-point-session', async (req, res) => {
     const u = userId ? data.users[userId] : null;
     const tier = PRICING.find(t => t.id === tierId);
     if (!u || !tier) return res.status(404).json({ error: 'not found' });
-    const firstBonus = u.has_recharged ? 0 : 0.20;
-    const loyaltyBonus = tier.tierBonus;
-    const addPoints = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
+    const addPoints = Math.floor(tier.points);
     u.points = (u.points || 0) + addPoints;
     u.has_recharged = true;
     u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
     data.purchases[sessionId] = true;
     saveData(data);
-    res.json({ points: u.points, added: addPoints, bonus_rate: firstBonus + loyaltyBonus });
+    res.json({ points: u.points, added: addPoints });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -759,9 +755,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   const u = uid ? data.users[uid] : null;
   const tier = PRICING.find(t => t.id === tierId);
   if (!u || !tier) { try { return await ctx.reply('Not found'); } catch (_) { return; } }
-  const firstBonus = u.has_recharged ? 0 : 0.20;
-  const loyaltyBonus = tier.tierBonus;
-  const addPoints = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
+  const addPoints = Math.floor(tier.points);
   u.points = (u.points || 0) + addPoints;
   u.has_recharged = true;
   u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
@@ -794,9 +788,7 @@ bot.command('confirm', async ctx => {
   const u = uid ? data.users[uid] : null;
   const tier = PRICING.find(t => t.id === tierId);
   if (!u || !tier) return ctx.reply('Not found');
-  const firstBonus = u.has_recharged ? 0 : 0.20;
-  const loyaltyBonus = tier.tierBonus;
-  const addPoints = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
+  const addPoints = Math.floor(tier.points);
   u.points = (u.points || 0) + addPoints;
   u.has_recharged = true;
   u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
@@ -866,9 +858,7 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
       const u = userId ? data.users[userId] : null;
       const tier = PRICING.find(t => t.id === tierId);
       if (u && tier) {
-        const firstBonus = u.has_recharged ? 0 : 0.20;
-        const loyaltyBonus = tier.tierBonus;
-        const addPoints = Math.floor(tier.points * (1 + firstBonus + loyaltyBonus));
+        const addPoints = Math.floor(tier.points);
         u.points = (u.points || 0) + addPoints;
         u.has_recharged = true;
         u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
@@ -1505,18 +1495,7 @@ bot.command('promote', async ctx => {
   await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
 });
 
-bot.command('free', async ctx => {
-  const owner = String(process.env.OWNER_ID || '');
-  if (!owner || String(ctx.from.id) !== owner) return;
-  const parts = (ctx.message.text || '').split(' ').filter(Boolean);
-  const target = parts[1] ? String(parts[1]) : String(ctx.from.id);
-  const data = loadData();
-  const u = data.users[target] || { id: target, points: 9 };
-  data.users[target] = u;
-  u.free = true;
-  saveData(data);
-  await ctx.reply(`Free enabled for ${target}`);
-});
+ 
 
 bot.action('promote', async ctx => {
   await ctx.answerCbQuery();
