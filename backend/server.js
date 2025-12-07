@@ -697,6 +697,7 @@ bot.action('buy', async ctx => {
     return [Markup.button.callback(`${t.points} pts · $${t.usd}`, `buy:${t.id}`)];
   });
   try {
+    try { console.log('buy.action', { chat: ctx.chat && ctx.chat.id, type: ctx.chat && ctx.chat.type, from: id }); } catch (_) {}
     try {
       await ctx.editMessageText('Select a package:', { reply_markup: Markup.inlineKeyboard(rows).reply_markup });
     } catch (_) {
@@ -739,11 +740,9 @@ bot.action(/buy:(.+)/, async ctx => {
     [Markup.button.callback('Main Menu', 'menu'), Markup.button.callback('Help', 'help')]
   ]);
   try {
-    try {
-      await ctx.editMessageText('Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup });
-    } catch (_) {
-      await ctx.reply('Complete your purchase, then tap Confirm:', kb);
-    }
+    try { console.log('buy.checkout', { chat: ctx.chat && ctx.chat.id, type: ctx.chat && ctx.chat.type, from: id, tier: tierId, session: session && session.id, url: session && session.url }); } catch (_) {}
+    try { await ctx.editMessageText('Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup }); }
+    catch (_) { await ctx.reply('Complete your purchase, then tap Confirm:', kb); }
   } catch (_) {}
   } catch (e) {
     try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
@@ -755,6 +754,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   await ctx.answerCbQuery();
   const sessionId = ctx.match[1];
   const r = await stripe.checkout.sessions.retrieve(sessionId);
+  try { console.log('confirm.action.retrieve', { sessionId, status: r && r.status, paid: r && r.payment_status, amount_total: r && r.amount_total, currency: r && r.currency }); } catch (_) {}
   if (!r) {
     try { return await ctx.editMessageText('Payment session not found'); } catch (_) { try { return await ctx.reply('Payment session not found'); } catch (__) { return; } }
   }
@@ -788,6 +788,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   }
   data.purchases[sessionId] = true;
   saveData(data);
+  try { console.log('confirm.action.credit', { sessionId, addPoints, balance: u.points, user: uid }); } catch (_) {}
   try { await ctx.editMessageText(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } catch (_) { try { await ctx.reply(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } catch (__) {} }
 });
 
