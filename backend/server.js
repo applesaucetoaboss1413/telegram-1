@@ -737,7 +737,10 @@ bot.action(/buy:(.+)/, async ctx => {
   ]);
   try {
     try { console.log('buy.checkout', { chat: ctx.chat && ctx.chat.id, type: ctx.chat && ctx.chat.type, from: id, tier: tierId, session: session && session.id, url: session && session.url }); } catch (_) {}
-    await sendInChannel(ctx, 'Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup });
+    const posted = await sendInChannel(ctx, 'Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup });
+    if (!posted) {
+      await sendInChannel(ctx, `Pay $${tier.usd}: ${session.url}\nThen run /confirm ${session.id}`);
+    }
   } catch (_) {}
   } catch (e) {
     try { await sendInChannel(ctx, `Error: ${e && e.message ? e.message : 'Unknown error'}`); } catch (_) {}
@@ -1537,10 +1540,10 @@ async function sendInChannel(ctx, text, options) {
     if (ctx && ctx.chat && (ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
       return await ctx.reply(text, options);
     }
-  } catch (_) {}
+  } catch (e) { try { console.error('sendInChannel reply error', { chat: ctx && ctx.chat && ctx.chat.id, type: ctx && ctx.chat && ctx.chat.type, error: e && e.message, code: e && e.code }); } catch (_) {} }
   const ch = getPrimaryChannelId();
   if (!ch) return null;
-  try { return await bot.telegram.sendMessage(ch, text, options || {}); } catch (_) { return null; }
+  try { return await bot.telegram.sendMessage(ch, text, options || {}); } catch (e2) { try { console.error('sendInChannel channel post error', { channel: ch, error: e2 && e2.message, code: e2 && e2.code }); } catch (_) {} return null; }
 }
 
 async function seedChannelMenu() {
