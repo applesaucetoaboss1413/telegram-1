@@ -116,6 +116,15 @@ function saveData(data) {
   fs.writeFileSync(dataFile, JSON.stringify(data));
 }
 
+function setUserContext(id, chatId) {
+  try {
+    const data = loadData();
+    if (!data.users[id]) return;
+    data.users[id].last_context_chat_id = String(chatId || '');
+    saveData(data);
+  } catch (_) {}
+}
+
 function today() {
   const d = new Date();
   const y = d.getFullYear();
@@ -698,7 +707,7 @@ bot.action(/buy:(.+)/, async ctx => {
     const u = getOrCreateUser(id);
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Not found');
-    const origin = computeOrigin(ctx.headers && ctx.headers.origin);
+    const origin = computeOrigin(null);
     const chatMeta = String(ctx.chat && ctx.chat.id);
     const chatId = String(ctx.chat && ctx.chat.id || '');
     let session;
@@ -896,80 +905,36 @@ const pendingChannel = {};
 
 bot.command('faceswap', async ctx => {
   const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', uid: String(ctx.from.id), swap: null, target: null };
-  } else {
-    pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
-  }
+  pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null, chatId: String(ctx.chat.id) };
+  setUserContext(String(ctx.from.id), String(ctx.chat.id));
   await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.');
 });
 
 bot.action('faceswap', async ctx => {
   await ctx.answerCbQuery();
-  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  if (isChannel) {
-    try {
-      const chatId = String(ctx.chat.id);
-      const member = await ctx.telegram.getChatMember(chatId, ctx.from.id);
-      const can = member && (member.status === 'creator' || member.status === 'administrator');
-      if (!can) {
-        const u = process.env.BOT_USERNAME || '';
-        const link = u ? `https://t.me/${u}?start=faceswap` : '';
-        if (link) { try { await ctx.reply(`Start in private chat: ${link}`); } catch (_) {} }
-        return;
-      }
-    } catch (_) {}
-  }
-  if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', swap: null, target: null };
-  } else {
-    pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
-  }
+  pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null, chatId: String(ctx.chat.id) };
+  setUserContext(String(ctx.from.id), String(ctx.chat.id));
   try { await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.'); } catch (_) {}
 });
 
 bot.command('imageswap', async ctx => {
   const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', uid: String(ctx.from.id), swap: null, target: null };
-  } else {
-    pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null };
-  }
+  pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null, chatId: String(ctx.chat.id) };
+  setUserContext(String(ctx.from.id), String(ctx.chat.id));
   await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.');
 });
 
 bot.action('imageswap', async ctx => {
   await ctx.answerCbQuery();
-  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  if (isChannel) {
-    try {
-      const chatId = String(ctx.chat.id);
-      const member = await ctx.telegram.getChatMember(chatId, ctx.from.id);
-      const can = member && (member.status === 'creator' || member.status === 'administrator');
-      if (!can) {
-        const u = process.env.BOT_USERNAME || '';
-        const link = u ? `https://t.me/${u}?start=imageswap` : '';
-        if (link) { try { await ctx.reply(`Start in private chat: ${link}`); } catch (_) {} }
-        return;
-      }
-    } catch (_) {}
-  }
-  if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', swap: null, target: null };
-  } else {
-    pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null };
-  }
+  pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null, chatId: String(ctx.chat.id) };
+  setUserContext(String(ctx.from.id), String(ctx.chat.id));
   try { await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.'); } catch (_) {}
 });
 
 bot.action('createvideo', async ctx => {
   await ctx.answerCbQuery();
-  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  if (isChannel) {
-    pendingChannel[String(ctx.chat.id)] = { mode: 'createvideo', uid: String(ctx.from.id), photo: null, video: null };
-  } else {
-    pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
-  }
+  pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null, chatId: String(ctx.chat.id) };
+  setUserContext(String(ctx.from.id), String(ctx.chat.id));
   try { await ctx.reply('Create Video: Send overlay photo, then base video. Cost: 10 points (10 seconds @ 1 point/sec).'); } catch (_) {}
 });
 
@@ -988,7 +953,7 @@ bot.on('photo', async ctx => {
       if (p.target) {
         const u = getOrCreateUser(pid);
         let r;
-        try { r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        try { r = await runFaceswap(u, p.swap, p.target, String(p.chatId || ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
         delete pending[pid];
         if (r.error) {
           const kb = Markup.inlineKeyboard([
@@ -1013,7 +978,7 @@ bot.on('photo', async ctx => {
         p.target = dest;
         const u = getOrCreateUser(pid);
         let r;
-        try { r = await runFaceswapImage(u, p.swap, p.target, String(ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        try { r = await runFaceswapImage(u, p.swap, p.target, String(p.chatId || ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
         delete pending[pid];
         if (r.error) {
           const kb = Markup.inlineKeyboard([
@@ -1047,7 +1012,7 @@ bot.on('video', async ctx => {
       if (p.swap) {
         const u = getOrCreateUser(pid);
         let r;
-        try { r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
+        try { r = await runFaceswap(u, p.swap, p.target, String(p.chatId || ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
         delete pending[pid];
         if (r.error) {
           const kb = Markup.inlineKeyboard([
