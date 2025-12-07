@@ -1533,11 +1533,14 @@ function getPrimaryChannelId() {
 }
 
 async function sendInChannel(ctx, text, options) {
+  try {
+    if (ctx && ctx.chat && (ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
+      return await ctx.reply(text, options);
+    }
+  } catch (_) {}
   const ch = getPrimaryChannelId();
-  if (ch) {
-    try { return await bot.telegram.sendMessage(ch, text, options || {}); } catch (_) {}
-  }
-  try { return await ctx.reply(text, options); } catch (_) { return null; }
+  if (!ch) return null;
+  try { return await bot.telegram.sendMessage(ch, text, options || {}); } catch (_) { return null; }
 }
 
 async function seedChannelMenu() {
