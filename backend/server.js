@@ -18,11 +18,13 @@ if (ffprobePath && ffprobePath.path) {
   ffmpeg.setFfprobePath(ffprobePath.path);
 }
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-let stripe = null;
-if (stripeSecretKey) {
-  stripe = require('stripe')(stripeSecretKey);
-} else {
-  try { console.warn('Missing STRIPE_SECRET_KEY. Stripe payments disabled until configured.'); } catch (_) {}
+let stripe = global.__stripe || null;
+if (!stripe) {
+  if (stripeSecretKey) {
+    stripe = require('stripe')(stripeSecretKey);
+  } else {
+    try { console.warn('Missing STRIPE_SECRET_KEY. Stripe payments disabled until configured.'); } catch (_) {}
+  }
 }
 console.log('Env', { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, CHANNEL_ID: process.env.CHANNEL_ID ? process.env.CHANNEL_ID : '' });
 
@@ -30,6 +32,10 @@ const app = express();
 const uploadsDir = path.join(__dirname, 'uploads');
 const outputsDir = path.join(__dirname, 'outputs');
 const dataFile = path.join(__dirname, 'data.json');
+function formatUSD(amount) {
+  const n = Number(amount || 0);
+  return `$${n.toFixed(2)}`;
+}
 let PRICING = [
   { id: 'p60', points: 60, usd: 3.09, stars: 150, tierBonus: 0.0 },
   { id: 'p120', points: 120, usd: 5.09, stars: 250, tierBonus: 0.02 },
@@ -117,14 +123,30 @@ function loadData() {
     const data = JSON.parse(raw);
     if (!data.users) data.users = {};
     if (!data.purchases) data.purchases = {};
+    if (!data.audits) data.audits = {};
+    if (!data.pending_swaps) data.pending_swaps = {};
     return data;
   } catch (e) {
-    return { users: {}, purchases: {} };
+    return { users: {}, purchases: {}, audits: {}, pending_swaps: {} };
   }
 }
 
+module.exports = { app };
+
 function saveData(data) {
   fs.writeFileSync(dataFile, JSON.stringify(data));
+}
+function addAudit(userId, delta, reason, meta) {
+  try {
+    const data = loadData();
+    const u = data.users[userId];
+    const before = u ? (u.points || 0) : null;
+    const after = u ? (before + delta) : null;
+    const rec = { at: Date.now(), before, delta, after, reason: String(reason || ''), meta: meta || {} };
+    data.audits[userId] = data.audits[userId] || [];
+    data.audits[userId].push(rec);
+    saveData(data);
+  } catch (_) {}
 }
 
 function setUserContext(id, chatId) {
@@ -246,6 +268,37 @@ app.get('/leaderboard', (req, res) => {
 app.get('/pricing', (req, res) => {
   res.json({ tiers: PRICING });
 });
+app.get('/go/:sessionId', async (req, res) => {
+  try {
+    const sid = String(req.params.sessionId || '');
+    if (!stripe) return res.status(503).send('Payments unavailable');
+    const s = await stripe.checkout.sessions.retrieve(sid);
+    if (!s || !s.url) return res.status(404).send('Session not found');
+    res.redirect(302, s.url);
+  } catch (e) {
+    res.status(500).send('Checkout redirect error');
+  }
+});
+app.get('/pay/:sessionId', async (req, res) => {
+  const sid = String(req.params.sessionId || '');
+  const base = PUBLIC_BASE || '';
+  const goUrl = `${base}/go/${encodeURIComponent(sid)}`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Proceed to Payment</title><style>:root{--bg:#0f1115;--fg:#e7e9ee;--accent:#3b82f6;--accent-hover:#2563eb}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Arial,Noto Sans,sans-serif;background:var(--bg);color:var(--fg);display:grid;min-height:100vh;place-items:center}.wrap{padding:24px;max-width:640px;width:100%}h1{font-size:1.5rem;margin:0 0 12px}p{margin:0 0 20px;line-height:1.5}.cta{display:inline-block;padding:14px 20px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;box-shadow:0 8px 20px rgba(59,130,246,.25);transition:background .15s ease,transform .06s ease}.cta:focus{outline:3px solid #fff;outline-offset:2px}.cta:hover{background:var(--accent-hover)}.cta:active{transform:translateY(1px)}.note{font-size:.875rem;opacity:.8}@media (max-width:480px){.wrap{padding:18px}.cta{width:100%;text-align:center}}</style></head><body><main class="wrap" role="main"><h1>Checkout</h1><p>Click the button below to proceed securely to payment.</p><a class="cta" href="${goUrl}" aria-label="Proceed to Payment">Proceed to Payment</a><p class="note" role="note">You will be redirected to our payment provider to complete your purchase.</p></main></body></html>`);
+});
+app.get('/points/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const data = loadData();
+  const u = data.users[id];
+  if (!u) return res.status(404).json({ error: 'user not found' });
+  res.json({ points: u.points, requirements: { image: 9, video_per_second: 3 } });
+});
+app.get('/points/history/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const data = loadData();
+  const arr = data.audits[id] || [];
+  res.json({ history: arr });
+});
 
 app.post('/create-point-session', async (req, res) => {
   if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
@@ -358,6 +411,7 @@ app.post('/faceswap', upload.fields([{ name: 'photo' }, { name: 'video' }]), asy
     }
   }
   if ((u.points || 0) < cost) return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
+  addAudit(userId, -cost, 'faceswap_debit', { video: !!videoPath });
   u.points -= cost;
   saveData(data);
   try {
@@ -374,6 +428,9 @@ app.post('/faceswap', upload.fields([{ name: 'photo' }, { name: 'video' }]), asy
     });
     const requestId = result && (result.request_id || result.requestId || result.id);
     if (!requestId) return res.status(500).json({ error: 'no request id' });
+    const data2 = loadData();
+    data2.pending_swaps[String(requestId)] = { userId, cost };
+    saveData(data2);
     res.json({ queued: true, request_id: requestId, points: u.points });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -694,7 +751,7 @@ bot.action('buy', async ctx => {
   const id = ctx.from ? String(ctx.from.id) : null;
   const viewer = id ? getOrCreateUser(id) : null;
   const rows = PRICING.map(t => {
-    return [Markup.button.callback(`${t.points} pts · $${t.usd}`, `buy:${t.id}`)];
+    return [Markup.button.callback(`${t.points} pts · ${formatUSD(t.usd)}`, `buy:${t.id}`)];
   });
   try {
     try { console.log('buy.action', { chat: ctx.chat && ctx.chat.id, type: ctx.chat && ctx.chat.type, from: id }); } catch (_) {}
@@ -718,12 +775,13 @@ bot.action(/buy:(.+)/, async ctx => {
     try {
       session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
-        line_items: [{ price_data: { currency: 'usd', product_data: { name: `${tier.points} Points` }, unit_amount: Math.round(tier.usd * 100) }, quantity: 1 }],
-        mode: 'payment',
-        success_url: `${origin}/?success=1&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/?cancel=1`,
-        metadata: { userId: String(id), tierId, chatId: chatMeta, promoterId: String(u.promoter_id || '') }
-      });
+      line_items: [{ price_data: { currency: 'usd', product_data: { name: `${tier.points} Points` }, unit_amount: Math.round(tier.usd * 100) }, quantity: 1 }],
+      mode: 'payment',
+      locale: 'en',
+      success_url: `${origin}/?success=1&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/?cancel=1`,
+      metadata: { userId: String(id), tierId, chatId: chatMeta, promoterId: String(u.promoter_id || '') }
+    });
       try { await ctx.answerCbQuery('Checkout ready'); } catch (_) {}
     } catch (e) {
       try { console.error('Stripe session create error', { msg: e && e.message, code: e && e.code, type: e && e.type }); } catch (_) {}
@@ -731,15 +789,16 @@ bot.action(/buy:(.+)/, async ctx => {
       return;
     }
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url(`Pay $${tier.usd}`, session.url || 'https://stripe.com')],
+    [Markup.button.url(`Proceed to Payment`, `${PUBLIC_BASE ? `${PUBLIC_BASE}/pay/${session.id}` : (session.url || 'https://stripe.com')}`)],
     [Markup.button.callback('Confirm Payment', `confirm:${session.id}`)],
     [Markup.button.callback('Main Menu', 'menu'), Markup.button.callback('Help', 'help')]
   ]);
   try {
     try { console.log('buy.checkout', { chat: ctx.chat && ctx.chat.id, type: ctx.chat && ctx.chat.type, from: id, tier: tierId, session: session && session.id, url: session && session.url }); } catch (_) {}
-    const posted = await sendInChannel(ctx, 'Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup });
+    const posted = await sendInChannel(ctx, `Price: ${formatUSD(tier.usd)}\nComplete your purchase, then tap Confirm:`, { reply_markup: kb.reply_markup });
     if (!posted) {
-      await sendInChannel(ctx, `Pay $${tier.usd}: ${session.url}\nThen run /confirm ${session.id}`);
+      const short = PUBLIC_BASE ? `${PUBLIC_BASE}/pay/${session.id}` : (session.url || '');
+      await sendInChannel(ctx, `Proceed to Payment: ${short}\nThen run /confirm ${session.id}`);
     }
   } catch (_) {}
   } catch (e) {
@@ -771,6 +830,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   const currency = (r.currency || '').toLowerCase();
   if (paid !== expected || currency !== 'usd') { try { return await sendInChannel(ctx, 'Payment amount mismatch'); } catch (_) { return; } }
   const addPoints = Math.floor(tier.points);
+  addAudit(uid, addPoints, 'stripe_credit', { sessionId, tierId, paid, currency });
   u.points = (u.points || 0) + addPoints;
   u.has_recharged = true;
   u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
@@ -1294,7 +1354,9 @@ if (process.env.BOT_TOKEN) {
   const forcePolling = String(process.env.TELEGRAM_FORCE_POLLING || '').toLowerCase();
   const shouldForcePolling = forcePolling === '1' || forcePolling === 'true' || forcePolling === 'yes';
   global.__botLaunchMode = 'none';
-  if (shouldForcePolling) {
+  if (process.env.NODE_ENV === 'test') {
+    global.__botLaunchMode = 'test';
+  } else if (shouldForcePolling) {
     bot.telegram.deleteWebhook().catch(() => {});
     bot.launch().then(async () => { global.__botLaunchMode = 'polling'; console.log('Bot launched (forced polling)'); try { await seedChannelMenu(); } catch (_) {} bot.telegram.getWebhookInfo().then(info => console.log('Webhook info', info)).catch(err => console.error('Webhook info err', err)); }).catch(err => console.error('Bot launch error', err));
   } else if ((process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN)) {
@@ -1333,12 +1395,15 @@ if (process.env.BOT_TOKEN) {
 
 console.log('Server is about to start...');
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
 let chs = (process.env.CHANNEL_ID || '').split(',').map(s => s.trim()).filter(Boolean);
 let __webhookMonitorStarted = false;
 function startWebhookMonitor() {
   if (__webhookMonitorStarted) return;
   __webhookMonitorStarted = true;
+  if (process.env.NODE_ENV === 'test') return;
   setInterval(async () => {
     if ((global.__botLaunchMode || '') !== 'webhook') return;
     try {
@@ -1362,7 +1427,7 @@ function channelKeyboard() {
   ]);
 }
 function channelGreetText() {
-  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+  const lines = PRICING.map(t => `${t.points} points / ${formatUSD(t.usd)}`);
   return `Faceswap Service\nImage Face Swap: send swap photo, then target photo. Cost: 9 points.\nVideo Face Swap: send swap photo, then target video trimmed to the length you want. Cost: 3 points per second.\n\nPrices (point packages):\n${lines.join('\n')}`;
 }
 async function postChannelGreet(chatId) {
