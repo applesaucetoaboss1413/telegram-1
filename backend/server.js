@@ -680,7 +680,7 @@ bot.action('leaderboard', async ctx => {
 
 bot.action('buy', async ctx => {
   try { await ctx.answerCbQuery('Opening packages…'); } catch (_) {}
-  if (!stripe) return toast(ctx, 'Stripe not configured. Add STRIPE_SECRET_KEY to enable payments.', { alert: true });
+  if (!stripe) return toast(ctx, 'Payments are currently unavailable.', { alert: true });
   const id = ctx.from ? String(ctx.from.id) : null;
   const viewer = id ? getOrCreateUser(id) : null;
   const rows = PRICING.map(t => {
@@ -702,7 +702,7 @@ bot.action('buy', async ctx => {
 bot.action(/buy:(.+)/, async ctx => {
   try { await ctx.answerCbQuery('Preparing checkout…'); } catch (_) {}
   try {
-    if (!stripe) { await toast(ctx, 'Stripe is not configured. Set STRIPE_SECRET_KEY & STRIPE_WEBHOOK_SECRET.', { alert: true }); return; }
+    if (!stripe) { await toast(ctx, 'Payments are currently unavailable.', { alert: true }); return; }
     const tierId = ctx.match[1];
     const id = String(ctx.from.id);
     const u = getOrCreateUser(id);
@@ -747,32 +747,33 @@ bot.action(/buy:(.+)/, async ctx => {
 });
 
 bot.action(/confirm:(.+)/, async ctx => {
-  if (!stripe) return toast(ctx, 'Stripe not configured. Set STRIPE_SECRET_KEY before confirming payments.', { alert: true });
-  if (!(await ensureChannelCanPost(ctx, 'announce the confirmation'))) return;
+  if (!stripe) return toast(ctx, 'Payments are currently unavailable.', { alert: true });
+  const canPost = await ensureChannelCanPost(ctx, 'announce the confirmation');
   await ctx.answerCbQuery();
   const sessionId = ctx.match[1];
+  const id = String(ctx.from.id);
   const r = await stripe.checkout.sessions.retrieve(sessionId);
   if (!r) {
-    try { return await ctx.reply('Payment session not found'); } catch (_) { return; }
+    try { if (canPost) { return await ctx.reply('Payment session not found'); } else { return await bot.telegram.sendMessage(id, 'Payment session not found'); } } catch (_) { return; }
   }
   if (r.payment_status !== 'paid' && r.status !== 'complete') {
-    try { return await ctx.reply('Payment not completed'); } catch (_) { return; }
+    try { if (canPost) { return await ctx.reply('Payment not completed'); } else { return await bot.telegram.sendMessage(id, 'Payment not completed'); } } catch (_) { return; }
   }
   const data = loadData();
   if (data.purchases[sessionId]) {
     const uid = r.metadata && r.metadata.userId;
     const u = uid ? data.users[uid] : null;
-    try { return await ctx.reply(`Already processed. Points: ${u ? u.points : ''}`); } catch (_) { return; }
+    try { if (canPost) { return await ctx.reply(`Already processed. Points: ${u ? u.points : ''}`); } else { return await bot.telegram.sendMessage(id, `Already processed. Points: ${u ? u.points : ''}`); } } catch (_) { return; }
   }
   const uid = r.metadata && r.metadata.userId;
   const tierId = r.metadata && r.metadata.tierId;
   const u = uid ? data.users[uid] : null;
   const tier = PRICING.find(t => t.id === tierId);
-  if (!u || !tier) { try { return await ctx.reply('Not found'); } catch (_) { return; } }
+  if (!u || !tier) { try { if (canPost) { return await ctx.reply('Not found'); } else { return await bot.telegram.sendMessage(id, 'Not found'); } } catch (_) { return; } }
   const expected = Math.round(tier.usd * 100);
   const paid = typeof r.amount_total === 'number' ? r.amount_total : null;
   const currency = (r.currency || '').toLowerCase();
-  if (paid !== expected || currency !== 'usd') { try { return await ctx.reply('Payment amount mismatch'); } catch (_) { return; } }
+  if (paid !== expected || currency !== 'usd') { try { if (canPost) { return await ctx.reply('Payment amount mismatch'); } else { return await bot.telegram.sendMessage(id, 'Payment amount mismatch'); } } catch (_) { return; } }
   const addPoints = Math.floor(tier.points);
   u.points = (u.points || 0) + addPoints;
   u.has_recharged = true;
@@ -785,11 +786,11 @@ bot.action(/confirm:(.+)/, async ctx => {
   }
   data.purchases[sessionId] = true;
   saveData(data);
-  try { await ctx.reply(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } catch (_) {}
+  try { if (canPost) { await ctx.reply(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } else { await bot.telegram.sendMessage(id, `Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } } catch (_) {}
 });
 
 bot.command('confirm', async ctx => {
-  if (!stripe) return ctx.reply('Stripe not configured. Set STRIPE_SECRET_KEY before confirming payments.');
+  if (!stripe) return ctx.reply('Payments are currently unavailable.');
   const parts = (ctx.message.text || '').split(' ').filter(Boolean);
   const sessionId = parts[1];
   if (!sessionId) return ctx.reply('Provide session id');
@@ -1418,7 +1419,7 @@ bot.action('help', async ctx => {
     [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
     [Markup.button.callback('Check-In', 'checkin'), Markup.button.callback('Leaderboard', 'leaderboard')]
   ]);
-  await ctx.reply('Faceswap: Tap Faceswap, send a swap photo, then a target video trimmed to the length you want. Cost: 3 points per second. Buy Points to unlock features. Use Create Video for simple overlays. Check-In daily for bonuses.', kb);
+  await ctx.reply('Faceswap: Tap Faceswap, send a swap photo, then a target video trimmed to the length you want. Cost: 3 points per second. Buy Points to unlock features. Use Create Video for simple overlays.', kb);
 });
 
 bot.command('help', async ctx => {
@@ -1428,7 +1429,7 @@ bot.command('help', async ctx => {
     [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
     [Markup.button.callback('Check-In', 'checkin'), Markup.button.callback('Leaderboard', 'leaderboard')]
   ]);
-  await ctx.reply('Faceswap: Tap Faceswap, send a swap photo, then a target video trimmed to the length you want. Cost: 3 points per second. Buy Points to unlock features. Use Create Video for simple overlays. Check-In daily for bonuses.', kb);
+  await ctx.reply('Faceswap: Tap Faceswap, send a swap photo, then a target video trimmed to the length you want. Cost: 3 points per second. Buy Points to unlock features. Use Create Video for simple overlays.', kb);
 });
 
 bot.command('buy', async ctx => {
@@ -1503,9 +1504,9 @@ bot.command('status', async ctx => {
     const url = info && info.url ? String(info.url) : '';
     const pending = info && typeof info.pending_update_count === 'number' ? info.pending_update_count : 0;
     const lastErr = info && info.last_error_message ? String(info.last_error_message) : '';
-    await ctx.reply(`mode: ${mode}\nwebhook.url: ${url}\npending: ${pending}\nerror: ${lastErr}\nstripe: ${stripe ? 'ready' : 'missing key'}\npublic_base: ${PUBLIC_BASE || PUBLIC_BASE_ERROR || 'unset'}`);
+    await ctx.reply(`mode: ${mode}\nwebhook.url: ${url}\npending: ${pending}\nerror: ${lastErr}\nstripe: ${stripe ? 'ready' : 'unavailable'}\npublic_base: ${PUBLIC_BASE || PUBLIC_BASE_ERROR || 'unset'}`);
   } catch (e) {
-    await ctx.reply(`mode: ${global.__botLaunchMode || 'none'}\nerror: ${e.message}\nstripe: ${stripe ? 'ready' : 'missing key'}\npublic_base: ${PUBLIC_BASE || PUBLIC_BASE_ERROR || 'unset'}`);
+    await ctx.reply(`mode: ${global.__botLaunchMode || 'none'}\nerror: ${e.message}\nstripe: ${stripe ? 'ready' : 'unavailable'}\npublic_base: ${PUBLIC_BASE || PUBLIC_BASE_ERROR || 'unset'}`);
   }
 });
 
