@@ -173,7 +173,7 @@ bot.action(/curr:(\w+):(.+)/, async ctx => {
       return;
     }
     const kb = Markup.inlineKeyboard([
-      [Markup.button.url('Make Payment', session.url || 'https://stripe.com')],
+      [Markup.button.url('Click to Access Link', `${PUBLIC_BASE ? `${PUBLIC_BASE}/link/${session.id}` : (session.url || 'https://stripe.com')}`)],
       [Markup.button.callback('Confirm Payment', `confirm:${session.id}`)],
       [Markup.button.callback('Main Menu', 'menu'), Markup.button.callback('Help', 'help')]
     ]);
@@ -360,6 +360,19 @@ app.get('/pay/:sessionId', async (req, res) => {
   const goUrl = `${base}/go/${encodeURIComponent(sid)}`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Proceed to Payment</title><style>:root{--bg:#0f1115;--fg:#e7e9ee;--accent:#3b82f6;--accent-hover:#2563eb}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Arial,Noto Sans,sans-serif;background:var(--bg);color:var(--fg);display:grid;min-height:100vh;place-items:center}.wrap{padding:24px;max-width:640px;width:100%}h1{font-size:1.5rem;margin:0 0 12px}p{margin:0 0 20px;line-height:1.5}.cta{display:inline-block;padding:14px 20px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;box-shadow:0 8px 20px rgba(59,130,246,.25);transition:background .15s ease,transform .06s ease}.cta:focus{outline:3px solid #fff;outline-offset:2px}.cta:hover{background:var(--accent-hover)}.cta:active{transform:translateY(1px)}.note{font-size:.875rem;opacity:.8}@media (max-width:480px){.wrap{padding:18px}.cta{width:100%;text-align:center}}</style></head><body><main class="wrap" role="main"><h1>Checkout</h1><p>Click the button below to proceed securely to payment.</p><a class="cta" href="${goUrl}" aria-label="Proceed to Payment">Proceed to Payment</a><p class="note" role="note">You will be redirected to our payment provider to complete your purchase.</p></main></body></html>`);
+});
+app.get('/link/:sessionId', async (req, res) => {
+  try {
+    const sid = String(req.params.sessionId || '');
+    if (!stripe) return res.status(503).send('Payments unavailable');
+    const s = await stripe.checkout.sessions.retrieve(sid);
+    if (!s || !s.url) return res.status(404).send('Session not found');
+    const longUrl = String(s.url);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Click to Access Link</title><style>:root{--bg:#0f1115;--fg:#e7e9ee;--accent:#10b981;--accent-hover:#0ea5a3}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Arial,Noto Sans,sans-serif;background:var(--bg);color:var(--fg);display:grid;min-height:100vh;place-items:center}.wrap{padding:24px;max-width:720px;width:100%}h1{font-size:1.5rem;margin:0 0 12px}p{margin:0 0 16px;line-height:1.6}.cta{display:inline-block;padding:14px 22px;border-radius:12px;background:var(--accent);color:#fff;text-decoration:none;font-weight:700;letter-spacing:.2px;box-shadow:0 8px 24px rgba(16,185,129,.25);transition:background .15s ease,transform .06s ease}.cta:focus{outline:3px solid #fff;outline-offset:2px}.cta:hover{background:var(--accent-hover)}.cta:active{transform:translateY(1px)}.url{margin-top:16px;padding:12px;border-radius:10px;background:#161922;color:#cbd5e1;font-size:.85rem;word-break:break-all;border:1px solid #1f2430}.note{font-size:.875rem;opacity:.8;margin-top:10px}@media (max-width:520px){.wrap{padding:18px}.cta{width:100%;text-align:center}}</style></head><body><main class="wrap" role="main"><h1>Access Link</h1><p>Click the button below to open the full link. The complete address is shown to prevent any truncation.</p><a class="cta" href="${longUrl}" aria-label="Click to Access Link">Click to Access Link</a><div class="url" aria-label="Full URL" role="textbox">${longUrl}</div><p class="note">If the button is blocked by your app, copy the full URL above and open it in your browser.</p></main></body></html>`);
+  } catch (e) {
+    res.status(500).send('Link page error');
+  }
 });
 app.get('/points/:id', (req, res) => {
   const id = String(req.params.id || '');
