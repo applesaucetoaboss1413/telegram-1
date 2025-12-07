@@ -82,7 +82,8 @@ function computeTierPayout(tier) {
 }
 
 function computeOrigin(reqOrigin) {
-  const originRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || reqOrigin || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me'));
+  if (PUBLIC_BASE) return PUBLIC_BASE;
+  const originRaw = (reqOrigin || '');
   return String(originRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
 }
 try {
@@ -704,7 +705,7 @@ bot.action(/buy:(.+)/, async ctx => {
     const u = getOrCreateUser(id);
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Not found');
-    const origin = computeOrigin(null);
+    const origin = PUBLIC_BASE || computeOrigin(null);
     const chatMeta = String(ctx.chat && ctx.chat.id);
     const chatId = String(ctx.chat && ctx.chat.id || '');
     let session;
