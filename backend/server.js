@@ -256,8 +256,8 @@ app.post('/create-point-session', async (req, res) => {
         quantity: 1,
       }],
       mode: 'payment',
-      success_url: `${computeOrigin(req.headers.origin)}/?success=1&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${computeOrigin(req.headers.origin)}/?cancel=1`,
+        success_url: `${(PUBLIC_BASE || computeOrigin(req.headers.origin) || 'https://stripe.com')}/?success=1&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${(PUBLIC_BASE || computeOrigin(req.headers.origin) || 'https://stripe.com')}/?cancel=1`,
       metadata: { userId: String(userId), tierId },
     });
     res.json({ id: session.id });
@@ -705,7 +705,7 @@ bot.action(/buy:(.+)/, async ctx => {
     const u = getOrCreateUser(id);
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Not found');
-    const origin = PUBLIC_BASE || computeOrigin(null);
+    const origin = PUBLIC_BASE || computeOrigin(null) || 'https://stripe.com';
     const chatMeta = String(ctx.chat && ctx.chat.id);
     const chatId = String(ctx.chat && ctx.chat.id || '');
     let session;
