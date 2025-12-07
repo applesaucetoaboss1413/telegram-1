@@ -1,5 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 console.log('Server script started');
+console.log('Deploy tick', Date.now());
 try { console.log('Stripe key length:', (process.env.STRIPE_SECRET_KEY || '').length); } catch (_) {}
 const fs = require('fs');
 const path = require('path');
