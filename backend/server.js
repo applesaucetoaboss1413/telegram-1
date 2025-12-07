@@ -687,7 +687,11 @@ bot.action('buy', async ctx => {
     return [Markup.button.callback(`${t.points} pts · $${t.usd}`, `buy:${t.id}`)];
   });
   try {
-    await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
+    try {
+      await ctx.editMessageText('Select a package:', { reply_markup: Markup.inlineKeyboard(rows).reply_markup });
+    } catch (_) {
+      await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
+    }
   } catch (_) {}
 });
 
@@ -725,7 +729,11 @@ bot.action(/buy:(.+)/, async ctx => {
     [Markup.button.callback('Main Menu', 'menu'), Markup.button.callback('Help', 'help')]
   ]);
   try {
-    await ctx.reply('Complete your purchase, then tap Confirm:', kb);
+    try {
+      await ctx.editMessageText('Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup });
+    } catch (_) {
+      await ctx.reply('Complete your purchase, then tap Confirm:', kb);
+    }
   } catch (_) {}
   } catch (e) {
     try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
@@ -738,10 +746,10 @@ bot.action(/confirm:(.+)/, async ctx => {
   const sessionId = ctx.match[1];
   const r = await stripe.checkout.sessions.retrieve(sessionId);
   if (!r) {
-    try { return await ctx.reply('Payment session not found'); } catch (_) { return; }
+    try { return await ctx.editMessageText('Payment session not found'); } catch (_) { try { return await ctx.reply('Payment session not found'); } catch (__) { return; } }
   }
   if (r.payment_status !== 'paid' && r.status !== 'complete') {
-    try { return await ctx.reply('Payment not completed'); } catch (_) { return; }
+    try { return await ctx.editMessageText('Payment not completed'); } catch (_) { try { return await ctx.reply('Payment not completed'); } catch (__) { return; } }
   }
   const data = loadData();
   if (data.purchases[sessionId]) {
@@ -753,11 +761,11 @@ bot.action(/confirm:(.+)/, async ctx => {
   const tierId = r.metadata && r.metadata.tierId;
   const u = uid ? data.users[uid] : null;
   const tier = PRICING.find(t => t.id === tierId);
-  if (!u || !tier) { try { return await ctx.reply('Not found'); } catch (_) { return; } }
+  if (!u || !tier) { try { return await ctx.editMessageText('Not found'); } catch (_) { try { return await ctx.reply('Not found'); } catch (__) { return; } }
   const expected = Math.round(tier.usd * 100);
   const paid = typeof r.amount_total === 'number' ? r.amount_total : null;
   const currency = (r.currency || '').toLowerCase();
-  if (paid !== expected || currency !== 'usd') { try { return await ctx.reply('Payment amount mismatch'); } catch (_) { return; } }
+  if (paid !== expected || currency !== 'usd') { try { return await ctx.editMessageText('Payment amount mismatch'); } catch (_) { try { return await ctx.reply('Payment amount mismatch'); } catch (__) { return; } }
   const addPoints = Math.floor(tier.points);
   u.points = (u.points || 0) + addPoints;
   u.has_recharged = true;
@@ -770,7 +778,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   }
   data.purchases[sessionId] = true;
   saveData(data);
-  try { await ctx.reply(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } catch (_) {}
+  try { await ctx.editMessageText(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } catch (_) { try { await ctx.reply(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } catch (__) {} }
 });
 
 bot.command('confirm', async ctx => {
