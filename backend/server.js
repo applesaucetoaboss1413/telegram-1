@@ -726,8 +726,8 @@ bot.action(/buy:(.+)/, async ctx => {
       });
       try { await ctx.answerCbQuery('Checkout ready'); } catch (_) {}
     } catch (e) {
-      try { console.error('Stripe session create error', e); } catch (_) {}
-      try { await ctx.reply(`Payment error: ${e.message}`); } catch (_) { try { await bot.telegram.sendMessage(id, `Payment error: ${e.message}`); } catch (__) {} }
+      try { console.error('Stripe session create error', { msg: e && e.message, code: e && e.code, type: e && e.type }); } catch (_) {}
+      try { await sendInChannel(ctx, `Payment error: ${e && e.message ? e.message : 'Checkout failed'}`); } catch (_) {}
       return;
     }
   const kb = Markup.inlineKeyboard([
@@ -740,7 +740,7 @@ bot.action(/buy:(.+)/, async ctx => {
     await sendInChannel(ctx, 'Complete your purchase, then tap Confirm:', { reply_markup: kb.reply_markup });
   } catch (_) {}
   } catch (e) {
-    try { await ctx.reply(`Error: ${e.message}`); } catch (_) {}
+    try { await sendInChannel(ctx, `Error: ${e && e.message ? e.message : 'Unknown error'}`); } catch (_) {}
   }
 });
 
@@ -756,7 +756,7 @@ bot.action(/confirm:(.+)/, async ctx => {
   if (data.purchases[sessionId]) {
     const uid = r.metadata && r.metadata.userId;
     const u = uid ? data.users[uid] : null;
-    try { return await ctx.reply(`Already processed. Points: ${u ? u.points : ''}`); } catch (_) { return; }
+    try { return await sendInChannel(ctx, `Already processed. Points: ${u ? u.points : ''}`); } catch (_) { return; }
   }
   const uid = r.metadata && r.metadata.userId;
   const tierId = r.metadata && r.metadata.tierId;
