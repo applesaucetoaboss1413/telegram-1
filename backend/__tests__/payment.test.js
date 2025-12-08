@@ -1,6 +1,7 @@
 const request = require('supertest')
 process.env.NODE_ENV = 'test'
 process.env.PUBLIC_URL = 'https://example.com'
+process.env.BOT_TOKEN = '123:test' // Dummy token for Telegraf
 const loadApp = (stripeMock) => {
   if (stripeMock) global.__stripe = stripeMock
   process.env.STRIPE_SECRET_KEY = ''
@@ -36,6 +37,7 @@ describe('Payment API', () => {
   test('create-point-session success with mocked stripe', async () => {
     const app3 = loadApp({ checkout: { sessions: { create: jest.fn().mockResolvedValue({ id: 'sess_123' }) } } })
     const res = await request(app3).post('/create-point-session').send({ userId: 'u1', tierId: 'p60' })
+    if (res.status !== 200) console.error('Test failed body:', res.body)
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ id: 'sess_123' })
   })
