@@ -202,35 +202,12 @@ function addAudit(userId, delta, reason, meta) {
   saveDB();
 }
 
-function adjustPoints(userId, delta, reason, meta) {
-  const u = getOrCreateUser(String(userId));
-  const before = Number(u.points || 0);
-  let after = before + Number(delta);
-  if (after < 0) after = 0;
-  u.points = after;
-  if (delta > 0) {
-    u.has_recharged = true;
-    u.recharge_total_points = Number(u.recharge_total_points || 0) + Number(delta);
-  }
-  addAudit(String(userId), Number(delta), reason, meta);
-  saveDB();
-  return after;
-}
-
-
 // --- Telegram Bot ---
 const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 
 bot.use(async (ctx, next) => {
-  try {
-    if (ctx.updateType === 'callback_query') {
-      const data = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-      console.log('update callback_query', (ctx.from && ctx.from.id), 'data=', data.slice(0, 80), 'len=', data.length);
-    } else {
-      console.log('update', ctx.updateType, (ctx.from && ctx.from.id));
-    }
-  } catch (_) {}
+  try { console.log('update', ctx.updateType, (ctx.from && ctx.from.id)); } catch (_) {}
   return next();
 });
 
@@ -266,67 +243,50 @@ async function getFileUrl(ctx, fileId, localPath) {
   }
 }
 
-async function ack(ctx, text) {
-  if (ctx && ctx.updateType === 'callback_query') {
-    try { await ctx.answerCbQuery(text || 'Processing…'); } catch (_) {}
-  }
-}
-
-
-async function ack(ctx, text) {
-  if (ctx && ctx.updateType === 'callback_query') {
-    try { await ctx.answerCbQuery(text || 'Processing…'); } catch (_) {}
-  }
-}
-
-
-async function ack(ctx, text) {
-  if (ctx && ctx.updateType === 'callback_query') {
-    try { await ctx.answerCbQuery(text || 'Processing…'); } catch (_) {}
-  }
-}
-
-
-async function ack(ctx, text) {
-  if (ctx && ctx.updateType === 'callback_query') {
-    try { await ctx.answerCbQuery(text || 'Processing…'); } catch (_) {}
-  }
-}
-
-
 async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 9 : 9;
   const user = DB.users[u.id];
   
   if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
   
-  adjustPoints(u.id, -cost, 'faceswap_start', { isVideo });
+  user.points -= cost;
+  saveDB();
+  addAudit(u.id, -cost, 'faceswap_start', { isVideo });
 
   const swapUrl = await getFileUrl(ctx, swapFileId, swapPath);
   const targetUrl = await getFileUrl(ctx, targetFileId, targetPath);
 
   if (!swapUrl || !targetUrl) {
-    adjustPoints(u.id, cost, 'faceswap_refund_urls_failed', { isVideo });
-    return { error: 'Failed to generate file URLs.', points: user.points 
-  };
+    user.points += cost;
+    saveDB();
+    return { error: 'Failed to generate file URLs.', points: user.points };
   }
 
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
   if (!key) return { error: 'Server config error', points: user.points };
 
   const endpoint = isVideo 
-    ? '/api/v1/capix/faceswap/faceswap/v1/video'
-    : '/api/v1/capix/faceswap/faceswap/v1/image';
+    ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
+    : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
   
-  const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
+  // V2 uses JSON payload structure: { input: { swap_image: ..., target_image/video: ... } }
+  // Endpoint paths are: /api/v1/magicapi/faceswap-v2/faceswap/video/run or .../image/run
+  
+  const payload = JSON.stringify({
+    input: {
+      swap_image: swapUrl,
+      [isVideo ? 'target_video' : 'target_image']: targetUrl
+    }
+  });
+
   const reqOpts = {
     hostname: 'api.magicapi.dev',
     path: endpoint,
     method: 'POST',
     headers: {
       'x-magicapi-key': key,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Content-Length': Buffer.byteLength(form)
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload)
     }
   };
 
@@ -340,16 +300,16 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
         });
       });
       r.on('error', reject);
-      r.write(form);
+      r.write(payload);
       r.end();
     });
 
     const requestId = result && (result.request_id || result.requestId || result.id);
     if (!requestId) {
-      adjustPoints(u.id, cost, 'faceswap_refund_api_error', { isVideo });
+      user.points += cost;
+      saveDB();
       console.error('MagicAPI Error', result);
       return { error: 'API Error: ' + (result.message || JSON.stringify(result)), points: user.points };
-    }
     }
 
     // --- PERSISTENCE START ---
@@ -368,13 +328,16 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     return { started: true, points: user.points, requestId };
 
   } catch (e) {
-    adjustPoints(u.id, cost, 'faceswap_refund_network_error', { isVideo });
+    user.points += cost;
+    saveDB();
     return { error: 'Network Error: ' + e.message, points: user.points };
   }
 }
 
 function pollMagicResult(requestId, chatId) {
   let tries = 0;
+  const job = DB.pending_swaps[requestId];
+  const isVideo = job ? job.isVideo : true; // Default to true if missing, or maybe try both paths?
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
   
   const poll = () => {
@@ -391,12 +354,12 @@ function pollMagicResult(requestId, chatId) {
        return;
     }
 
-    const form = querystring.stringify({ request_id: requestId });
+    const typePath = isVideo ? 'video' : 'image';
     const req = https.request({
       hostname: 'api.magicapi.dev',
-      path: '/api/v1/capix/faceswap/result/',
-      method: 'POST',
-      headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(form) }
+      path: `/api/v1/magicapi/faceswap-v2/faceswap/${typePath}/status/${requestId}`,
+      method: 'GET',
+      headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
     }, res => {
       let buf=''; res.on('data', c=>buf+=c); res.on('end', async () => {
         try {
@@ -440,7 +403,7 @@ function pollMagicResult(requestId, chatId) {
       });
     });
     req.on('error', () => setTimeout(poll, 3000));
-    req.write(form);
+// req.write(form); // GET request has no body
     req.end();
   };
   
@@ -485,10 +448,6 @@ bot.command('status', ctx => {
 
 bot.action('buy', async ctx => {
   try {
-    await ack(ctx, 'Opening packages…');
-    await ack(ctx, 'Opening packages…');
-    await ack(ctx, 'Opening packages…');
-    await ack(ctx, 'Opening packages…');
     const u = getOrCreateUser(String(ctx.from.id));
     const rows = PRICING.map(p => [Markup.button.callback(`${p.points} Pts - ${formatUSD(p.usd)}`, `buy:${p.id}`)]);
     await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
@@ -497,8 +456,6 @@ bot.action('buy', async ctx => {
 
 bot.action(/buy:(.+)/, async ctx => {
   try {
-    await ack(ctx, 'Select currency…');
-    await ack(ctx, 'Select currency…');
     const tierId = ctx.match[1];
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Invalid tier');
@@ -512,8 +469,7 @@ bot.action(/buy:(.+)/, async ctx => {
   } catch(e) { console.error(e); }
 });
 
-bot.action('cancel', async ctx => {
-  await ack(ctx, 'Cancelled');
+bot.action('cancel', ctx => {
   ctx.deleteMessage().catch(()=>{});
   ctx.reply('Cancelled.');
 });
@@ -525,8 +481,6 @@ bot.action(/pay:(\w+):(.+)/, async ctx => {
   const tier = PRICING.find(t => t.id === tierId);
   
   try {
-    await ack(ctx, 'Creating checkout…');
-    await ack(ctx, 'Creating checkout…');
     const rate = await fetchUsdRate(curr);
     const amount = toMinorUnits(tier.usd, curr, rate);
     const origin = PUBLIC_BASE || 'https://stripe.com';
@@ -569,8 +523,6 @@ bot.action(/confirm:(.+)/, async ctx => {
   if (!stripe) return;
   
   try {
-    await ack(ctx, 'Verifying payment…');
-    await ack(ctx, 'Verifying payment…');
     const sid = (DB.pending_sessions || {})[shortId];
     if (!sid) return ctx.reply('Payment link expired or invalid.');
     
@@ -580,10 +532,12 @@ bot.action(/confirm:(.+)/, async ctx => {
       
       const uid = s.metadata.userId;
       const pts = Number(s.metadata.points);
-      adjustPoints(uid, pts, 'purchase_confirm', { session_id: sid, points: pts });
+      const u = getOrCreateUser(uid);
+      
+      u.points += pts;
       DB.purchases[sid] = true;
       saveDB();
-      ctx.reply(`Success! Added ${pts} points. Total: ${DB.users[uid].points}`);
+      ctx.reply(`Success! Added ${pts} points. Total: ${u.points}`);
     } else {
       ctx.reply('Payment not yet confirmed. Try again in a moment.');
     }
@@ -594,8 +548,7 @@ bot.command('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
   ctx.reply('Send the SWAP photo (the face you want to use).');
 });
-bot.action('faceswap', async ctx => {
-  await ack(ctx, 'Mode set: Video');
+bot.action('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
   ctx.reply('Send the SWAP photo (the face you want to use).');
 });
@@ -604,8 +557,7 @@ bot.command('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Send the SWAP photo (the face you want to use).');
 });
-bot.action('imageswap', async ctx => {
-  await ack(ctx, 'Mode set: Image');
+bot.action('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Send the SWAP photo (the face you want to use).');
 });
@@ -691,60 +643,6 @@ bot.command('debug', ctx => {
 });
 
 // --- Express App ---
-bot.on('callback_query', async (ctx) => {
-  try {
-    const d = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-    const known = (d === 'buy' || d === 'faceswap' || d === 'imageswap' || d === 'cancel' || /^buy:/.test(d) || /^pay:/.test(d) || /^confirm:/.test(d));
-    if (!known) {
-      await ack(ctx, 'Unsupported button');
-      await ctx.reply('That button is not recognized. Please use /start and try again.').catch(()=>{});
-    }
-  } catch (e) {
-    console.error('Callback fallback error', e);
-  }
-});
-
-bot.on('callback_query', async (ctx) => {
-  try {
-    const d = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-    const known = (d === 'buy' || d === 'faceswap' || d === 'imageswap' || d === 'cancel' || /^buy:/.test(d) || /^pay:/.test(d) || /^confirm:/.test(d));
-    if (!known) {
-      await ack(ctx, 'Unsupported button');
-      await ctx.reply('That button is not recognized. Please use /start and try again.').catch(()=>{});
-    }
-  } catch (e) {
-    console.error('Callback fallback error', e);
-  }
-});
-
-bot.on('callback_query', async (ctx) => {
-  try {
-    const d = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-    const known = (d === 'buy' || d === 'faceswap' || d === 'imageswap' || d === 'cancel' || /^buy:/.test(d) || /^pay:/.test(d) || /^confirm:/.test(d));
-    if (!known) {
-      await ack(ctx, 'Unsupported button');
-      await ctx.reply('That button is not recognized. Please use /start and try again.').catch(()=>{});
-    }
-  } catch (e) {
-    console.error('Callback fallback error', e);
-  }
-});
-
-bot.on('callback_query', async (ctx) => {
-  try {
-    await ack(ctx, 'Verifying payment…');
-    await ack(ctx, 'Creating checkout…');
-    const d = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-    const known = (d === 'buy' || d === 'faceswap' || d === 'imageswap' || d === 'cancel' || /^buy:/.test(d) || /^pay:/.test(d) || /^confirm:/.test(d));
-    if (!known) {
-      await ack(ctx, 'Unsupported button');
-      await ctx.reply('That button is not recognized. Please use /start and try again.').catch(()=>{});
-    }
-  } catch (e) {
-    console.error('Callback fallback error', e);
-  }
-});
-
 const app = express();
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
@@ -761,7 +659,8 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
       const pts = Number(s.metadata.points);
       
       if (!DB.purchases[s.id]) {
-        adjustPoints(uid, pts, 'purchase_webhook', { session_id: s.id, points: pts });
+        const u = getOrCreateUser(uid);
+        u.points += pts;
         DB.purchases[s.id] = true;
         saveDB();
         bot.telegram.sendMessage(uid, `Payment successful! Added ${pts} points.`).catch(()=>{});
@@ -775,22 +674,6 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
 
 // Root
 app.get('/', (req, res) => res.send('Telegram Bot Server Running'));
-
-app.get('/api/points', (req, res) => {
-  const uid = String(req.query.userId || '');
-  if (!uid) return res.status(400).json({ error: 'userId required' });
-  const u = getOrCreateUser(uid);
-  res.json({ id: u.id, points: u.points, has_recharged: !!u.has_recharged, recharge_total_points: Number(u.recharge_total_points || 0) });
-});
-
-app.get('/api/audits', (req, res) => {
-  const uid = String(req.query.userId || '');
-  if (!uid) return res.status(400).json({ error: 'userId required' });
-  const u = getOrCreateUser(uid);
-  const entries = (DB.audits && DB.audits[uid]) || [];
-  res.json({ id: u.id, points: u.points, audits: entries });
-});
-
 
 // Start
 const PORT = process.env.PORT || 3000;
