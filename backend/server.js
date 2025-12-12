@@ -105,7 +105,7 @@ function toMinorUnits(amount, currency, rate) {
 // --- Directories ---
 const uploadsDir = path.join(__dirname, 'uploads');
 const outputsDir = path.join(__dirname, 'outputs');
-const dataFile = path.join(__dirname, 'data.json');
+const dataFile = path.join(require('os').tmpdir(), 'telegram_bot_data.json'); console.log('Data File:', dataFile);
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.mkdirSync(outputsDir, { recursive: true });
