@@ -174,9 +174,10 @@ function saveDB() {
 }
 
 function getPending(uid) {
-  return (DB.pending_flows || {})[uid];
+  const res = (DB.pending_flows || {})[uid]; console.log('DEBUG: getPending', process.pid, uid, JSON.stringify(res)); return res;
 }
 function setPending(uid, val) {
+  console.log('DEBUG: setPending', process.pid, uid, JSON.stringify(val));
   if (!DB.pending_flows) DB.pending_flows = {};
   if (val) {
     DB.pending_flows[uid] = val;
@@ -579,6 +580,7 @@ bot.action('imageswap', ctx => {
 
 bot.on('photo', async ctx => {
   const uid = String(ctx.from.id);
+  console.log('DEBUG: bot.on photo', process.pid, uid);
   const p = getPending(uid);
   
   if (!p) {
@@ -618,6 +620,7 @@ bot.on('photo', async ctx => {
 
 bot.on('video', async ctx => {
   const uid = String(ctx.from.id);
+  console.log('DEBUG: bot.on photo', process.pid, uid);
   const p = getPending(uid);
   if (!p) {
     return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
