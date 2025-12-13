@@ -872,6 +872,7 @@ app.listen(PORT, async () => {
     
     if (!process.env.BOT_TOKEN) {
       console.error('CRITICAL ERROR: BOT_TOKEN is missing. The bot cannot connect to Telegram.');
+      return; // Stop startup to prevent crash loop
     }
 
     // Determine Webhook vs Polling
