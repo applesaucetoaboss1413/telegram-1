@@ -817,7 +817,24 @@ app.get('/', (req, res) => res.send('Telegram Bot Server Running'));
 // Start
 const PORT = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, async () => {
+  
+app.get('/debug-bot', async (req, res) => {
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    res.json({ 
+      status: 'ok', 
+      webhook: info, 
+      env: { 
+        hasToken: !!process.env.BOT_TOKEN, 
+        node_env: process.env.NODE_ENV,
+        public_base: process.env.PUBLIC_BASE
+      } 
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
     
     if (!process.env.BOT_TOKEN) {
@@ -826,11 +843,16 @@ if (process.env.NODE_ENV !== 'test') {
 
     // Determine Webhook vs Polling
     // If PUBLIC_BASE is set (e.g. Vercel URL), we should prefer Webhook to avoid serverless timeouts/conflicts.
+        // Determine Webhook vs Polling
+    // Only use Webhook if explicitly configured or we are clearly in a cloud env
     const WEBHOOK_PATH = '/telegram/webhook';
+    // Use TELEGRAM_WEBHOOK_URL if set. 
+    // Otherwise, use PUBLIC_BASE only if ENABLE_WEBHOOK is true (to avoid breaking local dev).
+    const shouldUseWebhook = process.env.TELEGRAM_WEBHOOK_URL || (process.env.ENABLE_WEBHOOK === 'true' && typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE);
     const PREFERRED_URL = process.env.TELEGRAM_WEBHOOK_URL || (typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE ? PUBLIC_BASE : '');
-    
-    if (PREFERRED_URL) {
-      const fullUrl = PREFERRED_URL.replace(/\/$/, '') + WEBHOOK_PATH;
+
+    if (shouldUseWebhook) {
+      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(/\/$/, '') + WEBHOOK_PATH;
       console.log(`Configuring Webhook at: ${fullUrl}`);
       
       // Mount the webhook callback on the Express app
@@ -844,9 +866,13 @@ if (process.env.NODE_ENV !== 'test') {
         console.error('FAILED to set Webhook:', e.message);
       }
     } else {
-      console.log('No public URL found. Starting in POLLING mode...');
+      console.log('Starting in POLLING mode (Webhook disabled)...');
+      // Clear webhook to ensure polling works
+      try { await bot.telegram.deleteWebhook(); } catch(e) {}
+      
       bot.launch().then(() => console.log('Bot launched via Polling')).catch(e => console.error('Bot polling launch failed', e));
     }
+
   });
 }
 
