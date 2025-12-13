@@ -602,7 +602,7 @@ bot.on('photo', async ctx => {
     }
     if (replyText.includes('Ref: img_swap:')) {
         // Step 2: Target Photo received for Image
-        const match = replyText.match(/Ref: img_swap:([\w-]+)/);
+        const match = replyText.match(/Ref: img_swap:(.+)/);
         if (match && match[1]) {
            const swapFileId = match[1];
            const swapPath = path.join(uploadsDir, `swap_${uid}_${Date.now()}.jpg`);
@@ -667,7 +667,7 @@ bot.on('video', async ctx => {
       const localPath = path.join(uploadsDir, `video_${uid}_${Date.now()}.mp4`);
       await downloadTo(link.href, localPath);
 
-      const match = replyText.match(/Ref: vid_swap:([\w-]+)/);
+      const match = replyText.match(/Ref: vid_swap:(.+)/);
       if (match && match[1]) {
          const swapFileId = match[1];
          const swapPath = path.join(uploadsDir, `swap_${uid}_${Date.now()}.jpg`);
