@@ -817,9 +817,36 @@ app.get('/', (req, res) => res.send('Telegram Bot Server Running'));
 // Start
 const PORT = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
-    bot.launch().then(() => console.log('Bot launched')).catch(e => console.error('Bot launch failed', e));
+    
+    if (!process.env.BOT_TOKEN) {
+      console.error('CRITICAL ERROR: BOT_TOKEN is missing. The bot cannot connect to Telegram.');
+    }
+
+    // Determine Webhook vs Polling
+    // If PUBLIC_BASE is set (e.g. Vercel URL), we should prefer Webhook to avoid serverless timeouts/conflicts.
+    const WEBHOOK_PATH = '/telegram/webhook';
+    const PREFERRED_URL = process.env.TELEGRAM_WEBHOOK_URL || (typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE ? PUBLIC_BASE : '');
+    
+    if (PREFERRED_URL) {
+      const fullUrl = PREFERRED_URL.replace(/\/$/, '') + WEBHOOK_PATH;
+      console.log(`Configuring Webhook at: ${fullUrl}`);
+      
+      // Mount the webhook callback on the Express app
+      app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
+      
+      // Tell Telegram to send updates to this URL
+      try {
+        await bot.telegram.setWebhook(fullUrl);
+        console.log('Webhook successfully set with Telegram.');
+      } catch (e) {
+        console.error('FAILED to set Webhook:', e.message);
+      }
+    } else {
+      console.log('No public URL found. Starting in POLLING mode...');
+      bot.launch().then(() => console.log('Bot launched via Polling')).catch(e => console.error('Bot polling launch failed', e));
+    }
   });
 }
 
