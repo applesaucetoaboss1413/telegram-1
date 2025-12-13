@@ -400,8 +400,8 @@ function pollMagicResult(requestId, chatId) {
             }
             
           } else if (status.includes('fail') || status.includes('error')) {
-            const errorMsg = j.error || j.message || j.reason || status;
-            bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Likely face detection issue or inaccessible input URLs)`).catch(()=>{});
+            const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : status);
+            bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).`).catch(()=>{});
             console.error('Swap Failed Details:', JSON.stringify(j));
             
             // Refund points on failure
