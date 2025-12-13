@@ -103,7 +103,7 @@ function toMinorUnits(amount, currency, rate) {
 }
 
 // --- Directories ---
-const uploadsDir = path.join(__dirname, 'uploads');
+const uploadsDir = require('os').tmpdir();
 const outputsDir = path.join(__dirname, 'outputs');
 const dataFile = path.join(require('os').tmpdir(), 'telegram_bot_data.json'); console.log('Data File:', dataFile);
 try {
@@ -234,12 +234,33 @@ async function downloadTo(url, dest) {
 }
 
 // --- MagicAPI Integration ---
+
+async function downloadToBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const proto = url.startsWith('https') ? https : require('http');
+    proto.get(url, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', reject);
+  });
+}
 async function getFileUrl(ctx, fileId, localPath) {
   try {
     const link = await ctx.telegram.getFileLink(fileId);
-    return link.href;
+    console.log('Downloading for Base64 conversion:', link.href);
+    const buf = await downloadToBuffer(link.href);
+    const b64 = buf.toString('base64');
+    
+    // Determine mime type (simple guess)
+    const ext = path.extname(localPath || '').toLowerCase();
+    let mime = 'image/jpeg';
+    if (ext === '.png') mime = 'image/png';
+    if (ext === '.mp4') mime = 'video/mp4';
+    
+    return `data:${mime};base64,${b64}`;
   } catch (e) {
-    console.error('Failed to get telegram link', e);
+    console.error('Failed to get file/convert to base64', e);
     return null;
   }
 }
@@ -866,6 +887,15 @@ app.post('/admin/grant-points', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+bot.command('claim_60_credits', ctx => {
+    const u = getOrCreateUser(String(ctx.from.id));
+    if (u.claimed_60) return ctx.reply('You have already claimed this compensation.');
+    u.points += 60;
+    u.claimed_60 = true;
+    saveDB();
+    ctx.reply('Success! Added 60 points to your account.');
 });
 app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
