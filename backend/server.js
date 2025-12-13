@@ -52,7 +52,6 @@ function formatCurrency(amount, currency = 'usd') {
   try {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
   } catch (e) {
-    if (PUBLIC_BASE) return `${PUBLIC_BASE}/uploads/${path.basename(localPath)}`;
     return `${currency.toUpperCase()} ${Number(amount).toFixed(2)}`;
   }
 }
@@ -235,32 +234,15 @@ async function downloadTo(url, dest) {
 
 // --- MagicAPI Integration ---
 
-async function downloadToBuffer(url) {
-  return new Promise((resolve, reject) => {
-    const proto = url.startsWith('https') ? https : require('http');
-    proto.get(url, res => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', reject);
-  });
-}
 async function getFileUrl(ctx, fileId, localPath) {
   try {
+    // ALWAYS use the direct Telegram link. 
+    // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
     const link = await ctx.telegram.getFileLink(fileId);
-    console.log('Downloading for Base64 conversion:', link.href);
-    const buf = await downloadToBuffer(link.href);
-    const b64 = buf.toString('base64');
-    
-    // Determine mime type (simple guess)
-    const ext = path.extname(localPath || '').toLowerCase();
-    let mime = 'image/jpeg';
-    if (ext === '.png') mime = 'image/png';
-    if (ext === '.mp4') mime = 'video/mp4';
-    
-    return `data:${mime};base64,${b64}`;
+    console.log('Using Telegram Link:', link.href);
+    return link.href;
   } catch (e) {
-    console.error('Failed to get file/convert to base64', e);
+    console.error('Failed to get telegram file link', e);
     return null;
   }
 }
@@ -290,9 +272,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
   const endpoint = isVideo 
     ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
     : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
-  
-  // V2 uses JSON payload structure: { input: { swap_image: ..., target_image/video: ... } }
-  // Endpoint paths are: /api/v1/magicapi/faceswap-v2/faceswap/video/run or .../image/run
   
   const payload = JSON.stringify({
     input: {
@@ -359,7 +338,7 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
 function pollMagicResult(requestId, chatId) {
   let tries = 0;
   const job = DB.pending_swaps[requestId];
-  const isVideo = job ? job.isVideo : true; // Default to true if missing, or maybe try both paths?
+  const isVideo = job ? job.isVideo : true; 
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
   
   const poll = () => {
@@ -428,7 +407,7 @@ function pollMagicResult(requestId, chatId) {
             // Refund points on failure
             if (job && job.userId) {
               const u = getOrCreateUser(job.userId);
-              const cost = job.isVideo ? 9 : 9; // Assuming 9 for both as per runFaceswap
+              const cost = job.isVideo ? 9 : 9; 
               u.points += cost;
               saveDB();
               addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
@@ -448,7 +427,6 @@ function pollMagicResult(requestId, chatId) {
       });
     });
     req.on('error', () => setTimeout(poll, 3000));
-// req.write(form); // GET request has no body
     req.end();
   };
   
@@ -457,7 +435,6 @@ function pollMagicResult(requestId, chatId) {
 }
 
 // --- RECOVERY LOGIC ---
-// Resume polling for any swaps that were left pending
 setTimeout(() => {
   const pendingIds = Object.keys(DB.pending_swaps || {});
   if (pendingIds.length > 0) {
@@ -650,7 +627,6 @@ bot.on('photo', async ctx => {
   const p = getPending(uid);
   
   if (!p) {
-    // If user sent a photo but we have no state, they likely didn't reply to the prompt.
     return ctx.reply(
       '⚠️ **Action Required**\n\nTo perform a Face Swap, you must:\n1. Select a mode below.\n2. When asked, **REPLY** to the bot\'s message with your photo.\n\n(Simply sending a photo without replying will not work).', 
       Markup.inlineKeyboard([
@@ -681,7 +657,6 @@ bot.on('photo', async ctx => {
     
     setPending(uid, null);
   } else if (p.step === 'target' && p.mode === 'faceswap') {
-    // Explicitly handle user sending photo instead of video
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
   }
 });
@@ -916,7 +891,7 @@ app.listen(PORT, async () => {
     const PREFERRED_URL = process.env.TELEGRAM_WEBHOOK_URL || (typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE ? PUBLIC_BASE : '');
 
     if (shouldUseWebhook) {
-      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(/\/$/, '') + WEBHOOK_PATH;
+      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(//$/, '') + WEBHOOK_PATH;
       console.log(`Configuring Webhook at: ${fullUrl}`);
       
       // Mount the webhook callback on the Express app
