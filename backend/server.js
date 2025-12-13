@@ -455,7 +455,7 @@ setTimeout(() => {
 // --- Bot Logic ---
 bot.command('start', ctx => {
   const u = getOrCreateUser(String(ctx.from.id));
-  ctx.reply(`Welcome! You have ${u.points} points.\nUse /faceswap to start.`, 
+  ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap to start.`, 
     Markup.inlineKeyboard([
       [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')],
       [Markup.button.callback('Buy Points', 'buy')]
@@ -570,20 +570,20 @@ bot.action(/confirm:(.+)/, async ctx => {
 
 bot.command('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
-  ctx.reply('Please Reply to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
+  ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
 });
 bot.action('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
-  ctx.reply('Please Reply to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
+  ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
 });
 
 bot.command('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
-  ctx.reply('Please Reply to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
+  ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
 });
 bot.action('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
-  ctx.reply('Please Reply to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
+  ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
 });
 
 bot.on('photo', async ctx => {
@@ -600,12 +600,12 @@ bot.on('photo', async ctx => {
 
     if (replyText.includes('for VIDEO Face Swap')) {
         // Step 1: Swap Photo received for Video
-        ctx.reply(`Received SWAP photo. Now Reply to this message with the TARGET VIDEO.\nRef: vid_swap:${fileId}`, Markup.forceReply());
+        ctx.reply(`Received SWAP photo. Now **REPLY** to this message with the TARGET VIDEO.\nRef: vid_swap:${fileId}`, Markup.forceReply());
         return;
     }
     if (replyText.includes('for IMAGE Face Swap')) {
         // Step 1: Swap Photo received for Image
-        ctx.reply(`Received SWAP photo. Now Reply to this message with the TARGET PHOTO.\nRef: img_swap:${fileId}`, Markup.forceReply());
+        ctx.reply(`Received SWAP photo. Now **REPLY** to this message with the TARGET PHOTO.\nRef: img_swap:${fileId}`, Markup.forceReply());
         return;
     }
     if (replyText.includes('Ref: img_swap:')) {
@@ -629,7 +629,9 @@ bot.on('photo', async ctx => {
   const p = getPending(uid);
   
   if (!p) {
-    return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.', 
+    // If user sent a photo but we have no state, they likely didn't reply to the prompt.
+    return ctx.reply(
+      '⚠️ **Action Required**\n\nTo perform a Face Swap, you must:\n1. Select a mode below.\n2. When asked, **REPLY** to the bot\'s message with your photo.\n\n(Simply sending a photo without replying will not work).', 
       Markup.inlineKeyboard([
         [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
       ])
