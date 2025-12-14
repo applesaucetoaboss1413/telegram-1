@@ -20,7 +20,7 @@ This project implements a Telegram bot as the primary interface, integrated with
 
 ```
 STRIPE_SECRET_KEY=sk_test_replace
-REPLICATE_API_TOKEN=replace
+MAGICAPI_KEY=replace
 BOT_TOKEN=replace
 BOT_USERNAME=replace
 PUBLIC_ORIGIN=http://localhost:3000
