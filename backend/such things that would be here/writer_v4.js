@@ -243,8 +243,23 @@ async function getFileUrl(ctx, fileId, localPath) {
     // ALWAYS use the direct Telegram link. 
     // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
     const link = await ctx.telegram.getFileLink(fileId);
-    console.log('Using Telegram Link:', link.href);
-    return link.href;
+    let url = link.href;
+
+    // MagicAPI workaround: Append extension if missing (Telegram URLs often lack it)
+    try {
+        const urlObj = new URL(url);
+        const ext = path.extname(urlObj.pathname);
+        if (!ext || ext.length < 2) {
+            const localExt = path.extname(localPath);
+            if (localExt) {
+                console.log(\`Appending extension \${localExt} to URL as query param\`);
+                url += \`?fake=image\${localExt}\`; 
+            }
+        }
+    } catch (e) { console.error('URL parse error', e); }
+
+    console.log('Using Telegram Link:', url);
+    return url;
   } catch (e) {
     console.error('Failed to get telegram file link', e);
     return null;
@@ -288,6 +303,7 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     hostname: 'api.magicapi.dev',
     path: endpoint,
     method: 'POST',
+    timeout: 30000, // 30s timeout
     headers: {
       'x-magicapi-key': key,
       'Content-Type': 'application/json',
@@ -305,6 +321,10 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
         });
       });
       r.on('error', reject);
+      r.on('timeout', () => {
+        r.destroy();
+        reject(new Error('API Request Timed Out'));
+      });
       r.write(payload);
       r.end();
     });
@@ -347,8 +367,8 @@ function pollMagicResult(requestId, chatId) {
   
   const poll = () => {
     tries++;
-    // Stop after ~3 minutes (60 tries * 3s)
-    if (tries > 60) {
+    // Stop after ~5 minutes (100 tries * 3s)
+    if (tries > 100) {
        if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
        
        if (DB.pending_swaps[requestId]) {
@@ -360,11 +380,17 @@ function pollMagicResult(requestId, chatId) {
        return;
     }
 
+    // Notify user every 30 seconds (every 10 tries)
+    if (tries % 10 === 0 && chatId) {
+        bot.telegram.sendMessage(chatId, \`Still processing... (\${tries * 3}s elapsed)\`).catch(()=>{});
+    }
+
     const typePath = isVideo ? 'video' : 'image';
     const req = https.request({
       hostname: 'api.magicapi.dev',
       path: \`/api/v1/magicapi/faceswap-v2/faceswap/\${typePath}/status/\${requestId}\`,
       method: 'GET',
+      timeout: 10000, // 10s timeout
       headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
     }, res => {
       let buf=''; res.on('data', c=>buf+=c); res.on('end', async () => {
@@ -441,6 +467,7 @@ function pollMagicResult(requestId, chatId) {
       });
     });
     req.on('error', () => setTimeout(poll, 3000));
+    req.on('timeout', () => { req.destroy(); setTimeout(poll, 3000); });
     req.end();
   };
   
