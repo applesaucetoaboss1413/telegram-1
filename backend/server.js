@@ -239,8 +239,23 @@ async function getFileUrl(ctx, fileId, localPath) {
     // ALWAYS use the direct Telegram link. 
     // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
     const link = await ctx.telegram.getFileLink(fileId);
-    console.log('Using Telegram Link:', link.href);
-    return link.href;
+    let url = link.href;
+    console.log('Using Telegram Link:', url);
+
+    // MagicAPI requires a valid extension. Append as hash if missing.
+    try {
+        const urlObj = new URL(url);
+        const ext = path.extname(urlObj.pathname);
+        if (!ext || ext.length < 2) {
+            const localExt = path.extname(localPath);
+            if (localExt) {
+                console.log(`Appending extension ${localExt} to URL as fragment`);
+                url += `#image${localExt}`; 
+            }
+        }
+    } catch (e) { console.error('URL parse error', e); }
+
+    return url;
   } catch (e) {
     console.error('Failed to get telegram file link', e);
     return null;
