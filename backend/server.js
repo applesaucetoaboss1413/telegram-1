@@ -331,7 +331,7 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
       'Content-Length': Buffer.byteLength(payload)
     }
   };
-
+  return { payload };
   try {
     const result = await new Promise((resolve, reject) => {
       const r = https.request(reqOpts, res => {
