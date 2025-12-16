@@ -1,0 +1,16 @@
+refs/heads/backup/local-main-20251207-020639
+refs/heads/deploy/main-sync
+refs/heads/main
+refs/heads/maintenance/faceswap-v2-hardening
+refs/remotes/origin/main
+refs/remotes/origin/backup/local-main-20251207-020639
+refs/remotes/origin/deploy/main-sync
+refs/remotes/origin/main
+refs/remotes/origin/maintenance/faceswap-v2-hardening
+refs/remotes/upstream/main
+refs/remotes/upstream/backup/local-main-20251207-020639
+refs/remotes/upstream/deploy/main-sync
+refs/remotes/upstream/main
+refs/remotes/upstream/maintenance/faceswap-v2-hardening
+refs/stash
+refs/tags/v0.4.1

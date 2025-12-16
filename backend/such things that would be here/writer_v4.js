@@ -105,15 +105,9 @@ function toMinorUnits(amount, currency, rate) {
 }
 
 // --- Directories ---
-<<<<<<< HEAD
 const uploadsDir = require('os').tmpdir();
 const outputsDir = path.join(__dirname, 'outputs');
 const dataFile = path.join(require('os').tmpdir(), 'telegram_bot_data.json'); console.log('Data File:', dataFile);
-=======
-const uploadsDir = path.join(__dirname, 'uploads');
-const outputsDir = path.join(__dirname, 'outputs');
-const dataFile = path.join(__dirname, 'data.json');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.mkdirSync(outputsDir, { recursive: true });
@@ -155,10 +149,6 @@ let DB = {
   purchases: {}, 
   audits: {}, 
   pending_swaps: {}, // Persistent Job Queue: requestId -> { chatId, type, startTime }
-<<<<<<< HEAD
-  api_results: {}, // Store API results: requestId -> { status, output, error }
-=======
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   channel: {}, 
   pending_sessions: {}, 
   pending_flows: {} 
@@ -186,16 +176,10 @@ function saveDB() {
 }
 
 function getPending(uid) {
-<<<<<<< HEAD
   const res = (DB.pending_flows || {})[uid]; console.log('DEBUG: getPending', process.pid, uid, JSON.stringify(res)); return res;
 }
 function setPending(uid, val) {
   console.log('DEBUG: setPending', process.pid, uid, JSON.stringify(val));
-=======
-  return (DB.pending_flows || {})[uid];
-}
-function setPending(uid, val) {
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   if (!DB.pending_flows) DB.pending_flows = {};
   if (val) {
     DB.pending_flows[uid] = val;
@@ -227,18 +211,7 @@ const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 
 bot.use(async (ctx, next) => {
-<<<<<<< HEAD
   try { console.log('update', ctx.updateType, (ctx.from && ctx.from.id)); } catch (_) {}
-=======
-  try {
-    if (ctx.updateType === 'callback_query') {
-      const data = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-      console.log('update callback_query', (ctx.from && ctx.from.id), 'data=', data.slice(0, 80), 'len=', data.length);
-    } else {
-      console.log('update', ctx.updateType, (ctx.from && ctx.from.id));
-    }
-  } catch (_) {}
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   return next();
 });
 
@@ -263,48 +236,16 @@ async function downloadTo(url, dest) {
 }
 
 // --- MagicAPI Integration ---
-<<<<<<< HEAD
 
 async function getFileUrl(ctx, fileId, localPath) {
   try {
     // ALWAYS use the direct Telegram link. 
     // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
     const link = await ctx.telegram.getFileLink(fileId);
-    let url = link.href;
-
-    // MagicAPI workaround: Append extension if missing (Telegram URLs often lack it)
-    try {
-        const urlObj = new URL(url);
-        const ext = path.extname(urlObj.pathname);
-        if (!ext || ext.length < 2) {
-            const localExt = path.extname(localPath);
-            if (localExt) {
-                console.log(\`Appending extension \${localExt} to URL as query param\`);
-                url += \`?fake=image\${localExt}\`; 
-            }
-        }
-    } catch (e) { console.error('URL parse error', e); }
-
-    console.log('Using Telegram Link:', url);
-    return url;
-  } catch (e) {
-    console.error('Failed to get telegram file link', e);
-=======
-function ack(ctx, text) {
-  if (ctx && ctx.updateType === 'callback_query') {
-    return ctx.answerCbQuery(text || 'Processing…').catch(() => {});
-  }
-}
-
-// --- MagicAPI Integration ---
-async function getFileUrl(ctx, fileId, localPath) {
-  if (PUBLIC_BASE) return \`\${PUBLIC_BASE}/uploads/\${path.basename(localPath)}\`;
-  try {
-    const link = await ctx.telegram.getFileLink(fileId);
+    console.log('Using Telegram Link:', link.href);
     return link.href;
   } catch (e) {
-    console.error('Failed to get telegram link', e);
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
+    console.error('Failed to get telegram file link', e);
     return null;
   }
 }
@@ -332,7 +273,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
   if (!key) return { error: 'Server config error', points: user.points };
 
   const endpoint = isVideo 
-<<<<<<< HEAD
     ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
     : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
   
@@ -343,28 +283,14 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     }
   });
 
-=======
-    ? '/api/v1/capix/faceswap/faceswap/v1/video'
-    : '/api/v1/capix/faceswap/faceswap/v1/image';
-  
-  const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   const reqOpts = {
     hostname: 'api.magicapi.dev',
     path: endpoint,
     method: 'POST',
-<<<<<<< HEAD
-    timeout: 30000, // 30s timeout
     headers: {
       'x-magicapi-key': key,
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(payload)
-=======
-    headers: {
-      'x-magicapi-key': key,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Content-Length': Buffer.byteLength(form)
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     }
   };
 
@@ -378,15 +304,7 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
         });
       });
       r.on('error', reject);
-<<<<<<< HEAD
-      r.on('timeout', () => {
-        r.destroy();
-        reject(new Error('API Request Timed Out'));
-      });
       r.write(payload);
-=======
-      r.write(form);
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
       r.end();
     });
 
@@ -422,41 +340,22 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
 
 function pollMagicResult(requestId, chatId) {
   let tries = 0;
-<<<<<<< HEAD
   const job = DB.pending_swaps[requestId];
   const isVideo = job ? job.isVideo : true; 
-=======
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
   
   const poll = () => {
     tries++;
-<<<<<<< HEAD
-    // Stop after ~5 minutes (100 tries * 3s)
-    if (tries > 100) {
-       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
-       
-       if (DB.pending_swaps[requestId]) {
-          if (!DB.api_results) DB.api_results = {};
-          DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
-=======
     // Stop after ~3 minutes (60 tries * 3s)
     if (tries > 60) {
        bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
        
        // Cleanup DB
        if (DB.pending_swaps[requestId]) {
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
           delete DB.pending_swaps[requestId];
           saveDB();
        }
        return;
-    }
-
-<<<<<<< HEAD
-    // Notify user every 30 seconds (every 10 tries)
-    if (tries % 10 === 0 && chatId) {
-        bot.telegram.sendMessage(chatId, \`Still processing... (\${tries * 3}s elapsed)\`).catch(()=>{});
     }
 
     const typePath = isVideo ? 'video' : 'image';
@@ -464,23 +363,13 @@ function pollMagicResult(requestId, chatId) {
       hostname: 'api.magicapi.dev',
       path: \`/api/v1/magicapi/faceswap-v2/faceswap/\${typePath}/status/\${requestId}\`,
       method: 'GET',
-      timeout: 10000, // 10s timeout
       headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
-=======
-    const form = querystring.stringify({ request_id: requestId });
-    const req = https.request({
-      hostname: 'api.magicapi.dev',
-      path: '/api/v1/capix/faceswap/result/',
-      method: 'POST',
-      headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(form) }
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     }, res => {
       let buf=''; res.on('data', c=>buf+=c); res.on('end', async () => {
         try {
           const j = JSON.parse(buf);
           const status = (j.status || j.state || '').toLowerCase();
           
-<<<<<<< HEAD
           if (status.includes('success') || status.includes('done') || status.includes('completed')) {
             // Extract output URL or Base64 (handle object output for video V2)
             let outData = j.output || j.result || j.url || j.image_url || j.video_url;
@@ -500,30 +389,11 @@ function pollMagicResult(requestId, chatId) {
               } else {
                 await downloadTo(finalUrl, dest);
               }
-              
-              const filename = path.basename(dest);
-              if (!DB.api_results) DB.api_results = {};
-              DB.api_results[requestId] = { status: 'success', output: filename, url: \`\${PUBLIC_BASE}/outputs/\${filename}\` };
 
-              if (chatId) {
-                if (dest.endsWith('mp4')) await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) });
-                else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
-              }
-            } else {
-               if (chatId) bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
-=======
-          if (status.includes('success') || status.includes('done')) {
-            const outUrl = j.output || j.result || j.url || j.image_url || j.video_url;
-            const finalUrl = Array.isArray(outUrl) ? outUrl[outUrl.length-1] : outUrl;
-            
-            if (finalUrl) {
-              const dest = path.join(outputsDir, \`result_\${Date.now()}.\${finalUrl.split('.').pop() || 'dat'}\`);
-              await downloadTo(finalUrl, dest);
               if (dest.endsWith('mp4')) await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) });
               else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
             } else {
                bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
             }
             
             // Cleanup on success
@@ -533,13 +403,9 @@ function pollMagicResult(requestId, chatId) {
             }
             
           } else if (status.includes('fail') || status.includes('error')) {
-<<<<<<< HEAD
             const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : status);
-            if (chatId) bot.telegram.sendMessage(chatId, \`Task failed: \${errorMsg}. (Refunded).\`).catch(()=>{});
+            bot.telegram.sendMessage(chatId, \`Task failed: \${errorMsg}. (Refunded).\`).catch(()=>{});
             console.error('Swap Failed Details:', JSON.stringify(j));
-            
-            if (!DB.api_results) DB.api_results = {};
-            DB.api_results[requestId] = { status: 'failed', error: errorMsg };
             
             // Refund points on failure
             if (job && job.userId) {
@@ -548,13 +414,8 @@ function pollMagicResult(requestId, chatId) {
               u.points += cost;
               saveDB();
               addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
-              if (chatId) bot.telegram.sendMessage(chatId, \`Refunded \${cost} points due to failure.\`).catch(()=>{});
+              bot.telegram.sendMessage(chatId, \`Refunded \${cost} points due to failure.\`).catch(()=>{});
             }
-=======
-            bot.telegram.sendMessage(chatId, \`Task failed: \${j.error || status}\`).catch(()=>{});
-            
-            // Refund points? (Optional, skipping for now to avoid abuse, or implement automated refund)
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
             // Cleanup on fail
             if (DB.pending_swaps[requestId]) {
               delete DB.pending_swaps[requestId];
@@ -569,11 +430,6 @@ function pollMagicResult(requestId, chatId) {
       });
     });
     req.on('error', () => setTimeout(poll, 3000));
-<<<<<<< HEAD
-    req.on('timeout', () => { req.destroy(); setTimeout(poll, 3000); });
-=======
-    req.write(form);
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     req.end();
   };
   
@@ -582,10 +438,6 @@ function pollMagicResult(requestId, chatId) {
 }
 
 // --- RECOVERY LOGIC ---
-<<<<<<< HEAD
-=======
-// Resume polling for any swaps that were left pending
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 setTimeout(() => {
   const pendingIds = Object.keys(DB.pending_swaps || {});
   if (pendingIds.length > 0) {
@@ -604,11 +456,7 @@ setTimeout(() => {
 // --- Bot Logic ---
 bot.command('start', ctx => {
   const u = getOrCreateUser(String(ctx.from.id));
-<<<<<<< HEAD
   ctx.reply(\`Welcome! (ID: \${u.id}) You have \${u.points} points.\\nUse /faceswap to start.\`, 
-=======
-  ctx.reply('Welcome! You have ' + u.points + ' points.\nUse /faceswap to start.', 
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     Markup.inlineKeyboard([
       [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')],
       [Markup.button.callback('Buy Points', 'buy')]
@@ -616,19 +464,6 @@ bot.command('start', ctx => {
   );
 });
 
-<<<<<<< HEAD
-=======
-// Expose commands for better accessibility
-bot.telegram.setMyCommands([
-  { command: 'start', description: 'Start the bot' },
-  { command: 'status', description: 'System status' },
-  { command: 'faceswap', description: 'Video face swap' },
-  { command: 'imageswap', description: 'Image face swap' },
-  { command: 'reset', description: 'Reset state' },
-  { command: 'debug', description: 'Show current state' }
-]).catch(() => {});
-
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 bot.command('status', ctx => {
   const pending = Object.keys(DB.pending_swaps || {}).length;
   const uptime = process.uptime();
@@ -638,24 +473,14 @@ bot.command('status', ctx => {
 
 bot.action('buy', async ctx => {
   try {
-<<<<<<< HEAD
     const u = getOrCreateUser(String(ctx.from.id));
     const rows = PRICING.map(p => [Markup.button.callback(\`\${p.points} Pts - \${formatUSD(p.usd)}\`, \`buy:\${p.id}\`)]);
-=======
-    ack(ctx, 'Opening packages…');
-    const u = getOrCreateUser(String(ctx.from.id));
-    const rows = PRICING.map(p => [Markup.button.callback(`${p.points} Pts - ${formatUSD(p.usd)}`, `buy:${p.id}`)]);
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     await ctx.reply('Select a package:', Markup.inlineKeyboard(rows));
   } catch(e) { console.error(e); }
 });
 
 bot.action(/buy:(.+)/, async ctx => {
   try {
-<<<<<<< HEAD
-=======
-    ack(ctx, 'Select currency…');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     const tierId = ctx.match[1];
     const tier = PRICING.find(t => t.id === tierId);
     if (!tier) return ctx.reply('Invalid tier');
@@ -670,10 +495,6 @@ bot.action(/buy:(.+)/, async ctx => {
 });
 
 bot.action('cancel', ctx => {
-<<<<<<< HEAD
-=======
-  ack(ctx, 'Cancelled');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   ctx.deleteMessage().catch(()=>{});
   ctx.reply('Cancelled.');
 });
@@ -685,10 +506,6 @@ bot.action(/pay:(\\w+):(.+)/, async ctx => {
   const tier = PRICING.find(t => t.id === tierId);
   
   try {
-<<<<<<< HEAD
-=======
-    ack(ctx, 'Creating checkout…');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     const rate = await fetchUsdRate(curr);
     const amount = toMinorUnits(tier.usd, curr, rate);
     const origin = PUBLIC_BASE || 'https://stripe.com';
@@ -731,10 +548,6 @@ bot.action(/confirm:(.+)/, async ctx => {
   if (!stripe) return;
   
   try {
-<<<<<<< HEAD
-=======
-    ack(ctx, 'Verifying payment…');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     const sid = (DB.pending_sessions || {})[shortId];
     if (!sid) return ctx.reply('Payment link expired or invalid.');
     
@@ -758,60 +571,24 @@ bot.action(/confirm:(.+)/, async ctx => {
 
 bot.command('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
-<<<<<<< HEAD
   ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
 });
 bot.action('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
   ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
-=======
-  ctx.reply('Send the SWAP photo (the face you want to use).');
-});
-bot.action('faceswap', ctx => {
-  ack(ctx, 'Mode set: Video');
-  setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
-  ctx.reply('Send the SWAP photo (the face you want to use).');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 });
 
 bot.command('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
-<<<<<<< HEAD
   ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
 });
 bot.action('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
-=======
-  ctx.reply('Send the SWAP photo (the face you want to use).');
-});
-bot.action('imageswap', ctx => {
-  ack(ctx, 'Mode set: Image');
-  setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
-  ctx.reply('Send the SWAP photo (the face you want to use).');
-});
-
-// Fallback for unknown/invalid callback data to avoid unresponsive buttons
-bot.on('callback_query', async (ctx) => {
-  try {
-    const data = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-    const known = (
-      data === 'buy' || data === 'faceswap' || data === 'imageswap' || data === 'cancel' ||
-      /^buy:/.test(data) || /^pay:/.test(data) || /^confirm:/.test(data)
-    );
-    if (!known) {
-      await ack(ctx, 'Unsupported button');
-      await ctx.reply('That button is not recognized. Please use /start and try again.').catch(()=>{});
-    }
-  } catch (e) {
-    console.error('Callback fallback error', e);
-  }
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 });
 
 bot.on('photo', async ctx => {
   const uid = String(ctx.from.id);
-<<<<<<< HEAD
   console.log('DEBUG: bot.on photo', process.pid, uid);
   
   // --- STATELESS FLOW CHECK ---
@@ -855,12 +632,6 @@ bot.on('photo', async ctx => {
   if (!p) {
     return ctx.reply(
       '⚠️ **Action Required**\\n\\nTo perform a Face Swap, you must:\\n1. Select a mode below.\\n2. When asked, **REPLY** to the bot\\'s message with your photo.\\n\\n(Simply sending a photo without replying will not work).', 
-=======
-  const p = getPending(uid);
-  
-  if (!p) {
-    return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.', 
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
       Markup.inlineKeyboard([
         [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
       ])
@@ -889,17 +660,12 @@ bot.on('photo', async ctx => {
     
     setPending(uid, null);
   } else if (p.step === 'target' && p.mode === 'faceswap') {
-<<<<<<< HEAD
-=======
-    // Explicitly handle user sending photo instead of video
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
   }
 });
 
 bot.on('video', async ctx => {
   const uid = String(ctx.from.id);
-<<<<<<< HEAD
   console.log('DEBUG: bot.on video', process.pid, uid);
   
   // --- STATELESS FLOW CHECK ---
@@ -925,8 +691,6 @@ bot.on('video', async ctx => {
       }
   }
   // --- END STATELESS FLOW ---
-=======
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   const p = getPending(uid);
   if (!p) {
     return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
@@ -996,7 +760,6 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
   }
 });
 
-<<<<<<< HEAD
 
 // Test-friendly endpoints
 app.get('/healthz', (req, res) => {
@@ -1046,117 +809,22 @@ app.post('/confirm-point-session', async (req, res) => {
 });
 
 const upload = multer();
-app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'target', maxCount: 1 }]), async (req, res) => {
+app.post('/faceswap', upload.single('photo'), (req, res) => {
   try {
     const userId = req.body && req.body.userId;
+    if (!req.file) return res.status(400).json({ error: 'photo required' });
     if (!userId) return res.status(400).json({ error: 'user required' });
-    
-    // Check files
-    const swapFile = req.files && req.files['swap'] ? req.files['swap'][0] : null;
-    const targetFile = req.files && req.files['target'] ? req.files['target'][0] : null;
-    
-    if (!swapFile || !targetFile) return res.status(400).json({ error: 'swap and target files required' });
-    
-    // Save files
-    const swapPath = path.join(uploadsDir, \`swap_\${userId}_\${Date.now()}.\${swapFile.originalname.split('.').pop()}\`);
-    const targetPath = path.join(uploadsDir, \`target_\${userId}_\${Date.now()}.\${targetFile.originalname.split('.').pop()}\`);
-    
-    fs.writeFileSync(swapPath, swapFile.buffer);
-    fs.writeFileSync(targetPath, targetFile.buffer);
-    
-    const isVideo = targetFile.mimetype.startsWith('video');
-    const u = getOrCreateUser(userId);
-    
-    const cost = isVideo ? 9 : 9;
-    if ((u.points || 0) < cost) return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
-    
-    u.points -= cost;
-    saveDB();
-    addAudit(u.id, -cost, 'faceswap_api', { isVideo });
-    
-    const swapUrl = \`\${PUBLIC_BASE}/uploads/\${path.basename(swapPath)}\`;
-    const targetUrl = \`\${PUBLIC_BASE}/uploads/\${path.basename(targetPath)}\`;
-    
-    // Call MagicAPI
-    const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
-    const endpoint = isVideo 
-      ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
-      : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
-      
-    const payload = JSON.stringify({
-      input: {
-        swap_image: swapUrl,
-        [isVideo ? 'target_video' : 'target_image']: targetUrl
-      }
-    });
-    
-    const reqOpts = {
-      hostname: 'api.magicapi.dev',
-      path: endpoint,
-      method: 'POST',
-      headers: {
-        'x-magicapi-key': key,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    };
-    
-    const result = await new Promise((resolve, reject) => {
-      const r = https.request(reqOpts, res => {
-        let buf = ''; res.on('data', c => buf+=c);
-        res.on('end', () => { try { resolve(JSON.parse(buf)); } catch(e) { reject(e); } });
-      });
-      r.on('error', reject);
-      r.write(payload);
-      r.end();
-    });
-    
-    const requestId = result && (result.request_id || result.requestId || result.id);
-    if (!requestId) {
-        // Refund
-        u.points += cost;
-        saveDB();
-        return res.status(500).json({ error: 'API Error', details: result });
-    }
-    
-    if (!DB.pending_swaps) DB.pending_swaps = {};
-    DB.pending_swaps[requestId] = {
-      userId: u.id,
-      startTime: Date.now(),
-      isVideo: isVideo,
-      status: 'processing',
-      isApi: true
-    };
-    saveDB();
-    
-    pollMagicResult(requestId, null); // Start polling without chatId
-    
-    res.json({ ok: true, requestId, message: 'Job started. Poll status at /faceswap/status/' + requestId });
-    
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get('/faceswap/status/:requestId', (req, res) => {
-    const rid = req.params.requestId;
-    if (DB.pending_swaps[rid]) {
-        return res.json({ status: 'processing' });
-    }
-    if (DB.api_results && DB.api_results[rid]) {
-        return res.json(DB.api_results[rid]);
-    }
-    res.status(404).json({ error: 'Job not found or expired' });
-});
-
-=======
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 // Root
 app.get('/', (req, res) => res.send('Telegram Bot Server Running'));
 
 // Start
 const PORT = process.env.PORT || 3000;
-<<<<<<< HEAD
 if (process.env.NODE_ENV !== 'test') {
   
 app.get('/debug-bot', async (req, res) => {
@@ -1226,7 +894,7 @@ app.listen(PORT, async () => {
     const PREFERRED_URL = process.env.TELEGRAM_WEBHOOK_URL || (typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE ? PUBLIC_BASE : '');
 
     if (shouldUseWebhook) {
-      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(/\\/$/, '') + WEBHOOK_PATH;
+      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(/\/$/, '') + WEBHOOK_PATH;
       console.log(\`Configuring Webhook at: \${fullUrl}\`);
       
       // Mount the webhook callback on the Express app
@@ -1252,13 +920,6 @@ app.listen(PORT, async () => {
 
 module.exports = { app };
 
-=======
-app.listen(PORT, () => {
-  console.log(\`Server running on port \${PORT}\`);
-  bot.launch().then(() => console.log('Bot launched')).catch(e => console.error('Bot launch failed', e));
-});
-
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 `;

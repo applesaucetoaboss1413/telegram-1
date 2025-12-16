@@ -1,6 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 if (process.env.NODE_ENV !== 'test') {
-  console.log('Server script started (V5 - Cleanup & Stability)');
+  console.log('Server script started (V4)');
   console.log('Deploy tick', Date.now());
 }
 
@@ -17,7 +17,6 @@ process.on('unhandledRejection', (reason, promise) => {
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
@@ -30,61 +29,16 @@ if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 if (ffprobePath && ffprobePath.path) ffmpeg.setFfprobePath(ffprobePath.path);
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-<<<<<<< HEAD
 let stripe = global.__stripe || null;
 if (!stripe) {
   if (stripeSecretKey) {
     stripe = require('stripe')(stripeSecretKey);
   } else {
     try { console.warn('Missing STRIPE_SECRET_KEY. Stripe payments disabled.'); } catch (_) {}
-=======
-let stripe = null;
-if (stripeSecretKey) {
-  stripe = require('stripe')(stripeSecretKey);
-} else {
-  try { console.warn('Missing STRIPE_SECRET_KEY. Stripe payments disabled until configured.'); } catch (_) {}
-}
-console.log('Env', { BOT_TOKEN: !!process.env.BOT_TOKEN, PUBLIC_URL: !!process.env.PUBLIC_URL, PUBLIC_ORIGIN: !!process.env.PUBLIC_ORIGIN, CHANNEL_ID: process.env.CHANNEL_ID ? process.env.CHANNEL_ID : '' });
-
-const app = express();
-// Short ID mapping to satisfy Telegram callback data limit
-const pendingSessions = {};
-
-// Short ID mapping to satisfy Telegram callback data limit
-const pendingSessions = {};
-
-const uploadsDir = path.join(__dirname, 'uploads');
-const outputsDir = path.join(__dirname, 'outputs');
-const dataFile = path.join(__dirname, 'data.json');
-let PRICING = [
-  { id: 'p60', points: 60, usd: 3.09, stars: 150, tierBonus: 0.0 },
-  { id: 'p120', points: 120, usd: 5.09, stars: 250, tierBonus: 0.02 },
-  { id: 'p300', points: 300, usd: 9.99, stars: 500, tierBonus: 0.05 },
-  { id: 'p800', points: 800, usd: 19.99, stars: 1000, tierBonus: 0.08 },
-  { id: 'p1500', points: 1500, usd: 29.99, stars: 1500, tierBonus: 0.10 },
-  { id: 'p7500', points: 7500, usd: 99.0, stars: 5000, tierBonus: 0.12 },
-];
-
-try {
-  const pricingFile = path.join(__dirname, 'pricing.json');
-  const raw = fs.readFileSync(pricingFile, 'utf8');
-  const parsed = JSON.parse(raw);
-  if (Array.isArray(parsed) && parsed.length) {
-    PRICING = parsed
-      .filter(x => x && x.id && typeof x.points === 'number' && typeof x.usd === 'number')
-      .map(x => ({ id: String(x.id), points: Number(x.points), usd: Number(x.usd), stars: Number(x.stars || 0), tierBonus: Number(x.tierBonus || 0) }));
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
   }
 }
 
 // --- Constants & Helpers ---
-function cleanupFiles(paths) {
-  if (!Array.isArray(paths)) return;
-  paths.forEach(p => {
-    try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch(e) { console.error('Cleanup error', e); }
-  });
-}
-
 const SUPPORTED_CURRENCIES = ['usd','eur','gbp','cad','aud','jpy','cny','inr','brl','mxn'];
 const CURRENCY_DECIMALS = { usd: 2, eur: 2, gbp: 2, cad: 2, aud: 2, jpy: 0, cny: 2, inr: 2, brl: 2, rub: 2, mxn: 2 };
 
@@ -148,11 +102,9 @@ function toMinorUnits(amount, currency, rate) {
 }
 
 // --- Directories ---
-// Use os.tmpdir() for both uploads and outputs to ensure write access in serverless/readonly envs
 const uploadsDir = require('os').tmpdir();
-const outputsDir = path.join(require('os').tmpdir(), 'outputs');
-const dataFile = path.join(require('os').tmpdir(), 'telegram_bot_data.json'); 
-console.log('Data File:', dataFile);
+const outputsDir = path.join(__dirname, 'outputs');
+const dataFile = path.join(require('os').tmpdir(), 'telegram_bot_data.json'); console.log('Data File:', dataFile);
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.mkdirSync(outputsDir, { recursive: true });
@@ -194,7 +146,6 @@ let DB = {
   purchases: {}, 
   audits: {}, 
   pending_swaps: {}, // Persistent Job Queue: requestId -> { chatId, type, startTime }
-  api_results: {}, // Store API results: requestId -> { status, output, error }
   channel: {}, 
   pending_sessions: {}, 
   pending_flows: {} 
@@ -288,45 +239,19 @@ async function getFileUrl(ctx, fileId, localPath) {
     // ALWAYS use the direct Telegram link. 
     // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
     const link = await ctx.telegram.getFileLink(fileId);
-    let url = link.href;
-
-    // MagicAPI workaround: Append extension if missing (Telegram URLs often lack it)
-    try {
-        const urlObj = new URL(url);
-        const ext = path.extname(urlObj.pathname);
-        if (!ext || ext.length < 2) {
-            const localExt = path.extname(localPath);
-            if (localExt) {
-                console.log(`Appending extension ${localExt} to URL as fragment`);
-                // Use Fragment to avoid breaking download while hinting extension to API
-                url += `#image${localExt}`; 
-            }
-        }
-    } catch (e) { console.error('URL parse error', e); }
-
-    console.log('Using Telegram Link:', url);
-    return url;
+    console.log('Using Telegram Link:', link.href);
+    return link.href;
   } catch (e) {
     console.error('Failed to get telegram file link', e);
     return null;
   }
 }
 
-async function ack(ctx, text) {
-  if (ctx && ctx.updateType === 'callback_query') {
-    try { await ctx.answerCbQuery(text || 'Processing…'); } catch (_) {}
-  }
-}
-
-
 async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 9 : 9;
   const user = DB.users[u.id];
   
-  if ((user.points || 0) < cost) {
-      cleanupFiles([swapPath, targetPath]);
-      return { error: 'not enough points', required: cost, points: user.points };
-  }
+  if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
   
   user.points -= cost;
   saveDB();
@@ -338,15 +263,11 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
   if (!swapUrl || !targetUrl) {
     user.points += cost;
     saveDB();
-    cleanupFiles([swapPath, targetPath]);
     return { error: 'Failed to generate file URLs.', points: user.points };
   }
 
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
-  if (!key) {
-      cleanupFiles([swapPath, targetPath]);
-      return { error: 'Server config error', points: user.points };
-  }
+  if (!key) return { error: 'Server config error', points: user.points };
 
   const endpoint = isVideo 
     ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
@@ -363,7 +284,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     hostname: 'api.magicapi.dev',
     path: endpoint,
     method: 'POST',
-    timeout: 30000, // 30s timeout
     headers: {
       'x-magicapi-key': key,
       'Content-Type': 'application/json',
@@ -381,10 +301,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
         });
       });
       r.on('error', reject);
-      r.on('timeout', () => {
-        r.destroy();
-        reject(new Error('API Request Timed Out'));
-      });
       r.write(payload);
       r.end();
     });
@@ -394,7 +310,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
       user.points += cost;
       saveDB();
       console.error('MagicAPI Error', result);
-      cleanupFiles([swapPath, targetPath]);
       return { error: 'API Error: ' + (result.message || JSON.stringify(result)), points: user.points };
     }
 
@@ -409,10 +324,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     };
     saveDB();
     // --- PERSISTENCE END ---
-    
-    // We can clean up input files now because API should have downloaded them?
-    // MagicAPI downloads immediately. So yes, safe to clean up inputs.
-    cleanupFiles([swapPath, targetPath]);
 
     pollMagicResult(requestId, ctx.chat.id);
     return { started: true, points: user.points, requestId };
@@ -420,7 +331,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
   } catch (e) {
     user.points += cost;
     saveDB();
-    cleanupFiles([swapPath, targetPath]);
     return { error: 'Network Error: ' + e.message, points: user.points };
   }
 }
@@ -433,22 +343,16 @@ function pollMagicResult(requestId, chatId) {
   
   const poll = () => {
     tries++;
-    // Stop after ~5 minutes (100 tries * 3s)
-    if (tries > 100) {
-       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
+    // Stop after ~3 minutes (60 tries * 3s)
+    if (tries > 60) {
+       bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
        
+       // Cleanup DB
        if (DB.pending_swaps[requestId]) {
-          if (!DB.api_results) DB.api_results = {};
-          DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
           delete DB.pending_swaps[requestId];
           saveDB();
        }
        return;
-    }
-
-    // Notify user every 30 seconds (every 10 tries)
-    if (tries % 10 === 0 && chatId) {
-        bot.telegram.sendMessage(chatId, `Still processing... (${tries * 3}s elapsed)`).catch(()=>{});
     }
 
     const typePath = isVideo ? 'video' : 'image';
@@ -456,7 +360,6 @@ function pollMagicResult(requestId, chatId) {
       hostname: 'api.magicapi.dev',
       path: `/api/v1/magicapi/faceswap-v2/faceswap/${typePath}/status/${requestId}`,
       method: 'GET',
-      timeout: 10000, // 10s timeout
       headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
     }, res => {
       let buf=''; res.on('data', c=>buf+=c); res.on('end', async () => {
@@ -483,20 +386,11 @@ function pollMagicResult(requestId, chatId) {
               } else {
                 await downloadTo(finalUrl, dest);
               }
-              
-              const filename = path.basename(dest);
-              if (!DB.api_results) DB.api_results = {};
-              DB.api_results[requestId] = { status: 'success', output: filename, url: `${PUBLIC_BASE}/outputs/${filename}` };
 
-              if (chatId) {
-                if (dest.endsWith('mp4')) await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) });
-                else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
-              }
-              
-              // Cleanup output file after sending (delay slightly to ensure send completes)
-              setTimeout(() => cleanupFiles([dest]), 10000); // 10s delay
+              if (dest.endsWith('mp4')) await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) });
+              else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
             } else {
-               if (chatId) bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
+               bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
             }
             
             // Cleanup on success
@@ -506,13 +400,9 @@ function pollMagicResult(requestId, chatId) {
             }
             
           } else if (status.includes('fail') || status.includes('error')) {
-            const rawError = JSON.stringify(j);
-            const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : `Status: ${status}`);
-            if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).\nDebug: ${rawError.substring(0, 200)}`).catch(()=>{});
-            console.error('Swap Failed Details:', rawError);
-            
-            if (!DB.api_results) DB.api_results = {};
-            DB.api_results[requestId] = { status: 'failed', error: errorMsg };
+            const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : status);
+            bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).`).catch(()=>{});
+            console.error('Swap Failed Details:', JSON.stringify(j));
             
             // Refund points on failure
             if (job && job.userId) {
@@ -521,7 +411,7 @@ function pollMagicResult(requestId, chatId) {
               u.points += cost;
               saveDB();
               addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
-              if (chatId) bot.telegram.sendMessage(chatId, `Refunded ${cost} points due to failure.`).catch(()=>{});
+              bot.telegram.sendMessage(chatId, `Refunded ${cost} points due to failure.`).catch(()=>{});
             }
             // Cleanup on fail
             if (DB.pending_swaps[requestId]) {
@@ -537,7 +427,6 @@ function pollMagicResult(requestId, chatId) {
       });
     });
     req.on('error', () => setTimeout(poll, 3000));
-    req.on('timeout', () => { req.destroy(); setTimeout(poll, 3000); });
     req.end();
   };
   
@@ -769,7 +658,6 @@ bot.on('photo', async ctx => {
     setPending(uid, null);
   } else if (p.step === 'target' && p.mode === 'faceswap') {
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
-    cleanupFiles([localPath]); // Not used, so delete
   }
 });
 
@@ -840,19 +728,6 @@ bot.command('debug', ctx => {
 });
 
 // --- Express App ---
-bot.on('callback_query', async (ctx) => {
-  try {
-    const d = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
-    const known = (d === 'buy' || d === 'faceswap' || d === 'imageswap' || d === 'cancel' || /^buy:/.test(d) || /^pay:/.test(d) || /^confirm:/.test(d));
-    if (!known) {
-      await ack(ctx, 'Unsupported button');
-      await ctx.reply('That button is not recognized. Please use /start and try again.').catch(()=>{});
-    }
-  } catch (e) {
-    console.error('Callback fallback error', e);
-  }
-});
-
 const app = express();
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
@@ -931,647 +806,15 @@ app.post('/confirm-point-session', async (req, res) => {
 });
 
 const upload = multer();
-app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'target', maxCount: 1 }]), async (req, res) => {
+app.post('/faceswap', upload.single('photo'), (req, res) => {
   try {
     const userId = req.body && req.body.userId;
+    if (!req.file) return res.status(400).json({ error: 'photo required' });
     if (!userId) return res.status(400).json({ error: 'user required' });
-    
-    // Check files
-    const swapFile = req.files && req.files['swap'] ? req.files['swap'][0] : null;
-    const targetFile = req.files && req.files['target'] ? req.files['target'][0] : null;
-    
-    if (!swapFile || !targetFile) return res.status(400).json({ error: 'swap and target files required' });
-    
-    // Save files
-    const swapPath = path.join(uploadsDir, `swap_${userId}_${Date.now()}.${swapFile.originalname.split('.').pop()}`);
-    const targetPath = path.join(uploadsDir, `target_${userId}_${Date.now()}.${targetFile.originalname.split('.').pop()}`);
-    
-    fs.writeFileSync(swapPath, swapFile.buffer);
-    fs.writeFileSync(targetPath, targetFile.buffer);
-    
-    const isVideo = targetFile.mimetype.startsWith('video');
-    const u = getOrCreateUser(userId);
-    
-    const cost = isVideo ? 9 : 9;
-    if ((u.points || 0) < cost) {
-         cleanupFiles([swapPath, targetPath]);
-         return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
-    }
-    
-    u.points -= cost;
-    saveDB();
-    addAudit(u.id, -cost, 'faceswap_api', { isVideo });
-    
-    const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(swapPath)}`;
-    const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(targetPath)}`;
-    
-    // Call MagicAPI
-    const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
-    const endpoint = isVideo 
-      ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
-      : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
-      
-    const payload = JSON.stringify({
-      input: {
-        swap_image: swapUrl,
-        [isVideo ? 'target_video' : 'target_image']: targetUrl
-      }
-    });
-    
-    const reqOpts = {
-      hostname: 'api.magicapi.dev',
-      path: endpoint,
-      method: 'POST',
-      headers: {
-        'x-magicapi-key': key,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    };
-<<<<<<< HEAD
-    
-    const result = await new Promise((resolve, reject) => {
-      const r = https.request(reqOpts, res => {
-        let buf = ''; res.on('data', c => buf+=c);
-        res.on('end', () => { try { resolve(JSON.parse(buf)); } catch(e) { reject(e); } });
-      });
-      r.on('error', reject);
-      r.write(payload);
-      r.end();
-    });
-    
-    const requestId = result && (result.request_id || result.requestId || result.id);
-    if (!requestId) {
-        // Refund
-        u.points += cost;
-        saveDB();
-        cleanupFiles([swapPath, targetPath]);
-        return res.status(500).json({ error: 'API Error', details: result });
-    }
-    
-    if (!DB.pending_swaps) DB.pending_swaps = {};
-    DB.pending_swaps[requestId] = {
-      userId: u.id,
-      startTime: Date.now(),
-      isVideo: isVideo,
-      status: 'processing',
-      isApi: true
-    };
-    saveDB();
-    cleanupFiles([swapPath, targetPath]);
-    
-    pollMagicResult(requestId, null); // Start polling without chatId
-    
-    res.json({ ok: true, requestId, message: 'Job started. Poll status at /faceswap/status/' + requestId });
-    
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-app.get('/faceswap/status/:requestId', (req, res) => {
-    const rid = req.params.requestId;
-    if (DB.pending_swaps[rid]) {
-        return res.json({ status: 'processing' });
-    }
-    if (DB.api_results && DB.api_results[rid]) {
-        return res.json(DB.api_results[rid]);
-=======
-    data.users[id] = u;
-    saveData(data);
-  }
-  if (fields) {
-    Object.assign(u, fields);
-    saveData(data);
-  }
-  return u;
-}
-
-async function downloadTo(url, dest) {
-  const proto = url.startsWith('https') ? require('https') : require('http');
-  await new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    proto.get(url, res => {
-      res.pipe(file);
-      file.on('finish', () => file.close(resolve));
-    }).on('error', err => {
-      fs.unlink(dest, () => reject(err));
-    });
-  });
-}
-
-async function ffprobeDuration(p) {
-  return await new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(p, (err, d) => {
-      if (err) reject(err); else resolve((d.format && d.format.duration) ? Math.ceil(d.format.duration) : 0);
-    });
-  });
-}
-
-async function runFaceswap(u, photoPath, videoPath, chatId) {
-  let cost = 3;
-  if (videoPath) {
-    const duration = await ffprobeDuration(videoPath);
-    cost = duration * 3;
-  }
-  const data = loadData();
-  const user = data.users[u.id];
-  if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
-  user.points -= cost;
-  saveData(data);
-  if (!PUBLIC_BASE) return { error: PUBLIC_BASE_ERROR || 'Missing PUBLIC_URL/PUBLIC_ORIGIN', required: 0, points: user.points };
-  const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(photoPath)}`;
-  const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(videoPath || photoPath)}`;
-  const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
-  if (!key) return { error: 'missing API key', required: 0, points: user.points };
-  const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
-  const pth = videoPath ? '/api/v1/capix/faceswap/faceswap/v1/video' : '/api/v1/capix/faceswap/faceswap/v1/image';
-  const reqOpts = { hostname: 'api.magicapi.dev', path: pth, method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
-  const result = await new Promise((resolve, reject) => {
-    const r = https.request(reqOpts, res2 => { let buf=''; res2.on('data', c => buf+=c); res2.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(e); } }); }); r.on('error', reject); r.write(form); r.end();
-  });
-  const requestId = result && (result.request_id || result.requestId || result.id);
-  if (!requestId) return { error: 'submit error', required: 0, points: user.points };
-  startMagicResultPoll(String(requestId), String(chatId || ''));
-  return { started: true, points: user.points };
-}
-
-async function runFaceswapImage(u, swapPhotoPath, targetPhotoPath, chatId) {
-  const cost = 9;
-  const data = loadData();
-  const user = data.users[u.id];
-  if ((user.points || 0) < cost) return { error: 'not enough points', required: cost, points: user.points };
-  user.points -= cost;
-  saveData(data);
-  const baseRaw = (process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || '');
-  const base = String(baseRaw).trim().replace(/^['"`]+|['"`]+$/g, '');
-  const swapUrl = base ? `${base}/uploads/${path.basename(swapPhotoPath)}` : '';
-  const targetUrl = base ? `${base}/uploads/${path.basename(targetPhotoPath)}` : '';
-  const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY || '';
-  if (!base || !key) return { error: 'missing config', required: 0, points: user.points };
-  const form = querystring.stringify({ target_url: targetUrl, swap_url: swapUrl });
-  const reqOpts = { hostname: 'api.magicapi.dev', path: '/api/v1/capix/faceswap/faceswap/v1/image', method: 'POST', headers: { 'x-magicapi-key': key, 'Content-Type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'Content-Length': Buffer.byteLength(form) } };
-  const result = await new Promise((resolve, reject) => {
-    const r = https.request(reqOpts, res2 => { let buf=''; res2.on('data', c => buf+=c); res2.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(e); } }); }); r.on('error', reject); r.write(form); r.end();
-  });
-  const requestId = result && (result.request_id || result.requestId || result.id);
-  if (!requestId) return { error: 'submit error', required: 0, points: user.points };
-  startMagicResultPoll(String(requestId), String(chatId || ''));
-  return { started: true, points: user.points };
-}
-
-bot.start(async ctx => {
-  const payload = ctx.startPayload || '';
-  const u = getOrCreateUser(String(ctx.from.id), { username: ctx.from.username || '', first_name: ctx.from.first_name || '', last_name: ctx.from.last_name || '' });
-  if (payload && payload.startsWith('ref_')) {
-    const ref = payload.substring(4);
-    const data = loadData();
-    if (ref && ref !== String(ctx.from.id) && data.users[ref]) {
-      data.users[ref].points = (data.users[ref].points || 0) + 9;
-      data.users[ref].invite_count = (data.users[ref].invite_count || 0) + 1;
-      saveData(data);
-    }
-  }
-  if (payload && payload.startsWith('promo_')) {
-    const promo = payload.substring(6);
-    const data = loadData();
-    if (promo && promo !== String(ctx.from.id) && data.users[promo]) {
-      u.promoter_id = promo;
-      data.users[promo].promo_count = (data.users[promo].promo_count || 0) + 1;
-      saveData(data);
-    }
-  }
-  if (payload === 'faceswap') {
-    pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null };
-    try { await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.'); } catch (_) {}
-  }
-  if (payload === 'imageswap') {
-    pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null };
-    try { await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.'); } catch (_) {}
-  }
-  if (payload === 'createvideo') {
-    pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null };
-    try { await ctx.reply('Create Video: Send overlay photo, then base video. Cost: 10 points (10 seconds @ 1 point/sec).'); } catch (_) {}
-  }
-  const referral_link = `/?ref=${u.id}`;
-  const botUsername = process.env.BOT_USERNAME || '';
-  const promo_link = botUsername ? `https://t.me/${botUsername}?start=promo_${u.id}` : '';
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Image Face Swap', 'imageswap')],
-    [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
-    [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
-  ]);
-  await ctx.reply(`Hello ${u.first_name || ''}. Points: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
-});
-
-bot.action('menu', async ctx => {
-  await ctx.answerCbQuery();
-  const id = String(ctx.from.id);
-  const u = getOrCreateUser(id);
-  const referral_link = `/?ref=${u.id}`;
-  const botUsername = process.env.BOT_USERNAME || '';
-  const promo_link = botUsername ? `https://t.me/${botUsername}?start=promo_${u.id}` : '';
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Image Face Swap', 'imageswap')],
-    [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
-    [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
-  ]);
-  await ctx.reply(`Main Menu\nPoints: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
-});
-
-bot.command('menu', async ctx => {
-  const id = String(ctx.from.id);
-  const u = getOrCreateUser(id);
-  const referral_link = `/?ref=${u.id}`;
-  const botUsername = process.env.BOT_USERNAME || '';
-  const promo_link = botUsername ? `https://t.me/${botUsername}?start=promo_${u.id}` : '';
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('Points', 'points'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Image Face Swap', 'imageswap')],
-    [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Create Video', 'createvideo')],
-    [Markup.button.callback('Promote', 'promote'), Markup.button.callback('Help', 'help')]
-  ]);
-  await ctx.reply(`Main Menu\nPoints: ${u.points}\nInvite: ${referral_link}${promo_link ? '\nPromo: ' + promo_link : ''}`, keyboard);
-});
-
-bot.action('points', async ctx => {
-  const u = getOrCreateUser(String(ctx.from.id));
-  await ctx.answerCbQuery();
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Check-In', 'checkin')],
-    [Markup.button.callback('Main Menu', 'menu')]
-  ]);
-  await ctx.reply(`Points: ${u.points}`, kb);
-});
-
-bot.action(/confirm:(.+)/, async ctx => {
-  if (!stripe) return toast(ctx, 'Payments are currently unavailable.', { alert: true });
-  const canPost = await ensureChannelCanPost(ctx, 'announce the confirmation');
-  await ctx.answerCbQuery();
-  const short = ctx.match[1];
-  const sessionId = pendingSessions[short] || short;
-  const id = String(ctx.from.id);
-  const r = await stripe.checkout.sessions.retrieve(sessionId);
-  if (!r) {
-    try {
-    ack(ctx, 'Verifying payment…');
-    ack(ctx, 'Verifying payment…');
-    ack(ctx, 'Verifying payment…'); if (canPost) { return await ctx.reply('Payment session not found'); } else { return await bot.telegram.sendMessage(id, 'Payment session not found'); } } catch (_) { return; }
-  }
-  if (r.payment_status !== 'paid' && r.status !== 'complete') {
-    try { if (canPost) { return await ctx.reply('Payment not completed'); } else { return await bot.telegram.sendMessage(id, 'Payment not completed'); } } catch (_) { return; }
-  }
-  const data = loadData();
-  if (data.purchases[sessionId]) {
-    const uid = r.metadata && r.metadata.userId;
-    const u = uid ? data.users[uid] : null;
-    try { if (canPost) { return await ctx.reply(`Already processed. Points: ${u ? u.points : ''}`); } else { return await bot.telegram.sendMessage(id, `Already processed. Points: ${u ? u.points : ''}`); } } catch (_) { return; }
-  }
-  const uid = r.metadata && r.metadata.userId;
-  const tierId = r.metadata && r.metadata.tierId;
-  const u = uid ? data.users[uid] : null;
-  const tier = PRICING.find(t => t.id === tierId);
-  if (!u || !tier) { try { if (canPost) { return await ctx.reply('Not found'); } else { return await bot.telegram.sendMessage(id, 'Not found'); } } catch (_) { return; } }
-  const expected = Math.round(tier.usd * 100);
-  const paid = typeof r.amount_total === 'number' ? r.amount_total : null;
-  const currency = (r.currency || '').toLowerCase();
-  if (paid !== expected || currency !== 'usd') { try { if (canPost) { return await ctx.reply('Payment amount mismatch'); } else { return await bot.telegram.sendMessage(id, 'Payment amount mismatch'); } } catch (_) { return; } }
-  const addPoints = Math.floor(tier.points);
-  u.points = (u.points || 0) + addPoints;
-  u.has_recharged = true;
-  u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
-  const promoterId = (r.metadata && r.metadata.promoterId) || u.promoter_id || null;
-  if (promoterId && data.users[promoterId]) {
-    const amount = r.amount_total ? r.amount_total / 100 : tier.usd;
-    const reward = Math.round(amount * 0.20 * 100) / 100;
-    data.users[promoterId].reward_balance = (data.users[promoterId].reward_balance || 0) + reward;
-  }
-  data.purchases[sessionId] = true;
-  saveData(data);
-  try { if (canPost) { await ctx.reply(`Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } else { await bot.telegram.sendMessage(id, `Payment confirmed. Credited ${addPoints} points. Balance: ${u.points}`); } } catch (_) {}
-});
-
-bot.command('confirm', async ctx => {
-  if (!stripe) return ctx.reply('Payments are currently unavailable.');
-  const parts = (ctx.message.text || '').split(' ').filter(Boolean);
-  const sessionId = parts[1];
-  if (!sessionId) return ctx.reply('Provide session id');
-  const r = await stripe.checkout.sessions.retrieve(sessionId);
-  if (!r) return ctx.reply('Payment session not found');
-  if (r.payment_status !== 'paid' && r.status !== 'complete') return ctx.reply('Payment not completed');
-  const data = loadData();
-  if (data.purchases[sessionId]) {
-    const uid = r.metadata && r.metadata.userId;
-    const u = uid ? data.users[uid] : null;
-    return ctx.reply(`Already processed. Points: ${u ? u.points : ''}`);
-  }
-  const uid = r.metadata && r.metadata.userId;
-  const tierId = r.metadata && r.metadata.tierId;
-  const u = uid ? data.users[uid] : null;
-  const tier = PRICING.find(t => t.id === tierId);
-  if (!u || !tier) return ctx.reply('Not found');
-  const expected = Math.round(tier.usd * 100);
-  const paid = typeof r.amount_total === 'number' ? r.amount_total : null;
-  const currency = (r.currency || '').toLowerCase();
-  if (paid !== expected || currency !== 'usd') return ctx.reply('Payment amount mismatch');
-  const addPoints = Math.floor(tier.points);
-  u.points = (u.points || 0) + addPoints;
-  u.has_recharged = true;
-  u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
-  const promoterId = (r.metadata && r.metadata.promoterId) || u.promoter_id || null;
-  if (promoterId && data.users[promoterId]) {
-    const amount = r.amount_total ? r.amount_total / 100 : tier.usd;
-    const reward = Math.round(amount * 0.20 * 100) / 100;
-    data.users[promoterId].reward_balance = (data.users[promoterId].reward_balance || 0) + reward;
-  }
-  data.purchases[sessionId] = true;
-  saveData(data);
-  await ctx.reply(`Credited ${addPoints} points. Balance: ${u.points}`);
-});
-
-bot.action('clone', async ctx => {
-  await ctx.answerCbQuery();
-  const id = String(ctx.from.id);
-  const botUsername = process.env.BOT_USERNAME || '';
-  const promoLink = botUsername ? `https://t.me/${botUsername}?start=promo_${id}` : '';
-  const refLink = `https://t.me/${botUsername}?start=ref_${id}`;
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.url('Promo Link', promoLink || refLink)],
-    [Markup.button.url('Invite Link', refLink)],
-    [Markup.button.callback('Main Menu', 'menu')]
-  ]);
-  await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
-});
-
-bot.action('pricing', async ctx => {
-  await ctx.answerCbQuery();
-  const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
-  await ctx.reply(`Prices:\n${lines.join('\n')}`);
-});
-
-bot.action('promote', async ctx => {
-  await ctx.answerCbQuery();
-  const id = String(ctx.from.id);
-  const u = process.env.BOT_USERNAME || '';
-  const promo = u ? `https://t.me/${u}?start=promo_${id}` : '';
-  const ref = u ? `https://t.me/${u}?start=ref_${id}` : '';
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.url('Promo Link', promo || ref)],
-    [Markup.button.url('Invite Link', ref || promo)],
-    [Markup.button.callback('Main Menu', 'menu')]
-  ]);
-  await ctx.reply('Share these links to promote. Purchases via your links credit you 20% and add promo counts.', kb);
-});
-
-app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  if (!stripe) return res.status(503).send('Stripe not configured');
-  const sig = req.headers['stripe-signature'];
-  const secret = process.env.STRIPE_WEBHOOK_SECRET || '';
-  let event;
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, secret);
-  } catch (err) {
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const userId = session.metadata && session.metadata.userId;
-    const tierId = session.metadata && session.metadata.tierId;
-    const chatId = session.metadata && session.metadata.chatId;
-    const promoterId = session.metadata && session.metadata.promoterId;
-    const data = loadData();
-    if (!data.purchases[session.id]) {
-      const u = userId ? data.users[userId] : null;
-      const tier = PRICING.find(t => t.id === tierId);
-      if (u && tier) {
-        const addPoints = Math.floor(tier.points);
-        u.points = (u.points || 0) + addPoints;
-        u.has_recharged = true;
-        u.recharge_total_points = (u.recharge_total_points || 0) + tier.points;
-        if (promoterId && data.users[promoterId]) {
-          const amount = session.amount_total ? session.amount_total / 100 : tier.usd;
-          const reward = Math.round(amount * 0.20 * 100) / 100;
-          data.users[promoterId].reward_balance = (data.users[promoterId].reward_balance || 0) + reward;
-        }
-        data.purchases[session.id] = true;
-        saveData(data);
-        if (chatId) {
-          bot.telegram.sendMessage(chatId, `Payment received. Credited ${addPoints} points. New balance: ${u.points}`);
-        }
-      }
-    }
-  }
-  res.json({ received: true });
-});
-
-const pending = {};
-const pendingChannel = {};
-
-bot.command('faceswap', async ctx => {
-  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null, chatId: String(ctx.chat.id) };
-  if (isChannel) { pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', uid: String(ctx.from.id), swap: null, target: null }; }
-  setUserContext(String(ctx.from.id), String(ctx.chat.id));
-  await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.');
-});
-
-bot.action('faceswap', async ctx => {
-  ack(ctx, 'Mode set: Video');
-  ack(ctx, 'Mode set: Video');
-  ack(ctx, 'Mode set: Video');
-  await ctx.answerCbQuery();
-  pending[String(ctx.from.id)] = { mode: 'faceswap', swap: null, target: null, chatId: String(ctx.chat.id) };
-  if ((ctx.chat && ctx.chat.type) === 'channel') { pendingChannel[String(ctx.chat.id)] = { mode: 'faceswap', uid: String(ctx.from.id), swap: null, target: null }; }
-  setUserContext(String(ctx.from.id), String(ctx.chat.id));
-  try { await ctx.reply('Video Face Swap: Send a swap photo first, then a target video trimmed to the length you want. Cost: 3 points per second.'); } catch (_) {}
-});
-
-bot.command('imageswap', async ctx => {
-  const isChannel = (ctx.chat && ctx.chat.type) === 'channel';
-  pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null, chatId: String(ctx.chat.id) };
-  if (isChannel) { pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', uid: String(ctx.from.id), swap: null, target: null }; }
-  setUserContext(String(ctx.from.id), String(ctx.chat.id));
-  await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.');
-});
-
-bot.action('imageswap', async ctx => {
-  ack(ctx, 'Mode set: Image');
-  ack(ctx, 'Mode set: Image');
-  ack(ctx, 'Mode set: Image');
-  await ctx.answerCbQuery();
-  pending[String(ctx.from.id)] = { mode: 'imageswap', swap: null, target: null, chatId: String(ctx.chat.id) };
-  if ((ctx.chat && ctx.chat.type) === 'channel') { pendingChannel[String(ctx.chat.id)] = { mode: 'imageswap', uid: String(ctx.from.id), swap: null, target: null }; }
-  setUserContext(String(ctx.from.id), String(ctx.chat.id));
-  try { await ctx.reply('Image Face Swap: Send a swap photo first, then a target photo. Cost: 9 points.'); } catch (_) {}
-});
-
-bot.action('createvideo', async ctx => {
-  await ctx.answerCbQuery();
-  pending[String(ctx.from.id)] = { mode: 'createvideo', photo: null, video: null, chatId: String(ctx.chat.id) };
-  if ((ctx.chat && ctx.chat.type) === 'channel') { pendingChannel[String(ctx.chat.id)] = { mode: 'createvideo', uid: String(ctx.from.id), photo: null, video: null }; }
-  setUserContext(String(ctx.from.id), String(ctx.chat.id));
-  try { await ctx.reply('Create Video: Send overlay photo, then base video. Cost: 10 points (10 seconds @ 1 point/sec).'); } catch (_) {}
-});
-
-bot.on('photo', async ctx => {
-<<<<<<< Updated upstream
-=======
-  const uid = String(ctx.from.id);
-  const p = getPending(uid);
-  
-  if (!p) {
-    return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.', 
-      Markup.inlineKeyboard([
-        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
-      ])
-    );
-  }
-
-  const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
-  const link = await ctx.telegram.getFileLink(fileId);
-  const localPath = path.join(uploadsDir, `photo_${uid}_${Date.now()}.jpg`);
-  await downloadTo(link.href, localPath);
-
-  if (p.step === 'swap') {
-    p.swapPath = localPath;
-    p.swapFileId = fileId;
-    p.step = 'target';
-    setPending(uid, p);
-    ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET video.' : 'Great! Now send the TARGET photo.');
-  } else if (p.step === 'target' && p.mode === 'imageswap') {
-    p.targetPath = localPath;
-    p.targetFileId = fileId;
-    
-    ctx.reply('Processing Image Swap...');
-    const res = await runFaceswap(ctx, getOrCreateUser(uid), p.swapPath, p.targetPath, p.swapFileId, p.targetFileId, false);
-    if (res.error) ctx.reply(res.error);
-    else ctx.reply('Job started! ID: ' + res.requestId);
-    
-    setPending(uid, null);
-  } else if (p.step === 'target' && p.mode === 'faceswap') {
-    // Explicitly handle user sending photo instead of video
-    ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
-  }
-});
-
-bot.on('video', async ctx => {
-  const uid = String(ctx.from.id);
-  const p = getPending(uid);
-  if (!p) {
-    return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
-      ])
-    );
-  }
-  
-  if (p.mode !== 'faceswap' || p.step !== 'target') {
-    return ctx.reply('Unexpected video. Are you in the right mode?');
-  }
-
-  const fileId = ctx.message.video.file_id;
-  const link = await ctx.telegram.getFileLink(fileId);
-  const localPath = path.join(uploadsDir, `video_${uid}_${Date.now()}.mp4`);
-  await downloadTo(link.href, localPath);
-
-  p.targetPath = localPath;
-  p.targetFileId = fileId;
-
-  ctx.reply('Processing Video Swap...');
-  const res = await runFaceswap(ctx, getOrCreateUser(uid), p.swapPath, p.targetPath, p.swapFileId, p.targetFileId, true);
-  if (res.error) ctx.reply(res.error);
-  else ctx.reply('Job started! ID: ' + res.requestId);
-  
-  setPending(uid, null);
-});
-
-bot.command('reset', ctx => {
-  setPending(String(ctx.from.id), null);
-  ctx.reply('State reset. Use /faceswap to start over.');
-});
-
-bot.command('debug', ctx => {
-  const p = getPending(String(ctx.from.id));
-  ctx.reply('Current State: ' + JSON.stringify(p || 'None'));
-});
-
-// --- Express App ---
-const app = express();
-app.use(express.json());
-// Rate Limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
-
-app.use('/uploads', express.static(uploadsDir));
-app.use('/outputs', express.static(outputsDir));
-
-// Webhook for Stripe
-app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  const sig = req.headers['stripe-signature'];
->>>>>>> Stashed changes
-  try {
-    const pid = String(ctx.from.id);
-    if (!pending[pid]) return;
-    const p = pending[pid];
-    const photos = ctx.message.photo;
-    const fileId = photos[photos.length - 1].file_id;
-    const link = await ctx.telegram.getFileLink(fileId);
-    const dest = path.join(uploadsDir, `photo_${pid}_${Date.now()}.jpg`);
-    await downloadTo(String(link), dest);
-    if (p.mode === 'faceswap') {
-      p.swap = dest;
-      if (p.target) {
-        const u = getOrCreateUser(pid);
-        let r;
-        try { r = await runFaceswap(u, p.swap, p.target, String(p.chatId || ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
-        delete pending[pid];
-        if (r.error) {
-          const kb = Markup.inlineKeyboard([
-            [Markup.button.callback('Buy Points', 'buy')],
-            [Markup.button.callback('Main Menu', 'menu')]
-          ]);
-          return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
-        }
-        if (r.started) {
-          await ctx.reply(`Processing started. Points: ${r.points}`);
-        } else {
-          await ctx.reply(`Done. Points: ${r.points}`);
-        }
-      } else {
-        await ctx.reply('Now send target video.');
-      }
-    } else if (p.mode === 'imageswap') {
-      if (!p.swap) {
-        p.swap = dest;
-        await ctx.reply('Now send target photo.');
-      } else if (!p.target) {
-        p.target = dest;
-        const u = getOrCreateUser(pid);
-        let r;
-        try { r = await runFaceswapImage(u, p.swap, p.target, String(p.chatId || ctx.chat.id)); } catch (e) { await ctx.reply(`Error: ${e.message}`); delete pending[pid]; return; }
-        delete pending[pid];
-        if (r.error) {
-          const kb = Markup.inlineKeyboard([
-            [Markup.button.callback('Buy Points', 'buy')],
-            [Markup.button.callback('Main Menu', 'menu')]
-          ]);
-          return ctx.reply(`Not enough points. Required: ${r.required}, Your Points: ${r.points}`, kb);
-        }
-        await ctx.reply(`Processing started. Points: ${r.points}`);
-      }
-    } else if (p.mode === 'createvideo') {
-      p.photo = dest;
-      await ctx.reply('Now send base video.');
->>>>>>> db8c81c (fix: responsive Telegram buttons and payment callbacks)
-    }
-    res.status(404).json({ error: 'Job not found or expired' });
 });
 
 // Root
@@ -1648,7 +891,7 @@ app.listen(PORT, async () => {
     const PREFERRED_URL = process.env.TELEGRAM_WEBHOOK_URL || (typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE ? PUBLIC_BASE : '');
 
     if (shouldUseWebhook) {
-      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(/\/$/, '') + WEBHOOK_PATH;
+      const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(//$/, '') + WEBHOOK_PATH;
       console.log(`Configuring Webhook at: ${fullUrl}`);
       
       // Mount the webhook callback on the Express app

@@ -1,0 +1,6 @@
+tree c1e39e99608deb82d74679ea2f083f77c33f75ca
+parent 8922345c8b4860d14472aab494623e63e7689d4c
+author Trae Agent <trae@example.com> 1765544298 -0600
+committer Trae Agent <trae@example.com> 1765544298 -0600
+
+Cleanup workspace: remove temporary probe and patch scripts; keep tests
