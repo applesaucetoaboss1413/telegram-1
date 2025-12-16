@@ -775,44 +775,55 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
 });
 
 app.get('/healthz', (req, res) => {
-  res.json({ mode: 'backend', env: { node: process.version, public: !!PUBLIC_BASE } });
+  res.json({ mode: 'backend', env: { node: process.version } });
 });
 
-app.listen(PORT, async () => {
+// Webhook Configuration
+const WEBHOOK_PATH = '/telegram/webhook';
+// Prioritize explicit variables, then Render's automatic one
+const publicUrl = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || process.env.TELEGRAM_WEBHOOK_URL;
+// We use webhook if any public URL is provided
+const shouldUseWebhook = !!publicUrl;
+
+if (shouldUseWebhook) {
+  let domain = publicUrl;
+  if (!domain.startsWith('http')) domain = 'https://' + domain;
+  // Ensure no double slashes
+  const fullUrl = domain.replace(/\/$/, '') + WEBHOOK_PATH;
+  
+  console.log(`🚀 Starting in WEBHOOK Mode`);
+  console.log(`   URL: ${fullUrl}`);
+  
+  // Mount webhook middleware BEFORE listen to ensure route exists
+  app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
+  
+  // Set webhook on Telegram side
+  // We do this after a slight delay to ensure server is up, or just fire and forget
+  bot.telegram.setWebhook(fullUrl).then(() => {
+    console.log('✅ Webhook successfully set with Telegram.');
+  }).catch(e => {
+    console.error('❌ FAILED to set Webhook:', e.message);
+  });
+} else {
+  console.log('🔄 Starting in POLLING Mode (No Public URL found)');
+  // Delete webhook to ensure polling works
+  bot.telegram.deleteWebhook().then(() => {
+      console.log('   Old webhook deleted.');
+      return bot.launch();
+  }).then(() => {
+      console.log('✅ Bot launched via Polling');
+  }).catch(e => {
+      console.error('❌ Polling launch failed:', e);
+  });
+}
+
+app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     
     if (!process.env.BOT_TOKEN) {
       console.error('CRITICAL ERROR: BOT_TOKEN is missing.');
-      return;
     }
-
-    const WEBHOOK_PATH = '/telegram/webhook';
-    const shouldUseWebhook = process.env.TELEGRAM_WEBHOOK_URL || (process.env.ENABLE_WEBHOOK === 'true' && typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE) || process.env.RENDER_EXTERNAL_URL;
-    
-    // Prioritize RENDER_EXTERNAL_URL if available
-    let baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL;
-    if (baseUrl && !baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
-    
-    if (shouldUseWebhook && baseUrl) {
-      const fullUrl = baseUrl.replace(/\/$/, '') + WEBHOOK_PATH;
-      console.log(`Configuring Webhook at: ${fullUrl}`);
-      
-      app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
-      
-      try {
-        await bot.telegram.setWebhook(fullUrl);
-        console.log('Webhook successfully set with Telegram.');
-      } catch (e) {
-        console.error('FAILED to set Webhook:', e.message);
-      }
-    } else {
-      console.log('Starting in POLLING mode (Webhook disabled)...');
-      try { await bot.telegram.deleteWebhook(); } catch(e) {}
-      
-      bot.launch().then(() => console.log('Bot launched via Polling')).catch(e => console.error('Bot polling launch failed', e));
-    }
-
-  });
+});
 
 module.exports = { app };
 
