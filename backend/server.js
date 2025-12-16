@@ -1,5 +1,8 @@
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const fetch = require('node-fetch');
+const { default: PQueue } = require('p-queue');
+
+const queue = new PQueue({ concurrency: 1, timeout: 300000 });
 
 if (process.env.NODE_ENV !== 'test') {
   console.log('Server script started (V6 - JSON/URL Fix)');
@@ -256,6 +259,155 @@ async function ack(ctx, text) {
   }
 }
 
+// Helper: Retry Logic
+async function callMagicAPIWithRetry(endpoint, payload, key, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[Attempt ${attempt}/${maxRetries}] Calling MagicAPI...`);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json', 'accept': 'application/json' },
+        body: JSON.stringify(payload),
+        timeout: 60000
+      });
+      const responseText = await response.text();
+      let data;
+      try { data = JSON.parse(responseText); } catch(e) {}
+      
+      if (response.ok) return { success: true, data };
+      
+      if (response.status === 401) throw new Error('Invalid API key');
+      if (response.status === 429) {
+         const waitTime = attempt * 2000;
+         console.log(`[Rate Limited] Waiting ${waitTime}ms...`);
+         await new Promise(r => setTimeout(r, waitTime));
+         continue;
+      }
+      if (response.status >= 500) {
+         await new Promise(r => setTimeout(r, 2000));
+         continue;
+      }
+      throw new Error(`API returned ${response.status}: ${data ? (data.message || JSON.stringify(data)) : responseText}`);
+    } catch (error) {
+      console.error(`[Attempt ${attempt}] Error: ${error.message}`);
+      if (attempt === maxRetries || error.message.includes('Invalid API key')) throw error;
+      await new Promise(r => setTimeout(r, attempt * 1000));
+    }
+  }
+}
+
+// Helper: Poll Result
+function pollMagicResult(requestId, chatId) {
+  let tries = 0;
+  const job = DB.pending_swaps[requestId];
+  const isVideo = job ? job.isVideo : true; 
+  const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
+  
+  const poll = async () => {
+    tries++;
+    if (tries > 100) { // 5 minutes approx
+       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
+       if (DB.pending_swaps[requestId]) {
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
+          delete DB.pending_swaps[requestId];
+          saveDB();
+       }
+       return;
+    }
+
+    if (tries % 10 === 0 && chatId) {
+        bot.telegram.sendMessage(chatId, `Still processing... (${tries * 3}s elapsed)`).catch(()=>{});
+    }
+
+    try {
+      let response;
+      if (isVideo) {
+          // Capix Polling (POST)
+          const params = new URLSearchParams();
+          params.append('request_id', requestId);
+          response = await fetch('https://api.magicapi.dev/api/v1/capix/faceswap/result/', {
+              method: 'POST',
+              headers: { 
+                  'x-magicapi-key': key, 
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  'accept': 'application/json'
+              },
+              body: params
+          });
+      } else {
+          // Fallback/Legacy Polling (GET)
+          response = await fetch(`https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/status/${requestId}`, {
+              method: 'GET',
+              headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
+          });
+      }
+
+      const text = await response.text();
+      let j;
+      try { j = JSON.parse(text); } catch(e) {}
+
+      if (response.ok && j) {
+          const status = (j.status || j.state || '').toLowerCase();
+          const outData = j.output || j.result || j.url || j.image_url || j.video_url || (j.data && j.data.result);
+          
+          if (outData) {
+            // Success
+            let finalUrl = Array.isArray(outData) ? outData[outData.length-1] : outData;
+            if (typeof finalUrl === 'object') finalUrl = finalUrl.video_url || finalUrl.image_url || finalUrl.url || Object.values(finalUrl)[0];
+
+            if (chatId) {
+                if (isVideo) await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Face swap complete!' });
+                else await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Face swap complete!' });
+            }
+            
+            if (!DB.api_results) DB.api_results = {};
+            DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
+            
+            if (DB.pending_swaps[requestId]) {
+              delete DB.pending_swaps[requestId];
+              saveDB();
+            }
+          } else if (status.includes('fail') || status.includes('error')) {
+             // Failed
+             throw new Error(j.error || j.message || 'Unknown error');
+          } else {
+             // Still processing
+             setTimeout(poll, 3000);
+          }
+      } else {
+          // API error or not ready
+          setTimeout(poll, 3000);
+      }
+    } catch (e) {
+       // Check if we should stop polling on error
+       if (e.message && (e.message.includes('fail') || e.message.includes('error'))) {
+          const errorMsg = e.message;
+          if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).`).catch(()=>{});
+          
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: errorMsg };
+          
+          if (job && job.userId) {
+            const u = getOrCreateUser(job.userId);
+            const cost = job.isVideo ? 15 : 9; 
+            u.points += cost;
+            saveDB();
+            addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
+          }
+          if (DB.pending_swaps[requestId]) {
+            delete DB.pending_swaps[requestId];
+            saveDB();
+          }
+       } else {
+          setTimeout(poll, 3000);
+       }
+    }
+  };
+  
+  setTimeout(poll, 2000);
+}
+
 async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 15 : 9;
   const user = DB.users[u.id];
@@ -268,92 +420,68 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   saveDB();
   addAudit(u.id, -cost, 'faceswap_start', { isVideo });
 
-  // 1. Get Telegram Public URLs
   const swapUrl = await getFileUrl(ctx, swapFileId);
   const targetUrl = await getFileUrl(ctx, targetFileId);
 
   if (!swapUrl || !targetUrl) {
-    user.points += cost; // Refund
+    user.points += cost; 
     saveDB();
     return { error: 'Failed to generate file URLs from Telegram.', points: user.points };
   }
 
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
   if (!key) {
-      console.error('MagicAPI key is missing!');
-      user.points += cost; // Refund
+      user.points += cost; 
       saveDB();
       return { error: 'Server config error: Missing API Key', points: user.points };
   }
 
-  // 2. Prepare Payload (JSON)
-  // Guide says: Use simple flat JSON with image URLs
-  // Endpoint: https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap
-  
   const endpoint = isVideo 
-    ? 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/run' // Assuming video still uses v2 or similar
+    ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
     : 'https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap';
   
   const payload = isVideo ? {
-    // Attempting JSON format for video too, as multipart was likely the issue
-    // If video endpoint is different, we might need to adjust
-    input: {
-        swap_image: swapUrl,
-        target_video: targetUrl
-    }
+    target_url: targetUrl, swap_url: swapUrl
   } : {
-    swap_image: swapUrl,
-    target_image: targetUrl
+    swap_image: swapUrl, target_image: targetUrl
   };
 
-  console.log(`[FACESWAP] Sending to ${endpoint}`);
-  console.log(`[FACESWAP] Payload:`, JSON.stringify(payload));
-
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'x-magicapi-key': key,
-        'Content-Type': 'application/json',
-        'accept': 'application/json'
-      },
-      body: JSON.stringify(payload),
-      timeout: 60000 // 60s timeout
-    });
+      const qPos = queue.size;
+      if (qPos > 0) {
+          ctx.reply(`📍 Position in queue: ${qPos + 1}\n⏳ Waiting for processor...`).catch(()=>{});
+      }
 
-    const responseText = await response.text();
-    console.log('[FACESWAP] Status:', response.status);
-    console.log('[FACESWAP] Response:', responseText.substring(0, 500));
+      const result = await queue.add(async () => {
+          return await callMagicAPIWithRetry(endpoint, payload, key);
+      });
 
-    let data;
-    try { data = JSON.parse(responseText); } catch(e) {}
+      const data = result.data;
+      const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && data.result.video_url));
 
-    if (!response.ok) {
-        user.points += cost; // Refund
-        saveDB();
-        return { error: `API Error ${response.status}: ${data ? (data.message || JSON.stringify(data)) : responseText}`, points: user.points };
-    }
-
-    // Success Handling
-    // Guide says response contains "output": "url"
-    const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && data.result.video_url));
-
-    if (outputUrl) {
-        return { success: true, output: outputUrl, points: user.points };
-    } else if (data && data.request_id) {
-        // Fallback to polling if it returns a request_id instead of immediate output
-        return { started: true, requestId: data.request_id, points: user.points };
-    } else {
-        user.points += cost; // Refund
-        saveDB();
-        return { error: 'No output URL in response.', points: user.points };
-    }
+      if (outputUrl) {
+          return { success: true, output: outputUrl, points: user.points };
+      } else if (data && data.request_id) {
+          if (!DB.pending_swaps) DB.pending_swaps = {};
+          DB.pending_swaps[data.request_id] = {
+            chatId: ctx.chat.id,
+            userId: u.id,
+            startTime: Date.now(),
+            isVideo: isVideo,
+            status: 'processing'
+          };
+          saveDB();
+          pollMagicResult(data.request_id, ctx.chat.id);
+          return { started: true, requestId: data.request_id, points: user.points };
+      } else {
+          throw new Error('No output URL or Request ID in response');
+      }
 
   } catch (e) {
-    user.points += cost; // Refund
+    user.points += cost;
     saveDB();
-    console.error('[FACESWAP] Network Error:', e);
-    return { error: 'Network/API Error: ' + e.message, points: user.points };
+    console.error('[FACESWAP] Error:', e);
+    return { error: 'Error: ' + e.message, points: user.points };
   }
 }
 
