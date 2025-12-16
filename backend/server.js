@@ -130,8 +130,8 @@ try {
   }
 } catch (_) {}
 
-function resolvePublicBase(url, origin, renderExternal) {
-  const raw = String(url || origin || renderExternal || '').trim().replace(/^['"`]+|['"`]+$/g, '').replace(/\/+$/, '');
+function resolvePublicBase(url, origin, renderExternal, publicUrl) {
+  const raw = String(url || origin || renderExternal || publicUrl || '').trim().replace(/^['"`]+|['"`]+$/g, '').replace(/\/+$/, '');
   if (!raw) return { base: '', error: 'Public URL not set.' };
   if (/https?:\/\/(?:localhost|127\.0\.0\.1)/i.test(raw)) return { base: '', error: 'Localhost not supported for external webhooks.' };
   if (/https?:\/\/t\.me/i.test(raw)) return { base: '', error: 't.me is not a file server.' };
