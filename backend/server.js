@@ -17,6 +17,7 @@ process.on('unhandledRejection', (reason, promise) => {
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
@@ -1415,6 +1416,106 @@ bot.action('createvideo', async ctx => {
 });
 
 bot.on('photo', async ctx => {
+<<<<<<< Updated upstream
+=======
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  
+  if (!p) {
+    return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.', 
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
+      ])
+    );
+  }
+
+  const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
+  const link = await ctx.telegram.getFileLink(fileId);
+  const localPath = path.join(uploadsDir, `photo_${uid}_${Date.now()}.jpg`);
+  await downloadTo(link.href, localPath);
+
+  if (p.step === 'swap') {
+    p.swapPath = localPath;
+    p.swapFileId = fileId;
+    p.step = 'target';
+    setPending(uid, p);
+    ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET video.' : 'Great! Now send the TARGET photo.');
+  } else if (p.step === 'target' && p.mode === 'imageswap') {
+    p.targetPath = localPath;
+    p.targetFileId = fileId;
+    
+    ctx.reply('Processing Image Swap...');
+    const res = await runFaceswap(ctx, getOrCreateUser(uid), p.swapPath, p.targetPath, p.swapFileId, p.targetFileId, false);
+    if (res.error) ctx.reply(res.error);
+    else ctx.reply('Job started! ID: ' + res.requestId);
+    
+    setPending(uid, null);
+  } else if (p.step === 'target' && p.mode === 'faceswap') {
+    // Explicitly handle user sending photo instead of video
+    ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
+  }
+});
+
+bot.on('video', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (!p) {
+    return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
+      ])
+    );
+  }
+  
+  if (p.mode !== 'faceswap' || p.step !== 'target') {
+    return ctx.reply('Unexpected video. Are you in the right mode?');
+  }
+
+  const fileId = ctx.message.video.file_id;
+  const link = await ctx.telegram.getFileLink(fileId);
+  const localPath = path.join(uploadsDir, `video_${uid}_${Date.now()}.mp4`);
+  await downloadTo(link.href, localPath);
+
+  p.targetPath = localPath;
+  p.targetFileId = fileId;
+
+  ctx.reply('Processing Video Swap...');
+  const res = await runFaceswap(ctx, getOrCreateUser(uid), p.swapPath, p.targetPath, p.swapFileId, p.targetFileId, true);
+  if (res.error) ctx.reply(res.error);
+  else ctx.reply('Job started! ID: ' + res.requestId);
+  
+  setPending(uid, null);
+});
+
+bot.command('reset', ctx => {
+  setPending(String(ctx.from.id), null);
+  ctx.reply('State reset. Use /faceswap to start over.');
+});
+
+bot.command('debug', ctx => {
+  const p = getPending(String(ctx.from.id));
+  ctx.reply('Current State: ' + JSON.stringify(p || 'None'));
+});
+
+// --- Express App ---
+const app = express();
+app.use(express.json());
+// Rate Limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
+
+app.use('/uploads', express.static(uploadsDir));
+app.use('/outputs', express.static(outputsDir));
+
+// Webhook for Stripe
+app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+>>>>>>> Stashed changes
   try {
     const pid = String(ctx.from.id);
     if (!pending[pid]) return;
