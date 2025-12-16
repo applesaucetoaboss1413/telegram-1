@@ -131,14 +131,14 @@ try {
   }
 } catch (_) {}
 
-function resolvePublicBase(url, origin) {
-  const raw = String(url || origin || '').trim().replace(/^['"`]+|['"`]+$/g, '').replace(/\/+$/, '');
+function resolvePublicBase(url, origin, renderExternal) {
+  const raw = String(url || origin || renderExternal || '').trim().replace(/^['"`]+|['"`]+$/g, '').replace(/\/+$/, '');
   if (!raw) return { base: '', error: 'Public URL not set.' };
   if (/https?:\/\/(?:localhost|127\.0\.0\.1)/i.test(raw)) return { base: '', error: 'Localhost not supported for external webhooks.' };
   if (/https?:\/\/t\.me/i.test(raw)) return { base: '', error: 't.me is not a file server.' };
   return { base: raw };
 }
-const PUBLIC_BASE_INFO = resolvePublicBase(process.env.PUBLIC_URL, process.env.PUBLIC_ORIGIN);
+const PUBLIC_BASE_INFO = resolvePublicBase(process.env.PUBLIC_URL, process.env.PUBLIC_ORIGIN, process.env.RENDER_EXTERNAL_URL);
 const PUBLIC_BASE = PUBLIC_BASE_INFO.base;
 
 let DB = { 
@@ -301,7 +301,10 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
   }
 
   const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
+  console.log('Using MagicAPI Key:', key ? (key.substring(0, 5) + '...') : 'MISSING');
+  
   if (!key) {
+      console.error('MagicAPI key is missing!');
       cleanupFiles([swapPath, targetPath]);
       return { error: 'Server config error', points: user.points };
   }
@@ -317,11 +320,13 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     }
   });
 
+  console.log('Sending MagicAPI request to', endpoint, 'Payload:', payload);
+
   const reqOpts = {
     hostname: 'api.magicapi.dev',
     path: endpoint,
     method: 'POST',
-    timeout: 30000,
+    timeout: 30000, // 30s timeout
     headers: {
       'x-magicapi-key': key,
       'Content-Type': 'application/json',
@@ -335,11 +340,19 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
         let buf = '';
         res.on('data', c => buf+=c);
         res.on('end', () => {
-          try { resolve(JSON.parse(buf)); } catch(e) { reject(e); }
+          try { 
+            const json = JSON.parse(buf);
+            console.log('MagicAPI Response:', JSON.stringify(json));
+            resolve(json); 
+          } catch(e) { reject(e); }
         });
       });
-      r.on('error', reject);
+      r.on('error', (err) => {
+          console.error('MagicAPI Request Error:', err);
+          reject(err);
+      });
       r.on('timeout', () => {
+        console.error('MagicAPI Request Timeout');
         r.destroy();
         reject(new Error('API Request Timed Out'));
       });
