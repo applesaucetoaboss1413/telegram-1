@@ -24,6 +24,8 @@ const multer = require('multer');
 const https = require('https');
 const { Telegraf, Markup } = require('telegraf');
 
+const PORT = process.env.PORT || 3000;
+
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
 if (!stripe) {
