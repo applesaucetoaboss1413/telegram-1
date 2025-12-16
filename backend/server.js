@@ -1,16 +1,15 @@
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+
 if (process.env.NODE_ENV !== 'test') {
   console.log('Server script started (V5 - Cleanup & Stability)');
   console.log('Deploy tick', Date.now());
 }
 
-// --- Global Error Handling ---
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
-  // Keep alive if possible, but log critical failure
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   console.error('UNHANDLED REJECTION:', reason);
 });
 
@@ -23,8 +22,8 @@ const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static');
 const https = require('https');
 const querystring = require('querystring');
+const { Telegraf, Markup } = require('telegraf');
 
-// --- Configuration & Setup ---
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 if (ffprobePath && ffprobePath.path) ffmpeg.setFfprobePath(ffprobePath.path);
 
@@ -38,7 +37,6 @@ if (!stripe) {
   }
 }
 
-// --- Constants & Helpers ---
 function cleanupFiles(paths) {
   if (!Array.isArray(paths)) return;
   paths.forEach(p => {
@@ -49,7 +47,6 @@ function cleanupFiles(paths) {
 const SUPPORTED_CURRENCIES = ['usd','eur','gbp','cad','aud','jpy','cny','inr','brl','mxn'];
 const CURRENCY_DECIMALS = { usd: 2, eur: 2, gbp: 2, cad: 2, aud: 2, jpy: 0, cny: 2, inr: 2, brl: 2, rub: 2, mxn: 2 };
 
-// Safe fallback rates
 const SAFE_RATES = { 
   EUR: 0.92, GBP: 0.79, CAD: 1.36, AUD: 1.52, JPY: 148.0, 
   CNY: 7.2, INR: 83.0, BRL: 5.0, RUB: 92.0, MXN: 17.0
@@ -102,14 +99,12 @@ function toMinorUnits(amount, currency, rate) {
   const dec = CURRENCY_DECIMALS[currency.toLowerCase()] ?? 2;
   let val = Number(amount) * Number(rate || 1);
   if (currency.toLowerCase() !== 'usd') {
-    val = val * 1.03; // 3% spread for FX safety
+    val = val * 1.03;
   }
   if (dec === 0) return Math.round(val);
   return Math.round(val * Math.pow(10, dec));
 }
 
-// --- Directories ---
-// Use os.tmpdir() for both uploads and outputs to ensure write access in serverless/readonly envs
 const uploadsDir = require('os').tmpdir();
 const outputsDir = path.join(require('os').tmpdir(), 'outputs');
 const dataFile = path.join(require('os').tmpdir(), 'telegram_bot_data.json'); 
@@ -119,7 +114,6 @@ try {
   fs.mkdirSync(outputsDir, { recursive: true });
 } catch (e) { console.error('Directory init error:', e); }
 
-// --- Pricing ---
 let PRICING = [
   { id: 'p60', points: 60, usd: 3.09, stars: 150 },
   { id: 'p120', points: 120, usd: 5.09, stars: 250 },
@@ -137,7 +131,6 @@ try {
   }
 } catch (_) {}
 
-// --- Public URL Logic ---
 function resolvePublicBase(url, origin) {
   const raw = String(url || origin || '').trim().replace(/^['"`]+|['"`]+$/g, '').replace(/\/+$/, '');
   if (!raw) return { base: '', error: 'Public URL not set.' };
@@ -148,14 +141,12 @@ function resolvePublicBase(url, origin) {
 const PUBLIC_BASE_INFO = resolvePublicBase(process.env.PUBLIC_URL, process.env.PUBLIC_ORIGIN);
 const PUBLIC_BASE = PUBLIC_BASE_INFO.base;
 
-// --- Data Persistence (In-Memory + Disk) ---
-// Global DB to ensure state is consistent even if disk write lags
 let DB = { 
   users: {}, 
   purchases: {}, 
   audits: {}, 
-  pending_swaps: {}, // Persistent Job Queue: requestId -> { chatId, type, startTime }
-  api_results: {}, // Store API results: requestId -> { status, output, error }
+  pending_swaps: {},
+  api_results: {},
   channel: {}, 
   pending_sessions: {}, 
   pending_flows: {} 
@@ -177,13 +168,14 @@ initDB();
 
 function saveDB() {
   try {
-    // Write SYNC to ensure data is safe before proceeding
     fs.writeFileSync(dataFile, JSON.stringify(DB, null, 2));
   } catch (e) { console.error('DB Save Trigger Error:', e); }
 }
 
 function getPending(uid) {
-  const res = (DB.pending_flows || {})[uid]; console.log('DEBUG: getPending', process.pid, uid, JSON.stringify(res)); return res;
+  const res = (DB.pending_flows || {})[uid];
+  console.log('DEBUG: getPending', process.pid, uid, JSON.stringify(res));
+  return res;
 }
 function setPending(uid, val) {
   console.log('DEBUG: setPending', process.pid, uid, JSON.stringify(val));
@@ -213,12 +205,26 @@ function addAudit(userId, delta, reason, meta) {
   saveDB();
 }
 
-// --- Telegram Bot ---
-const { Telegraf, Markup } = require('telegraf');
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 
+bot.telegram.setMyCommands([
+  { command: 'start', description: 'Start the bot' },
+  { command: 'status', description: 'System status' },
+  { command: 'faceswap', description: 'Video face swap' },
+  { command: 'imageswap', description: 'Image face swap' },
+  { command: 'reset', description: 'Reset state' },
+  { command: 'debug', description: 'Show current state' }
+]).catch(() => {});
+
 bot.use(async (ctx, next) => {
-  try { console.log('update', ctx.updateType, (ctx.from && ctx.from.id)); } catch (_) {}
+  try {
+    if (ctx.updateType === 'callback_query') {
+      const data = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
+      console.log('update callback_query', (ctx.from && ctx.from.id), 'data=', data.slice(0, 80), 'len=', data.length);
+    } else {
+      console.log('update', ctx.updateType, (ctx.from && ctx.from.id));
+    }
+  } catch (_) {}
   return next();
 });
 
@@ -242,16 +248,10 @@ async function downloadTo(url, dest) {
   });
 }
 
-// --- MagicAPI Integration ---
-
 async function getFileUrl(ctx, fileId, localPath) {
   try {
-    // ALWAYS use the direct Telegram link. 
-    // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
     const link = await ctx.telegram.getFileLink(fileId);
     let url = link.href;
-
-    // MagicAPI workaround: Append extension if missing (Telegram URLs often lack it)
     try {
         const urlObj = new URL(url);
         const ext = path.extname(urlObj.pathname);
@@ -259,12 +259,10 @@ async function getFileUrl(ctx, fileId, localPath) {
             const localExt = path.extname(localPath);
             if (localExt) {
                 console.log(`Appending extension ${localExt} to URL as fragment`);
-                // Use Fragment to avoid breaking download while hinting extension to API
                 url += `#image${localExt}`; 
             }
         }
     } catch (e) { console.error('URL parse error', e); }
-
     console.log('Using Telegram Link:', url);
     return url;
   } catch (e) {
@@ -278,7 +276,6 @@ async function ack(ctx, text) {
     try { await ctx.answerCbQuery(text || 'Processing…'); } catch (_) {}
   }
 }
-
 
 async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 15 : 9;
@@ -324,7 +321,7 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
     hostname: 'api.magicapi.dev',
     path: endpoint,
     method: 'POST',
-    timeout: 30000, // 30s timeout
+    timeout: 30000,
     headers: {
       'x-magicapi-key': key,
       'Content-Type': 'application/json',
@@ -359,7 +356,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
       return { error: 'API Error: ' + (result.message || JSON.stringify(result)), points: user.points };
     }
 
-    // --- PERSISTENCE START ---
     if (!DB.pending_swaps) DB.pending_swaps = {};
     DB.pending_swaps[requestId] = {
       chatId: ctx.chat.id,
@@ -369,10 +365,6 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
       status: 'processing'
     };
     saveDB();
-    // --- PERSISTENCE END ---
-    
-    // We can clean up input files now because API should have downloaded them?
-    // MagicAPI downloads immediately. So yes, safe to clean up inputs.
     cleanupFiles([swapPath, targetPath]);
 
     pollMagicResult(requestId, ctx.chat.id);
@@ -394,7 +386,6 @@ function pollMagicResult(requestId, chatId) {
   
   const poll = () => {
     tries++;
-    // Stop after ~5 minutes (100 tries * 3s)
     if (tries > 100) {
        if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
        
@@ -407,7 +398,6 @@ function pollMagicResult(requestId, chatId) {
        return;
     }
 
-    // Notify user every 30 seconds (every 10 tries)
     if (tries % 10 === 0 && chatId) {
         bot.telegram.sendMessage(chatId, `Still processing... (${tries * 3}s elapsed)`).catch(()=>{});
     }
@@ -417,7 +407,7 @@ function pollMagicResult(requestId, chatId) {
       hostname: 'api.magicapi.dev',
       path: `/api/v1/magicapi/faceswap-v2/faceswap/${typePath}/status/${requestId}`,
       method: 'GET',
-      timeout: 10000, // 10s timeout
+      timeout: 10000,
       headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
     }, res => {
       let buf=''; res.on('data', c=>buf+=c); res.on('end', async () => {
@@ -426,7 +416,6 @@ function pollMagicResult(requestId, chatId) {
           const status = (j.status || j.state || '').toLowerCase();
           
           if (status.includes('success') || status.includes('done') || status.includes('completed')) {
-            // Extract output URL or Base64 (handle object output for video V2)
             let outData = j.output || j.result || j.url || j.image_url || j.video_url;
             if (outData && typeof outData === 'object') {
                outData = outData.video_url || outData.image_url || outData.url || Object.values(outData)[0];
@@ -454,13 +443,11 @@ function pollMagicResult(requestId, chatId) {
                 else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
               }
               
-              // Cleanup output file after sending (delay slightly to ensure send completes)
-              setTimeout(() => cleanupFiles([dest]), 10000); // 10s delay
+              setTimeout(() => cleanupFiles([dest]), 10000);
             } else {
                if (chatId) bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
             }
             
-            // Cleanup on success
             if (DB.pending_swaps[requestId]) {
               delete DB.pending_swaps[requestId];
               saveDB();
@@ -475,7 +462,6 @@ function pollMagicResult(requestId, chatId) {
             if (!DB.api_results) DB.api_results = {};
             DB.api_results[requestId] = { status: 'failed', error: errorMsg };
             
-            // Refund points on failure
             if (job && job.userId) {
               const u = getOrCreateUser(job.userId);
               const cost = job.isVideo ? 15 : 9; 
@@ -484,14 +470,12 @@ function pollMagicResult(requestId, chatId) {
               addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
               if (chatId) bot.telegram.sendMessage(chatId, `Refunded ${cost} points due to failure.`).catch(()=>{});
             }
-            // Cleanup on fail
             if (DB.pending_swaps[requestId]) {
               delete DB.pending_swaps[requestId];
               saveDB();
             }
 
           } else {
-            // Still processing
             setTimeout(poll, 3000);
           }
         } catch (e) { setTimeout(poll, 3000); }
@@ -502,11 +486,9 @@ function pollMagicResult(requestId, chatId) {
     req.end();
   };
   
-  // Start polling
   setTimeout(poll, 2000);
 }
 
-// --- RECOVERY LOGIC ---
 setTimeout(() => {
   const pendingIds = Object.keys(DB.pending_swaps || {});
   if (pendingIds.length > 0) {
@@ -514,7 +496,6 @@ setTimeout(() => {
     pendingIds.forEach(rid => {
       const job = DB.pending_swaps[rid];
       if (job) {
-        // Recover all jobs - API jobs have no chatId but should still be polled
         const chatId = job.chatId || null;
         console.log(`Resuming poll for job ${rid} (${job.isApi ? 'API' : 'Chat ' + chatId})`);
         pollMagicResult(rid, chatId);
@@ -523,8 +504,6 @@ setTimeout(() => {
   }
 }, 1000);
 
-
-// --- Bot Logic ---
 bot.command('start', ctx => {
   const u = getOrCreateUser(String(ctx.from.id));
   ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap to start.`, 
@@ -543,6 +522,7 @@ bot.command('status', ctx => {
 });
 
 bot.action('buy', async ctx => {
+  ack(ctx, 'Opening packages…');
   try {
     const u = getOrCreateUser(String(ctx.from.id));
     const rows = PRICING.map(p => [Markup.button.callback(`${p.points} Pts - ${formatUSD(p.usd)}`, `buy:${p.id}`)]);
@@ -551,6 +531,7 @@ bot.action('buy', async ctx => {
 });
 
 bot.action(/buy:(.+)/, async ctx => {
+  ack(ctx, 'Select currency…');
   try {
     const tierId = ctx.match[1];
     const tier = PRICING.find(t => t.id === tierId);
@@ -566,11 +547,13 @@ bot.action(/buy:(.+)/, async ctx => {
 });
 
 bot.action('cancel', ctx => {
+  ack(ctx, 'Cancelled');
   ctx.deleteMessage().catch(()=>{});
   ctx.reply('Cancelled.');
 });
 
 bot.action(/pay:(\w+):(.+)/, async ctx => {
+  ack(ctx, 'Creating checkout…');
   if (!stripe) return ctx.reply('Payments unavailable.');
   const curr = ctx.match[1];
   const tierId = ctx.match[2];
@@ -615,6 +598,7 @@ bot.action(/pay:(\w+):(.+)/, async ctx => {
 });
 
 bot.action(/confirm:(.+)/, async ctx => {
+  ack(ctx, 'Verifying payment…');
   const shortId = ctx.match[1];
   if (!stripe) return;
   
@@ -645,6 +629,7 @@ bot.command('faceswap', ctx => {
   ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
 });
 bot.action('faceswap', ctx => {
+  ack(ctx, 'Mode set: Video');
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
   ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
 });
@@ -654,6 +639,7 @@ bot.command('imageswap', ctx => {
   ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
 });
 bot.action('imageswap', ctx => {
+  ack(ctx, 'Mode set: Image');
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
 });
@@ -662,28 +648,24 @@ bot.on('photo', async ctx => {
   const uid = String(ctx.from.id);
   console.log('DEBUG: bot.on photo', process.pid, uid);
   
-  // --- STATELESS FLOW CHECK ---
   const replyText = (ctx.message.reply_to_message && ctx.message.reply_to_message.text) || '';
-  let orphanedFilePath = null; // Track file path for cleanup if needed
+  let orphanedFilePath = null;
   if (replyText) {
     const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
     const link = await ctx.telegram.getFileLink(fileId);
     const localPath = path.join(uploadsDir, `photo_${uid}_${Date.now()}.jpg`);
-    orphanedFilePath = localPath; // Track for potential cleanup
+    orphanedFilePath = localPath;
     await downloadTo(link.href, localPath);
 
     if (replyText.includes('for VIDEO Face Swap')) {
-        // Step 1: Swap Photo received for Video
         ctx.reply(`Received SWAP photo. Now **REPLY** to this message with the TARGET VIDEO.\nRef: vid_swap:${fileId}`, Markup.forceReply());
         return;
     }
     if (replyText.includes('for IMAGE Face Swap')) {
-        // Step 1: Swap Photo received for Image
         ctx.reply(`Received SWAP photo. Now **REPLY** to this message with the TARGET PHOTO.\nRef: img_swap:${fileId}`, Markup.forceReply());
         return;
     }
     if (replyText.includes('Ref: img_swap:')) {
-        // Step 2: Target Photo received for Image
         const match = replyText.match(/Ref: img_swap:(.+)/);
         if (match && match[1]) {
            const swapFileId = match[1];
@@ -698,11 +680,9 @@ bot.on('photo', async ctx => {
            return;
         }
     }
-    // Clean up the file downloaded in replyText block since it wasn't used
     cleanupFiles([orphanedFilePath]);
-    orphanedFilePath = null; // Clear since we've cleaned it up
+    orphanedFilePath = null;
   }
-  // --- END STATELESS FLOW ---
   const p = getPending(uid);
   if (!p) {
     return ctx.reply(
@@ -736,7 +716,7 @@ bot.on('photo', async ctx => {
     setPending(uid, null);
   } else if (p.step === 'target' && p.mode === 'faceswap') {
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
-    cleanupFiles([localPath]); // Not used, so delete
+    cleanupFiles([localPath]);
   }
 });
 
@@ -744,7 +724,6 @@ bot.on('video', async ctx => {
   const uid = String(ctx.from.id);
   console.log('DEBUG: bot.on video', process.pid, uid);
   
-  // --- STATELESS FLOW CHECK ---
   const replyText = (ctx.message.reply_to_message && ctx.message.reply_to_message.text) || '';
   if (replyText.includes('Ref: vid_swap:')) {
       const fileId = ctx.message.video.file_id;
@@ -766,7 +745,6 @@ bot.on('video', async ctx => {
          return;
       }
   }
-  // --- END STATELESS FLOW ---
   const p = getPending(uid);
   if (!p) {
     return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
@@ -806,7 +784,6 @@ bot.command('debug', ctx => {
   ctx.reply('Current State: ' + JSON.stringify(p || 'None'));
 });
 
-// --- Express App ---
 bot.on('callback_query', async (ctx) => {
   try {
     const d = (ctx.update && ctx.update.callback_query && ctx.update.callback_query.data) || '';
@@ -825,7 +802,6 @@ app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 app.use('/outputs', express.static(outputsDir));
 
-// Webhook for Stripe
 app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature'];
   try {
@@ -849,8 +825,6 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res
   }
 });
 
-
-// Test-friendly endpoints
 app.get('/healthz', (req, res) => {
   res.json({ mode: 'backend', env: { node: process.version, public: !!PUBLIC_BASE } });
 });
@@ -903,13 +877,11 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     const userId = req.body && req.body.userId;
     if (!userId) return res.status(400).json({ error: 'user required' });
     
-    // Check files
     const swapFile = req.files && req.files['swap'] ? req.files['swap'][0] : null;
     const targetFile = req.files && req.files['target'] ? req.files['target'][0] : null;
     
     if (!swapFile || !targetFile) return res.status(400).json({ error: 'swap and target files required' });
     
-    // Save files
     const swapPath = path.join(uploadsDir, `swap_${userId}_${Date.now()}.${swapFile.originalname.split('.').pop()}`);
     const targetPath = path.join(uploadsDir, `target_${userId}_${Date.now()}.${targetFile.originalname.split('.').pop()}`);
     
@@ -932,7 +904,6 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(swapPath)}`;
     const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(targetPath)}`;
     
-    // Call MagicAPI
     const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
     const endpoint = isVideo 
       ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
@@ -968,7 +939,6 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     
     const requestId = result && (result.request_id || result.requestId || result.id);
     if (!requestId) {
-        // Refund
         u.points += cost;
         saveDB();
         cleanupFiles([swapPath, targetPath]);
@@ -986,7 +956,7 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     saveDB();
     cleanupFiles([swapPath, targetPath]);
     
-    pollMagicResult(requestId, null); // Start polling without chatId
+    pollMagicResult(requestId, null);
     
     res.json({ ok: true, requestId, message: 'Job started. Poll status at /faceswap/status/' + requestId });
     
@@ -1006,10 +976,8 @@ app.get('/faceswap/status/:requestId', (req, res) => {
     res.status(404).json({ error: 'Job not found or expired' });
 });
 
-// Root
 app.get('/', (req, res) => res.send('Telegram Bot Server Running'));
 
-// Start
 const PORT = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== 'test') {
   
@@ -1033,7 +1001,6 @@ app.get('/debug-bot', async (req, res) => {
 app.post('/admin/grant-points', (req, res) => {
   try {
     const { userId, amount, reason, secret } = req.body;
-    // Security: Only allow ADMIN_SECRET from environment, no hardcoded fallback
     if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) { 
         return res.status(403).json({ error: 'Forbidden' });
     }
@@ -1062,10 +1029,9 @@ bot.command('claim_60_credits', ctx => {
     ctx.reply('Success! Added 60 points to your account.');
 });
 
-// Error handling middleware
 app.use((err, req, res, next) => {
   if (err && err.code === 'LIMIT_UNEXPECTED_FILE') {
-    return res.status(400).json({ error: 'Unexpected field. Please use "swap" and "target" fields.' });
+    return res.status(400).json({ error: 'Unexpected field. Please use \"swap\" and \"target\" fields.' });
   }
   if (err) {
     console.error('Express Error:', err);
@@ -1079,16 +1045,10 @@ app.listen(PORT, async () => {
     
     if (!process.env.BOT_TOKEN) {
       console.error('CRITICAL ERROR: BOT_TOKEN is missing. The bot cannot connect to Telegram.');
-      return; // Stop startup to prevent crash loop
+      return;
     }
 
-    // Determine Webhook vs Polling
-    // If PUBLIC_BASE is set (e.g. Vercel URL), we should prefer Webhook to avoid serverless timeouts/conflicts.
-        // Determine Webhook vs Polling
-    // Only use Webhook if explicitly configured or we are clearly in a cloud env
     const WEBHOOK_PATH = '/telegram/webhook';
-    // Use TELEGRAM_WEBHOOK_URL if set. 
-    // Otherwise, use PUBLIC_BASE only if ENABLE_WEBHOOK is true (to avoid breaking local dev).
     const shouldUseWebhook = process.env.TELEGRAM_WEBHOOK_URL || (process.env.ENABLE_WEBHOOK === 'true' && typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE);
     const PREFERRED_URL = process.env.TELEGRAM_WEBHOOK_URL || (typeof PUBLIC_BASE !== 'undefined' && PUBLIC_BASE ? PUBLIC_BASE : '');
 
@@ -1096,10 +1056,8 @@ app.listen(PORT, async () => {
       const fullUrl = (process.env.TELEGRAM_WEBHOOK_URL || PREFERRED_URL).replace(/\/$/, '') + WEBHOOK_PATH;
       console.log(`Configuring Webhook at: ${fullUrl}`);
       
-      // Mount the webhook callback on the Express app
       app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
       
-      // Tell Telegram to send updates to this URL
       try {
         await bot.telegram.setWebhook(fullUrl);
         console.log('Webhook successfully set with Telegram.');
@@ -1108,7 +1066,6 @@ app.listen(PORT, async () => {
       }
     } else {
       console.log('Starting in POLLING mode (Webhook disabled)...');
-      // Clear webhook to ensure polling works
       try { await bot.telegram.deleteWebhook(); } catch(e) {}
       
       bot.launch().then(() => console.log('Bot launched via Polling')).catch(e => console.error('Bot polling launch failed', e));
@@ -1121,3 +1078,4 @@ module.exports = { app };
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
