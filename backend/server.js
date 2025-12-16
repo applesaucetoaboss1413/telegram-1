@@ -249,8 +249,8 @@ async function getFileUrl(ctx, fileId, localPath) {
         if (!ext || ext.length < 2) {
             const localExt = path.extname(localPath);
             if (localExt) {
-                console.log(`Appending extension ${localExt} to URL as query param`);
-                url += `?fake=image${localExt}`; 
+                console.log(`Appending extension ${localExt} to URL as fragment`);
+                url += `#image${localExt}`; 
             }
         }
     } catch (e) { console.error('URL parse error', e); }
@@ -284,7 +284,8 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
   const targetUrl = await getFileUrl(ctx, targetFileId, targetPath);
 
   if (!swapUrl || !targetUrl) {
-    adjustPoints(u.id, cost, 'faceswap_refund_urls_failed', { isVideo });
+    user.points += cost;
+    saveDB();
     return { error: 'Failed to generate file URLs.', points: user.points };
   }
 
@@ -440,9 +441,10 @@ function pollMagicResult(requestId, chatId) {
             }
             
           } else if (status.includes('fail') || status.includes('error')) {
-            const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : status);
-            if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).`).catch(()=>{});
-            console.error('Swap Failed Details:', JSON.stringify(j));
+            const rawError = JSON.stringify(j);
+            const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : `Status: ${status}`);
+            if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).\nDebug: ${rawError.substring(0, 200)}`).catch(()=>{});
+            console.error('Swap Failed Details:', rawError);
             
             if (!DB.api_results) DB.api_results = {};
             DB.api_results[requestId] = { status: 'failed', error: errorMsg };
