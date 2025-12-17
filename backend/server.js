@@ -826,7 +826,7 @@ async function startBot() {
 
 async function stopBot(reason) {
   if (!isBotRunning) {
-      // If we are in Webhook mode or bot wasn't running, just exit
+      if (reason) console.log(`Shutdown signal ${reason} received (Bot not running). Exiting.`);
       process.exit(0);
       return;
   }
@@ -839,6 +839,7 @@ async function stopBot(reason) {
   } finally {
     isBotRunning = false;
     console.log('Bot stopped.');
+    process.exit(0);
   }
 }
 
@@ -855,5 +856,7 @@ app.listen(PORT, async () => {
 module.exports = { app };
 
 // Graceful Shutdown Logic
-process.once('SIGINT', () => stopBot('SIGINT'));
-process.once('SIGTERM', () => stopBot('SIGTERM'));
+if (!shouldUseWebhook) {
+  process.once('SIGINT', () => stopBot('SIGINT'));
+  process.once('SIGTERM', () => stopBot('SIGTERM'));
+}
