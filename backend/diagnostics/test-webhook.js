@@ -1,5 +1,9 @@
 const { Telegraf } = require('telegraf');
-require('dotenv').config({ path: '../.env' });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+
+console.log('DEBUG: Token length:', (process.env.BOT_TOKEN || '').length);
+console.log('DEBUG: Token start:', (process.env.BOT_TOKEN || '').substring(0, 5));
 
 async function testWebhook() {
   const bot = new Telegraf(process.env.BOT_TOKEN);
