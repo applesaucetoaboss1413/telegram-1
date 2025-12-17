@@ -440,12 +440,12 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
 
   const endpoint = isVideo 
     ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
-    : 'https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap';
+    : 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/image';
   
   const payload = isVideo ? {
     target_url: targetUrl, swap_url: swapUrl
   } : {
-    swap_image: swapUrl, target_image: targetUrl
+    target_url: targetUrl, swap_url: swapUrl
   };
 
   try {
@@ -751,6 +751,112 @@ app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 app.use('/outputs', express.static(outputsDir));
 
+const upload = multer();
+
+app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'target', maxCount: 1 }]), async (req, res) => {
+  try {
+    const userId = req.body && req.body.userId;
+    if (!userId) return res.status(400).json({ error: 'user required' });
+    
+    const swapFile = req.files && req.files['swap'] ? req.files['swap'][0] : null;
+    const targetFile = req.files && req.files['target'] ? req.files['target'][0] : null;
+    
+    if (!swapFile || !targetFile) return res.status(400).json({ error: 'swap and target files required' });
+    
+    const swapExt = swapFile.originalname && swapFile.originalname.includes('.') ? swapFile.originalname.split('.').pop() : 'dat';
+    const targetExt = targetFile.originalname && targetFile.originalname.includes('.') ? targetFile.originalname.split('.').pop() : 'dat';
+    
+    const swapPath = path.join(uploadsDir, `swap_${userId}_${Date.now()}.${swapExt}`);
+    const targetPath = path.join(uploadsDir, `target_${userId}_${Date.now()}.${targetExt}`);
+    
+    fs.writeFileSync(swapPath, swapFile.buffer);
+    fs.writeFileSync(targetPath, targetFile.buffer);
+    
+    const isVideo = targetFile.mimetype && targetFile.mimetype.startsWith('video');
+    const u = getOrCreateUser(userId);
+    
+    const cost = isVideo ? 15 : 9;
+    if ((u.points || 0) < cost) {
+         cleanupFiles([swapPath, targetPath]);
+         return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
+    }
+    
+    u.points -= cost;
+    saveDB();
+    addAudit(u.id, -cost, 'faceswap_api', { isVideo });
+
+    if (!PUBLIC_BASE) {
+      u.points += cost;
+      saveDB();
+      cleanupFiles([swapPath, targetPath]);
+      return res.status(500).json({ error: 'Server config error: PUBLIC_URL not set' });
+    }
+
+    const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(swapPath)}`;
+    const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(targetPath)}`;
+
+    const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
+    if (!key) {
+      u.points += cost;
+      saveDB();
+      cleanupFiles([swapPath, targetPath]);
+      return res.status(500).json({ error: 'Server config error: Missing API Key', points: u.points });
+    }
+
+    const endpoint = isVideo 
+      ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
+      : 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/image';
+
+    const payload = {
+      target_url: targetUrl,
+      swap_url: swapUrl
+    };
+
+    const result = await callMagicAPIWithRetry(endpoint, payload, key);
+    const data = result && result.data;
+    const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && (data.result.video_url || data.result.image_url || data.result.url)));
+
+    if (outputUrl) {
+      cleanupFiles([swapPath, targetPath]);
+      return res.json({ ok: true, output: outputUrl, points: u.points });
+    }
+
+    if (data && data.request_id) {
+      const requestId = data.request_id;
+      if (!DB.pending_swaps) DB.pending_swaps = {};
+      DB.pending_swaps[requestId] = {
+        userId: u.id,
+        startTime: Date.now(),
+        isVideo: isVideo,
+        status: 'processing',
+        isApi: true
+      };
+      saveDB();
+      cleanupFiles([swapPath, targetPath]);
+      pollMagicResult(requestId, null);
+      return res.json({ ok: true, requestId, message: 'Job started. Poll status at /faceswap/status/' + requestId });
+    }
+
+    u.points += cost;
+    saveDB();
+    cleanupFiles([swapPath, targetPath]);
+    return res.status(500).json({ error: 'No output URL or request id from API', points: u.points });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/faceswap/status/:requestId', (req, res) => {
+  const rid = req.params.requestId;
+  if (DB.pending_swaps[rid]) {
+      return res.json({ status: 'processing' });
+  }
+  if (DB.api_results && DB.api_results[rid]) {
+      return res.json(DB.api_results[rid]);
+  }
+  res.status(404).json({ error: 'Job not found or expired' });
+});
+
 app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature'];
   try {
@@ -843,20 +949,21 @@ async function stopBot(reason) {
   }
 }
 
-app.listen(PORT, async () => {
-    console.log(`Server running on port ${PORT}`);
-    
-    if (!process.env.BOT_TOKEN) {
-      console.error('CRITICAL ERROR: BOT_TOKEN is missing.');
-    }
-    
-    await startBot();
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, async () => {
+      console.log(`Server running on port ${PORT}`);
+      
+      if (!process.env.BOT_TOKEN) {
+        console.error('CRITICAL ERROR: BOT_TOKEN is missing.');
+      }
+      
+      await startBot();
+  });
+
+  if (!shouldUseWebhook) {
+    process.once('SIGINT', () => stopBot('SIGINT'));
+    process.once('SIGTERM', () => stopBot('SIGTERM'));
+  }
+}
 
 module.exports = { app };
-
-// Graceful Shutdown Logic
-if (!shouldUseWebhook) {
-  process.once('SIGINT', () => stopBot('SIGINT'));
-  process.once('SIGTERM', () => stopBot('SIGTERM'));
-}
