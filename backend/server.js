@@ -785,47 +785,75 @@ const publicUrl = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || p
 // We use webhook if any public URL is provided
 const shouldUseWebhook = !!publicUrl;
 
-if (shouldUseWebhook) {
-  let domain = publicUrl;
-  if (!domain.startsWith('http')) domain = 'https://' + domain;
-  // Ensure no double slashes
-  const fullUrl = domain.replace(/\/$/, '') + WEBHOOK_PATH;
-  
-  console.log(`🚀 Starting in WEBHOOK Mode`);
-  console.log(`   URL: ${fullUrl}`);
-  
-  // Mount webhook middleware BEFORE listen to ensure route exists
-  app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
-  
-  // Set webhook on Telegram side
-  // We do this after a slight delay to ensure server is up, or just fire and forget
-  bot.telegram.setWebhook(fullUrl).then(() => {
-    console.log('✅ Webhook successfully set with Telegram.');
-  }).catch(e => {
-    console.error('❌ FAILED to set Webhook:', e.message);
-  });
-} else {
-  console.log('🔄 Starting in POLLING Mode (No Public URL found)');
-  // Delete webhook to ensure polling works
-  bot.telegram.deleteWebhook().then(() => {
+let isBotRunning = false;
+
+async function startBot() {
+  if (shouldUseWebhook) {
+    let domain = publicUrl;
+    if (!domain.startsWith('http')) domain = 'https://' + domain;
+    // Ensure no double slashes
+    const fullUrl = domain.replace(/\/$/, '') + WEBHOOK_PATH;
+    
+    console.log(`🚀 Starting in WEBHOOK Mode`);
+    console.log(`   URL: ${fullUrl}`);
+    
+    // Mount webhook middleware BEFORE listen to ensure route exists
+    app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
+    
+    // Set webhook on Telegram side
+    try {
+      await bot.telegram.setWebhook(fullUrl);
+      console.log('✅ Webhook successfully set with Telegram.');
+    } catch (e) {
+      console.error('❌ FAILED to set Webhook:', e.message);
+    }
+  } else {
+    console.log('🔄 Starting in POLLING Mode (No Public URL found)');
+    try {
+      // Delete webhook to ensure polling works
+      await bot.telegram.deleteWebhook();
       console.log('   Old webhook deleted.');
-      return bot.launch();
-  }).then(() => {
+      
+      await bot.launch();
+      isBotRunning = true;
       console.log('✅ Bot launched via Polling');
-  }).catch(e => {
+    } catch (e) {
       console.error('❌ Polling launch failed:', e);
-  });
+      process.exit(1);
+    }
+  }
 }
 
-app.listen(PORT, () => {
+async function stopBot(reason) {
+  if (!isBotRunning) {
+      // If we are in Webhook mode or bot wasn't running, just exit
+      process.exit(0);
+      return;
+  }
+  
+  console.log(`Stopping bot... Reason: ${reason}`);
+  try {
+    await bot.stop(reason);
+  } catch (e) {
+    console.error('Error stopping bot:', e.message);
+  } finally {
+    isBotRunning = false;
+    console.log('Bot stopped.');
+  }
+}
+
+app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
     
     if (!process.env.BOT_TOKEN) {
       console.error('CRITICAL ERROR: BOT_TOKEN is missing.');
     }
+    
+    await startBot();
 });
 
 module.exports = { app };
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+// Graceful Shutdown Logic
+process.once('SIGINT', () => stopBot('SIGINT'));
+process.once('SIGTERM', () => stopBot('SIGTERM'));
