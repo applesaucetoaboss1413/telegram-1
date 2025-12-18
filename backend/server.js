@@ -261,6 +261,32 @@ async function ack(ctx, text) {
   }
 }
 
+let promoTimer = null;
+
+function startPromoLoop() {
+  const channelId = process.env.PROMO_CHANNEL_ID || (DB.channel && DB.channel.defaultChannelId);
+  if (!channelId) return;
+  if (promoTimer) return;
+  const messages = [
+    '👥 FaceSwap Bot: Swap faces in photos or videos in minutes. Use /faceswap or /imageswap to start.',
+    '📸 Image FaceSwap: 1 API unit per image. Send a clear face photo and a target photo to begin.',
+    '🎥 Video FaceSwap: Pricing based on video length and resolution. Short clips are affordable and fast.',
+    '💰 Need more credits? Use the Buy Points button in /start to top up instantly.',
+    'ℹ️ FaceSwap V2 API: High-quality swaps, up to 4 minute videos. Try a sample swap now.'
+  ];
+  let index = 0;
+  const intervalMs = Number(process.env.PROMO_INTERVAL_MS || 3600000);
+  promoTimer = setInterval(async () => {
+    try {
+      const text = messages[index % messages.length];
+      index += 1;
+      await bot.telegram.sendMessage(channelId, text, { disable_web_page_preview: true });
+    } catch (e) {
+      console.error('Promo send error:', e.message || e);
+    }
+  }, intervalMs);
+}
+
 // Helper: Retry Logic
 async function callMagicAPIWithRetry(endpoint, payload, key, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -323,27 +349,16 @@ function pollMagicResult(requestId, chatId) {
     }
 
     try {
-      let response;
-      if (isVideo) {
-          // Capix Polling (POST)
-          const params = new URLSearchParams();
-          params.append('request_id', requestId);
-          response = await fetch('https://api.magicapi.dev/api/v1/capix/faceswap/result/', {
-              method: 'POST',
-              headers: { 
-                  'x-magicapi-key': key, 
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                  'accept': 'application/json'
-              },
-              body: params
-          });
-      } else {
-          // Fallback/Legacy Polling (GET)
-          response = await fetch(`https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/status/${requestId}`, {
-              method: 'GET',
-              headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
-          });
-      }
+      const kind = isVideo ? 'video' : 'image';
+      const statusUrl = `https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/${kind}/status/${requestId}`;
+      const response = await fetch(statusUrl, {
+          method: 'GET',
+          headers: { 
+            'x-magicapi-key': key, 
+            'Content-Type': 'application/json',
+            'accept': 'application/json'
+          }
+      });
 
       const text = await response.text();
       let j;
@@ -439,13 +454,14 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   }
 
   const endpoint = isVideo 
-    ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
-    : 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/image';
+    ? 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/run'
+    : 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/image/run';
   
-  const payload = isVideo ? {
-    target_url: targetUrl, swap_url: swapUrl
-  } : {
-    target_url: targetUrl, swap_url: swapUrl
+  const payload = {
+    input: {
+      swap_image: swapUrl,
+      [isVideo ? 'target_video' : 'target_image']: targetUrl
+    }
   };
 
   try {
@@ -458,24 +474,26 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
           return await callMagicAPIWithRetry(endpoint, payload, key);
       });
 
-      const data = result.data;
+      const data = result.data || {};
       const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && data.result.video_url));
 
       if (outputUrl) {
           return { success: true, output: outputUrl, points: user.points };
-      } else if (data && data.request_id) {
-          if (!DB.pending_swaps) DB.pending_swaps = {};
-          DB.pending_swaps[data.request_id] = {
-            chatId: ctx.chat.id,
-            userId: u.id,
-            startTime: Date.now(),
-            isVideo: isVideo,
-            status: 'processing'
-          };
-          saveDB();
-          pollMagicResult(data.request_id, ctx.chat.id);
-          return { started: true, requestId: data.request_id, points: user.points };
       } else {
+          const requestId = data.request_id || data.requestId || data.id;
+          if (requestId) {
+            if (!DB.pending_swaps) DB.pending_swaps = {};
+            DB.pending_swaps[requestId] = {
+              chatId: ctx.chat.id,
+              userId: u.id,
+              startTime: Date.now(),
+              isVideo: isVideo,
+              status: 'processing'
+            };
+            saveDB();
+            pollMagicResult(requestId, ctx.chat.id);
+            return { started: true, requestId, points: user.points };
+          }
           throw new Error('No output URL or Request ID in response');
       }
 
@@ -646,40 +664,14 @@ async function processSwapFlow(ctx, uid, swapFileId, targetFileId, isVideo) {
 
 bot.on('photo', async ctx => {
   const uid = String(ctx.from.id);
-  const replyText = (ctx.message.reply_to_message && ctx.message.reply_to_message.text) || '';
-  
-  if (replyText) {
-    const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
-    
-    if (replyText.includes('for VIDEO Face Swap')) {
-        ctx.reply(`Received SWAP photo. Now **REPLY** to this message with the TARGET VIDEO.\nRef: vid_swap:${fileId}`, Markup.forceReply());
-        return;
-    }
-    if (replyText.includes('for IMAGE Face Swap')) {
-        ctx.reply(`Received SWAP photo. Now **REPLY** to this message with the TARGET PHOTO.\nRef: img_swap:${fileId}`, Markup.forceReply());
-        return;
-    }
-    if (replyText.includes('Ref: img_swap:')) {
-        const match = replyText.match(/Ref: img_swap:(.+)/);
-        if (match && match[1]) {
-           const swapFileId = match[1];
-           await processSwapFlow(ctx, uid, swapFileId, fileId, false);
-           return;
-        }
-    }
-  }
-  
   const p = getPending(uid);
-  if (!p) {
-    return ctx.reply(
-      '⚠️ **Action Required**\n\nTo perform a Face Swap, you must:\n1. Select a mode below.\n2. When asked, **REPLY** to the bot\'s message with your photo.\n\n(Simply sending a photo without replying will not work).', 
-      Markup.inlineKeyboard([
-        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
-      ])
-    );
-  }
-
   const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
+
+  if (!p) {
+    const newState = { mode: 'imageswap', step: 'target', swapFileId: fileId };
+    setPending(uid, newState);
+    return ctx.reply('Got your SWAP photo. Now send the TARGET photo to complete the swap.');
+  }
 
   if (p.step === 'swap') {
     p.swapFileId = fileId;
@@ -697,18 +689,6 @@ bot.on('photo', async ctx => {
 
 bot.on('video', async ctx => {
   const uid = String(ctx.from.id);
-  const replyText = (ctx.message.reply_to_message && ctx.message.reply_to_message.text) || '';
-  
-  if (replyText.includes('Ref: vid_swap:')) {
-      const fileId = ctx.message.video.file_id;
-      const match = replyText.match(/Ref: vid_swap:(.+)/);
-      if (match && match[1]) {
-         const swapFileId = match[1];
-         await processSwapFlow(ctx, uid, swapFileId, fileId, true);
-         return;
-      }
-  }
-  
   const p = getPending(uid);
   if (!p || p.mode !== 'faceswap' || p.step !== 'target') {
     return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
@@ -804,16 +784,18 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     }
 
     const endpoint = isVideo 
-      ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
-      : 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/image';
+      ? 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/run'
+      : 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/image/run';
 
     const payload = {
-      target_url: targetUrl,
-      swap_url: swapUrl
+      input: {
+        swap_image: swapUrl,
+        [isVideo ? 'target_video' : 'target_image']: targetUrl
+      }
     };
 
     const result = await callMagicAPIWithRetry(endpoint, payload, key);
-    const data = result && result.data;
+    const data = (result && result.data) || {};
     const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && (data.result.video_url || data.result.image_url || data.result.url)));
 
     if (outputUrl) {
@@ -821,8 +803,8 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
       return res.json({ ok: true, output: outputUrl, points: u.points });
     }
 
-    if (data && data.request_id) {
-      const requestId = data.request_id;
+    const requestId = data.request_id || data.requestId || data.id;
+    if (requestId) {
       if (!DB.pending_swaps) DB.pending_swaps = {};
       DB.pending_swaps[requestId] = {
         userId: u.id,
@@ -927,6 +909,11 @@ async function startBot() {
       console.error('❌ Polling launch failed:', e);
       process.exit(1);
     }
+  }
+  try {
+    startPromoLoop();
+  } catch (e) {
+    console.error('Promo loop init error:', e.message || e);
   }
 }
 
