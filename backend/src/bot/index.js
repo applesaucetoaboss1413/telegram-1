@@ -234,10 +234,19 @@ function initBot() {
     if (!fs.existsSync(DIRS.uploads)) fs.mkdirSync(DIRS.uploads, { recursive: true });
     if (!fs.existsSync(DIRS.outputs)) fs.mkdirSync(DIRS.outputs, { recursive: true });
 
-    if (process.env.TELEGRAM_FORCE_POLLING === 'true') {
-        bot.launch().then(() => console.log('Bot launched (Polling)')).catch(console.error);
+    // Launch bot - Telegraf will handle webhook vs polling based on how it's configured
+    // In webhook mode (when setWebhook is called), bot.launch() is still needed to initialize handlers
+    // The actual webhook endpoint is registered in server.js via bot.webhookCallback()
+    if (!process.env.PUBLIC_ORIGIN && !process.env.PUBLIC_URL && !process.env.RENDER_EXTERNAL_URL) {
+        // No public URL means we're running locally - use polling
+        console.log('[Bot] No PUBLIC_ORIGIN detected, using polling mode');
+        bot.launch().then(() => console.log('✅ Bot launched in POLLING mode')).catch(console.error);
+    } else {
+        // Public URL exists - webhook mode will be set up by server.js
+        // But we still need to "launch" the bot to initialize it
+        console.log('[Bot] PUBLIC_ORIGIN detected, bot will use WEBHOOK mode (configured in server.js)');
     }
-    // Webhook setup is handled by the express server in src/server.js
+
     return bot;
 }
 
