@@ -24,8 +24,8 @@ module.exports = {
     PUBLIC_ORIGIN: computeOrigin(),
     PRICING,
     DIRS: {
-        uploads: require('path').join(__dirname, '../../uploads'),
-        outputs: require('path').join(__dirname, '../../outputs'),
-        data: require('path').join(__dirname, '../../data.json')
+        uploads: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'uploads') : require('path').join(__dirname, '../../uploads'),
+        outputs: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'outputs') : require('path').join(__dirname, '../../outputs'),
+        data: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'data.json') : require('path').join(__dirname, '../../data.json')
     }
 };
