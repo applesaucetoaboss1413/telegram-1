@@ -132,8 +132,8 @@ async function runFaceswap(u, photoPath, videoPath, chatId, bot) {
 
         const requestId = result && (result.request_id || result.requestId || result.id);
         if (!requestId) {
-            console.error('MagicAPI Error:', result);
-            return { error: 'submit error', required: 0, points: user.points };
+            console.error('MagicAPI Error (No Request ID):', JSON.stringify(result, null, 2));
+            return { error: 'MagicAPI submission failed: no request_id returned', required: 0, points: user.points };
         }
 
         startMagicResultPoll(String(requestId), String(chatId || ''), bot);
@@ -179,7 +179,10 @@ async function runFaceswapImage(u, swapPhotoPath, targetPhotoPath, chatId, bot) 
         });
 
         const requestId = result && (result.request_id || result.requestId || result.id);
-        if (!requestId) return { error: 'submit error', required: 0, points: user.points };
+        if (!requestId) {
+            console.error('MagicAPI Image Error (No Request ID):', JSON.stringify(result, null, 2));
+            return { error: 'MagicAPI Image submission failed: no request_id returned', required: 0, points: user.points };
+        }
 
         startMagicResultPoll(String(requestId), String(chatId || ''), bot);
         return { started: true, points: user.points };

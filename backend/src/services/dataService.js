@@ -53,9 +53,24 @@ function updateUser(id, updates) {
     return data.users[id];
 }
 
+function getOrCreateUser(id, defaults = {}) {
+    const data = loadData();
+    if (!data.users[id]) {
+        data.users[id] = {
+            id,
+            points: 9, // Start with 9 points
+            created_at: Date.now(),
+            ...defaults
+        };
+        saveData(data);
+    }
+    return data.users[id];
+}
+
 module.exports = {
     loadData,
     saveData,
     getUser,
-    updateUser
+    updateUser,
+    getOrCreateUser
 };
