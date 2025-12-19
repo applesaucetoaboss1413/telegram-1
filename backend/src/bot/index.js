@@ -10,6 +10,12 @@ const bot = new Telegraf(BOT_TOKEN);
 // State tracking for multi-step flows
 const pending = {};
 
+// Global Error Handler
+bot.catch((err, ctx) => {
+    console.error(`Ooops, encountered an error for ${ctx.updateType}`, err);
+    ctx.reply('An unexpected error occurred. Please try again later.').catch(() => { });
+});
+
 // Helpers
 function channelKeyboard() {
     return Markup.inlineKeyboard([
@@ -145,69 +151,79 @@ bot.action(/buy:(.+)/, async ctx => {
 
 // Photo/Video handling (The core interaction)
 bot.on('photo', async ctx => {
-    const uid = String(ctx.from.id);
-    const p = pending[uid];
-    if (!p) return; // Ignore random photos if not in a flow
+    try {
+        const uid = String(ctx.from.id);
+        const p = pending[uid];
+        if (!p) return; // Ignore random photos if not in a flow
 
-    const photos = ctx.message.photo;
-    const fileId = photos[photos.length - 1].file_id;
-    const link = await ctx.telegram.getFileLink(fileId);
-    const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
-    await downloadTo(String(link), dest);
+        const photos = ctx.message.photo;
+        const fileId = photos[photos.length - 1].file_id;
+        const link = await ctx.telegram.getFileLink(fileId);
+        const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
+        await downloadTo(String(link), dest);
 
-    if (p.mode === 'faceswap' || p.mode === 'imageswap') {
-        if (!p.swap) {
-            p.swap = dest;
-            await ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET VIDEO.' : 'Great! Now send the TARGET PHOTO.');
-        } else {
-            // This case is only for imageswap where target is a photo
-            if (p.mode === 'imageswap') {
-                p.target = dest;
-                await ctx.reply('Processing Image Face Swap...');
-                const u = getOrCreateUser(uid);
-                const r = await runFaceswapImage(u, p.swap, p.target, String(ctx.chat.id), bot);
-                delete pending[uid];
-                if (r.error) {
-                    await ctx.reply(`Failed: ${r.error}`);
-                } else {
-                    await ctx.reply(`Started! Points remaining: ${r.points}`);
-                }
+        if (p.mode === 'faceswap' || p.mode === 'imageswap') {
+            if (!p.swap) {
+                p.swap = dest;
+                await ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET VIDEO.' : 'Great! Now send the TARGET PHOTO.');
             } else {
-                // User sent a photo but we expected a video for video swap
-                await ctx.reply('Please send a VIDEO for the target, or start over.');
+                // This case is only for imageswap where target is a photo
+                if (p.mode === 'imageswap') {
+                    p.target = dest;
+                    await ctx.reply('Processing Image Face Swap...');
+                    const u = getOrCreateUser(uid);
+                    const r = await runFaceswapImage(u, p.swap, p.target, String(ctx.chat.id), bot);
+                    delete pending[uid];
+                    if (r.error) {
+                        await ctx.reply(`Failed: ${r.error}`);
+                    } else {
+                        await ctx.reply(`Started! Points remaining: ${r.points}`);
+                    }
+                } else {
+                    // User sent a photo but we expected a video for video swap
+                    await ctx.reply('Please send a VIDEO for the target, or start over.');
+                }
             }
+        } else if (p.mode === 'createvideo') {
+            // ... (Logic for createvideo if needed, omitting for brevity/focus on spam fix)
         }
-    } else if (p.mode === 'createvideo') {
-        // ... (Logic for createvideo if needed, omitting for brevity/focus on spam fix)
+    } catch (e) {
+        console.error('Photo handler error:', e);
+        ctx.reply('Sorry, I had trouble processing that photo.').catch(() => { });
     }
 });
 
 bot.on('video', async ctx => {
-    const uid = String(ctx.from.id);
-    const p = pending[uid];
-    if (!p) return;
+    try {
+        const uid = String(ctx.from.id);
+        const p = pending[uid];
+        if (!p) return;
 
-    if (p.mode === 'faceswap') {
-        if (!p.swap) {
-            await ctx.reply('Please send the swap PHOTO first.');
-            return;
+        if (p.mode === 'faceswap') {
+            if (!p.swap) {
+                await ctx.reply('Please send the swap PHOTO first.');
+                return;
+            }
+            const fileId = ctx.message.video.file_id;
+            const link = await ctx.telegram.getFileLink(fileId);
+            const dest = path.join(DIRS.uploads, `video_${uid}_${Date.now()}.mp4`);
+            await downloadTo(String(link), dest);
+
+            p.target = dest;
+            await ctx.reply('Processing Video Face Swap...');
+            const u = getOrCreateUser(uid);
+            const r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id), bot);
+            delete pending[uid];
+
+            if (r.error) {
+                await ctx.reply(`Failed: ${r.error}`);
+            } else {
+                await ctx.reply(`Started! Points remaining: ${r.points}`);
+            }
         }
-        const fileId = ctx.message.video.file_id;
-        const link = await ctx.telegram.getFileLink(fileId);
-        const dest = path.join(DIRS.uploads, `video_${uid}_${Date.now()}.mp4`);
-        await downloadTo(String(link), dest);
-
-        p.target = dest;
-        await ctx.reply('Processing Video Face Swap...');
-        const u = getOrCreateUser(uid);
-        const r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id), bot);
-        delete pending[uid];
-
-        if (r.error) {
-            await ctx.reply(`Failed: ${r.error}`);
-        } else {
-            await ctx.reply(`Started! Points remaining: ${r.points}`);
-        }
+    } catch (e) {
+        console.error('Video handler error:', e);
+        ctx.reply('Sorry, I had trouble processing that video.').catch(() => { });
     }
 });
 
