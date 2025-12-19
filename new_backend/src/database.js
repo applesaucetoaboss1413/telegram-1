@@ -64,11 +64,12 @@ const createJob = (requestId, userId, chatId, type, meta = {}) => {
 };
 
 const updateJobStatus = (requestId, status, resultUrl = null, error = null) => {
-    db.prepare(`
+    const result = db.prepare(`
         UPDATE jobs 
         SET status = ?, result_url = ?, error_message = ? 
-        WHERE request_id = ?
+        WHERE request_id = ? AND status = 'processing'
     `).run(status, resultUrl, error, requestId);
+    return result.changes;
 };
 
 const getPendingJobs = () => {

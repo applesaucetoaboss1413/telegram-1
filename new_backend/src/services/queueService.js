@@ -20,7 +20,7 @@ class QueueService extends EventEmitter {
         if (this.isPolling) return;
         this.isPolling = true;
         logger.info('Queue Service Started');
-        
+
         // Initial recovery
         this.poll();
 
@@ -41,7 +41,7 @@ class QueueService extends EventEmitter {
             try {
                 const meta = JSON.parse(job.meta || '{}');
                 const isVideo = job.type === 'video';
-                
+
                 // Check API status
                 const result = await checkStatus(job.request_id, isVideo);
                 const status = (result.status || result.state || '').toLowerCase();
@@ -56,22 +56,31 @@ class QueueService extends EventEmitter {
                     // Handle array output
                     if (Array.isArray(output)) output = output[output.length - 1];
 
-                    markJobComplete(job.request_id, 'completed', output, null);
-                    this.emit('job_complete', { job, output });
-                    logger.info(`Job ${job.request_id} completed`);
+                    const changes = markJobComplete(job.request_id, 'completed', output, null);
+                    if (changes > 0) {
+                        this.emit('job_complete', { job, output });
+                        logger.info(`Job ${job.request_id} completed`);
+                    } else {
+                        logger.warn(`Job ${job.request_id} already completed by another worker`);
+                    }
 
                 } else if (status === 'failed' || status === 'error') {
                     // Failure
                     const errorMsg = result.error || result.message || 'Unknown API Error';
-                    markJobComplete(job.request_id, 'failed', null, errorMsg);
-                    this.emit('job_failed', { job, error: errorMsg });
-                    logger.error(`Job ${job.request_id} failed: ${errorMsg}`);
+                    const changes = markJobComplete(job.request_id, 'failed', null, errorMsg);
+                    if (changes > 0) {
+                        this.emit('job_failed', { job, error: errorMsg });
+                        logger.error(`Job ${job.request_id} failed: ${errorMsg}`);
+                    }
+
                 } else {
                     // Still processing
                     // Check timeout (e.g., 10 minutes)
                     if (Date.now() - job.created_at > 10 * 60 * 1000) {
-                        markJobComplete(job.request_id, 'failed', null, 'Timeout');
-                        this.emit('job_failed', { job, error: 'Timeout' });
+                        const changes = markJobComplete(job.request_id, 'failed', null, 'Timeout');
+                        if (changes > 0) {
+                            this.emit('job_failed', { job, error: 'Timeout' });
+                        }
                     }
                 }
 
