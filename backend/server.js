@@ -263,8 +263,26 @@ async function ack(ctx, text) {
 
 let promoTimer = null;
 
+function normalizePromoChatId(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  if (/^-?\d+$/.test(raw)) return raw;
+  let s = raw.replace(/^['"`]+|['"`]+$/g, '').trim();
+  s = s.replace(/^https?:\/\//i, '');
+  s = s.replace(/^t\.me\//i, '');
+  s = s.replace(/^telegram\.me\//i, '');
+  s = s.replace(/^@/, '');
+  if (!s) return '';
+  const token = s.split(/[/?#]/)[0].trim();
+  if (!token) return '';
+  return '@' + token;
+}
+
 function startPromoLoop() {
-  const channelId = process.env.PROMO_CHANNEL_ID || (DB.channel && DB.channel.defaultChannelId);
+  const enabled = String(process.env.PROMO_ENABLED || '1').trim().toLowerCase();
+  if (enabled === '0' || enabled === 'false' || enabled === 'off') return;
+  const channelIdRaw = process.env.PROMO_CHANNEL_ID || (DB.channel && DB.channel.defaultChannelId);
+  const channelId = normalizePromoChatId(channelIdRaw) || channelIdRaw;
   if (!channelId) return;
   if (promoTimer) return;
   const messages = [
@@ -275,7 +293,8 @@ function startPromoLoop() {
     'ℹ️ FaceSwap V2 API: High-quality swaps, up to 4 minute videos. Try a sample swap now.'
   ];
   let index = 0;
-  const intervalMs = Number(process.env.PROMO_INTERVAL_MS || 3600000);
+  let intervalMs = Number(process.env.PROMO_INTERVAL_MS);
+  if (!Number.isFinite(intervalMs) || intervalMs < 900000) intervalMs = 3600000;
   promoTimer = setInterval(async () => {
     try {
       const text = messages[index % messages.length];
