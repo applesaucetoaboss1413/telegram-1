@@ -6,7 +6,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node server.js",
+    "start": "node src/server.js",
     "test": "jest --runInBand"
   },
   "dependencies": {
