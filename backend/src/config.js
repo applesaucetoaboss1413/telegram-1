@@ -10,8 +10,8 @@ const PRICING = [
 ];
 
 function computeOrigin() {
-    const raw = process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me');
-    return String(raw).trim().replace(/^['"`]+|['"`]+$/g, '');
+    const raw = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me');
+    return String(raw).trim().replace(/\/$/, '').replace(/^['"`]+|['"`]+$/g, '');
 }
 
 module.exports = {
@@ -26,6 +26,6 @@ module.exports = {
     DIRS: {
         uploads: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'uploads') : require('path').join(__dirname, '../../uploads'),
         outputs: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'outputs') : require('path').join(__dirname, '../../outputs'),
-        data: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'data.json') : require('path').join(__dirname, '../../data.json')
+        data: process.env.DATA_PATH || (process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'data.json') : require('path').join(__dirname, '../../data.json'))
     }
 };
