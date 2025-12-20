@@ -585,48 +585,60 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       });
 
       console.log('DEBUG MCP RESULT (raw):', JSON.stringify(result, null, 2));
-      let outputUrl, requestId;
-      try {
-        const response = result;
-        const data = result || {};
-        outputUrl = data.output || data.result_url || data.image_url || data.video_url || data.url
-          || (data.result && (data.result.output || data.result.result_url || data.result.image_url || data.result.video_url || data.result.url))
-          || (data.data && (data.data.output || data.data.result_url || data.data.image_url || data.data.video_url || data.data.url));
-        if (Array.isArray(outputUrl)) outputUrl = outputUrl[outputUrl.length - 1];
-        if (typeof outputUrl === 'object' && outputUrl) {
-          outputUrl = outputUrl.url || outputUrl.image_url || outputUrl.video_url || Object.values(outputUrl)[0];
+      let rawResponse = result;
+      if (result && Array.isArray(result.content)) {
+        const textItem = result.content.find(c => c && c.type === 'text' && typeof c.text === 'string');
+        if (textItem) {
+          const textContent = textItem.text;
+          try {
+            rawResponse = JSON.parse(textContent);
+            console.log('DEBUG MCP RESPONSE (parsed):', JSON.stringify(rawResponse, null, 2));
+          } catch (e) {
+            console.error('DEBUG: Failed to parse text content as JSON:', textContent);
+            throw new Error('Invalid JSON in MCP response text field');
+          }
         }
-        requestId = (data.request_id || data.id || data.requestId)
-          || (data.result && (data.result.request_id || data.result.id || data.result.requestId))
-          || (data.data && (data.data.request_id || data.data.id || data.data.requestId));
-        if (!outputUrl && !requestId) {
-          console.log('DEBUG MCP RESPONSE:', JSON.stringify(response, null, 2));
-          throw new Error('No output URL or Request ID in response');
+      }
+
+      const apiResponse = rawResponse || {};
+      const requestId = apiResponse.id;
+      const status = apiResponse.status;
+      console.log('DEBUG MCP STATUS:', status, 'REQUEST_ID:', requestId);
+
+      if (status === 'IN_QUEUE' || status === 'PROCESSING') {
+        if (requestId) {
+          if (!DB.pending_swaps) DB.pending_swaps = {};
+          DB.pending_swaps[requestId] = {
+            chatId: ctx.chat.id,
+            userId: u.id,
+            startTime: Date.now(),
+            isVideo: isVideo,
+            status: 'processing'
+          };
+          saveDB();
+          pollMagicResult(requestId, ctx.chat.id);
+          cleanupFiles([swapPath, targetPath]);
+          return {
+            started: true,
+            requestId,
+            status,
+            message: `Your faceswap is processing. Request ID: ${requestId}. You can check the status later.`,
+            points: user.points
+          };
         }
-      } catch (extractErr) {
-        console.error('DEBUG MCP EXTRACT ERROR:', extractErr.message);
-        console.error('DEBUG MCP RESULT:', JSON.stringify(result, null, 2));
-        throw extractErr;
+        throw new Error('Processing status without request ID in response');
+      }
+
+      let outputUrl = apiResponse.output_url || apiResponse.result_url || apiResponse.image_url || apiResponse.video_url || apiResponse.url;
+      if (!outputUrl) {
+        console.log('DEBUG MCP RESPONSE (no output after parsing):', JSON.stringify(apiResponse, null, 2));
+        throw new Error('Job completed but no output URL in response');
       }
 
       if (outputUrl) {
           cleanupFiles([swapPath, targetPath]);
           return { success: true, output: outputUrl, points: user.points };
       } else {
-          if (requestId) {
-            if (!DB.pending_swaps) DB.pending_swaps = {};
-            DB.pending_swaps[requestId] = {
-              chatId: ctx.chat.id,
-              userId: u.id,
-              startTime: Date.now(),
-              isVideo: isVideo,
-              status: 'processing'
-            };
-            saveDB();
-            pollMagicResult(requestId, ctx.chat.id);
-            cleanupFiles([swapPath, targetPath]);
-            return { started: true, requestId, points: user.points };
-          }
           throw new Error('No output URL or Request ID in response');
       }
 
