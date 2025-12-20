@@ -121,6 +121,9 @@ const MCP_ENDPOINT = 'https://prod.api.market/api/mcp/magicapi/faceswap-v2';
 let MCP_TOOLS_CACHE = { at: 0, tools: null };
 let MCP_ID_SEQ = 1;
 
+const { Pool, Client } = require('pg');
+const pgPool = new Pool({ connectionString: process.env.DATABASE_URL });
+
 async function mcpRequest(method, params, key) {
   const id = MCP_ID_SEQ++;
   const body = { jsonrpc: '2.0', id, method, params: params || {} };
@@ -253,6 +256,81 @@ function initDB() {
 }
 initDB();
 
+async function initDatabase() {
+  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      user_id BIGINT PRIMARY KEY,
+      first_name TEXT,
+      points INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS transactions (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT REFERENCES users(user_id),
+      amount INT,
+      type TEXT,
+      description TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS pending_swaps (
+      request_id TEXT PRIMARY KEY,
+      user_id BIGINT REFERENCES users(user_id),
+      chat_id BIGINT,
+      start_time BIGINT,
+      is_video BOOLEAN,
+      status TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS audits (
+      id SERIAL PRIMARY KEY,
+      user_id BIGINT REFERENCES users(user_id),
+      points INT,
+      type TEXT,
+      data JSONB,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.end();
+  console.log('[DB] PostgreSQL tables initialized');
+}
+
+async function loadFromDatabase() {
+  try {
+    const res = await pgPool.query('SELECT * FROM users');
+    DB.users = {};
+    res.rows.forEach(row => {
+      DB.users[row.user_id] = {
+        id: String(row.user_id),
+        first_name: row.first_name,
+        points: row.points
+      };
+    });
+    console.log('[DB] Loaded users from PostgreSQL');
+  } catch (e) {
+    console.error('[DB] Load error:', e.message);
+  }
+}
+
+// Initialize PostgreSQL and load data at startup (non-blocking)
+(async () => {
+  try {
+    if (process.env.DATABASE_URL) {
+      await initDatabase();
+      await loadFromDatabase();
+    } else {
+      console.warn('[DB] DATABASE_URL not set; continuing with JSON storage');
+    }
+  } catch (e) {
+    console.error('[DB] Startup error:', e.message);
+  }
+})();
+
 // Startup correction for lost points (temporary manual fix)
 if (DB.users && DB.users['8063916626']) {
   DB.users['8063916626'].points = 69; // 60 original + 9 refund
@@ -273,6 +351,7 @@ function saveDB() {
     fs.writeFileSync(dataFile, JSON.stringify(DB, null, 2));
   } catch (e) { console.error('DB Save Trigger Error:', e); }
   backupDB().catch(() => {});
+  syncToDB().catch(() => {});
 }
 
 async function backupDB() {
@@ -304,21 +383,79 @@ function setPending(uid, val) {
   saveDB();
 }
 
+async function syncToDB() {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    for (const [uid, user] of Object.entries(DB.users || {})) {
+      await pgPool.query(
+        'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET points = $3, updated_at = NOW()',
+        [uid, user.first_name || null, user.points || 0]
+      );
+    }
+    console.log('[DB] Synced to PostgreSQL');
+  } catch (e) {
+    console.error('[DB] Sync error:', e.message);
+  }
+}
+
 function getOrCreateUser(id, fields) {
   let u = DB.users[id];
   if (!u) {
-    u = { id, points: 10, created_at: Date.now() }; 
+    u = { id, points: 10, created_at: Date.now(), first_name: (fields && fields.first_name) || null }; 
     DB.users[id] = u;
     saveDB();
+    if (process.env.DATABASE_URL) {
+      pgPool.query(
+        'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING',
+        [id, u.first_name, u.points]
+      ).catch(() => {});
+    }
   }
-  if (fields) { Object.assign(u, fields); saveDB(); }
+  if (fields) { 
+    Object.assign(u, fields); 
+    saveDB(); 
+    if (process.env.DATABASE_URL) {
+      pgPool.query(
+        'UPDATE users SET first_name = $2, points = $3, updated_at = NOW() WHERE user_id = $1',
+        [id, u.first_name, u.points]
+      ).catch(() => {});
+    }
+  }
   return u;
 }
-function addAudit(userId, delta, reason, meta) {
+
+const pgPoolGetOrCreateUser = new (require('pg')).Pool({ connectionString: process.env.DATABASE_URL });
+async function pgGetOrCreateUser(uid, fname) {
+  try {
+    const res = await pgPoolGetOrCreateUser.query('SELECT * FROM users WHERE user_id = $1', [uid]);
+    if (res.rows.length > 0) {
+      return res.rows[0];
+    }
+    const newUser = await pgPoolGetOrCreateUser.query(
+      'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, 0) RETURNING *',
+      [uid, fname || 'User']
+    );
+    return newUser.rows[0];
+  } catch (e) {
+    console.error('[DB] getOrCreateUser error:', e.message);
+    return null;
+  }
+}
+async function addAudit(userId, delta, reason, meta) {
   if (!DB.audits) DB.audits = {};
   DB.audits[userId] = DB.audits[userId] || [];
   DB.audits[userId].push({ at: Date.now(), delta, reason, meta });
   saveDB();
+  if (process.env.DATABASE_URL) {
+    try {
+      await pgPool.query(
+        'INSERT INTO audits (user_id, points, type, data) VALUES ($1, $2, $3, $4)',
+        [userId, delta, reason, JSON.stringify(meta || {})]
+      );
+    } catch (e) {
+      console.error('[AUDIT] Error:', e.message);
+    }
+  }
 }
 
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
