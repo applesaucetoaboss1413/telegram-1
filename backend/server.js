@@ -460,7 +460,20 @@ function pollMagicResult(requestId, chatId) {
   const poll = async () => {
     tries++;
     if (tries > 100) { // 5 minutes approx
-       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Please contact support.').catch(()=>{});
+       try {
+         const jobInfo = DB.pending_swaps[requestId];
+         const userId = jobInfo && jobInfo.userId;
+         const costRefund = jobInfo ? (jobInfo.isVideo ? 15 : 9) : 10;
+         if (userId && DB.users[userId]) {
+           DB.users[userId].points += costRefund;
+           saveDB();
+           addAudit(userId, costRefund, 'refund_timeout', { requestId });
+           console.log(`TIMEOUT REFUND: User ${userId} refunded ${costRefund} points`);
+         }
+       } catch (e) {
+         console.error('Timeout refund error:', e && e.message);
+       }
+       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
        if (DB.pending_swaps[requestId]) {
           if (!DB.api_results) DB.api_results = {};
           DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
@@ -836,6 +849,13 @@ async function processSwapFlow(ctx, uid, swapFileId, targetFileId, isVideo) {
         }
     } catch (e) {
         console.error('[FLOW] Error in processSwapFlow:', e);
+        try {
+            const u = getOrCreateUser(uid);
+            const cost = isVideo ? 15 : 9;
+            u.points += cost;
+            saveDB();
+            addAudit(uid, cost, 'refund_flow_error', { error: e && e.message });
+        } catch (_) {}
         if (processingMsg) {
             await ctx.telegram.editMessageText(ctx.chat.id, processingMsg.message_id, null, `❌ Critical Error: ${e.message}`).catch(() => {});
         } else {
