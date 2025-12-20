@@ -2,7 +2,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const fetch = require('node-fetch');
 const { default: PQueue } = require('p-queue');
 
-const queue = new PQueue({ concurrency: 1, timeout: 300000 });
+const queue = new PQueue(process.env.NODE_ENV === 'test' ? { concurrency: 1 } : { concurrency: 1, timeout: 300000 });
 
 if (process.env.NODE_ENV !== 'test') {
   console.log('Server script started (V6 - JSON/URL Fix)');
@@ -343,6 +343,25 @@ async function callMagicAPIWithRetry(endpoint, payload, key, maxRetries = 3) {
   }
 }
 
+// Helper: Send to result channel
+async function sendToResultChannel(url, isVideo) {
+  const channel = isVideo 
+    ? (process.env.CHANNEL_VIDEO || '@faceswapvidz')
+    : (process.env.CHANNEL_ID || '@faceswapchat');
+  
+  if (!channel) return;
+  
+  try {
+    if (isVideo) {
+      await bot.telegram.sendVideo(channel, url, { caption: 'New Video Face Swap Result! 🎥' });
+    } else {
+      await bot.telegram.sendPhoto(channel, url, { caption: 'New Image Face Swap Result! 📸' });
+    }
+  } catch (e) {
+    console.error(`[CHANNEL] Failed to send to ${channel}:`, e.message);
+  }
+}
+
 // Helper: Poll Result
 function pollMagicResult(requestId, chatId) {
   let tries = 0;
@@ -396,6 +415,9 @@ function pollMagicResult(requestId, chatId) {
                 if (isVideo) await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Face swap complete!' });
                 else await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Face swap complete!' });
             }
+            
+            // Post to public channels
+            await sendToResultChannel(finalUrl, isVideo);
             
             if (!DB.api_results) DB.api_results = {};
             DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
@@ -644,40 +666,56 @@ bot.action(/confirm:(.+)/, async ctx => {
   } catch (e) { ctx.reply('Error: ' + e.message); }
 });
 
+bot.catch((err, ctx) => {
+  console.error(`Telegraf error for ${ctx.updateType}:`, err);
+  ctx.reply('⚠️ An unexpected error occurred. Please try again later.').catch(() => {});
+});
+
 bot.command('faceswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
-  ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
+  ctx.reply('Mode set: **Video Face Swap** 🎥\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** video.');
 });
 bot.action('faceswap', ctx => {
   ack(ctx, 'Mode set: Video');
   setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
-  ctx.reply('Please **REPLY** to this message with the SWAP photo for VIDEO Face Swap.', Markup.forceReply());
+  ctx.reply('Mode set: **Video Face Swap** 🎥\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** video.');
 });
 
 bot.command('imageswap', ctx => {
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
-  ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
+  ctx.reply('Mode set: **Image Face Swap** 📸\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** photo.');
 });
 bot.action('imageswap', ctx => {
   ack(ctx, 'Mode set: Image');
   setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
-  ctx.reply('Please **REPLY** to this message with the SWAP photo for IMAGE Face Swap.', Markup.forceReply());
+  ctx.reply('Mode set: **Image Face Swap** 📸\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** photo.');
 });
 
 async function processSwapFlow(ctx, uid, swapFileId, targetFileId, isVideo) {
-    const processingMsg = await ctx.reply('Processing face swap... Please wait ⏳');
-    
-    const res = await runFaceswap(ctx, getOrCreateUser(uid), swapFileId, targetFileId, isVideo);
-    
-    if (res.error) {
-        await ctx.telegram.editMessageText(ctx.chat.id, processingMsg.message_id, null, `❌ Failed: ${res.error}`);
-    } else if (res.success && res.output) {
-        await ctx.telegram.sendPhoto(ctx.chat.id, res.output, { caption: '✅ Face swap complete!' });
-        await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
-    } else if (res.started && res.requestId) {
-        // Handle legacy/async polling if needed, but for now we assume sync or just notify
-        await ctx.telegram.editMessageText(ctx.chat.id, processingMsg.message_id, null, `⏳ Job Started (ID: ${res.requestId}). This might take a while...`);
-        // We could re-implement polling here if necessary
+    let processingMsg;
+    try {
+        processingMsg = await ctx.reply('Processing face swap... Please wait ⏳');
+        
+        const res = await runFaceswap(ctx, getOrCreateUser(uid), swapFileId, targetFileId, isVideo);
+        
+        if (res.error) {
+            await ctx.telegram.editMessageText(ctx.chat.id, processingMsg.message_id, null, `❌ Failed: ${res.error}`);
+        } else if (res.success && res.output) {
+            if (isVideo) await ctx.telegram.sendVideo(ctx.chat.id, res.output, { caption: '✅ Face swap complete!' });
+            else await ctx.telegram.sendPhoto(ctx.chat.id, res.output, { caption: '✅ Face swap complete!' });
+            
+            await sendToResultChannel(res.output, isVideo);
+            await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id).catch(() => {});
+        } else if (res.started && res.requestId) {
+            await ctx.telegram.editMessageText(ctx.chat.id, processingMsg.message_id, null, `⏳ Job Started (ID: ${res.requestId}). This might take a while...`);
+        }
+    } catch (e) {
+        console.error('[FLOW] Error in processSwapFlow:', e);
+        if (processingMsg) {
+            await ctx.telegram.editMessageText(ctx.chat.id, processingMsg.message_id, null, `❌ Critical Error: ${e.message}`).catch(() => {});
+        } else {
+            ctx.reply(`❌ Critical Error: ${e.message}`).catch(() => {});
+        }
     }
 }
 
@@ -699,7 +737,8 @@ bot.on('photo', async ctx => {
     ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET video.' : 'Great! Now send the TARGET photo.');
   } else if (p.step === 'target' && p.mode === 'imageswap') {
     p.targetFileId = fileId;
-    await processSwapFlow(ctx, uid, p.swapFileId, p.targetFileId, false);
+    // Call background flow without await to avoid webhook timeout
+    processSwapFlow(ctx, uid, p.swapFileId, p.targetFileId, false).catch(e => console.error('Background swap error:', e));
     setPending(uid, null);
   } else if (p.step === 'target' && p.mode === 'faceswap') {
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
@@ -718,7 +757,8 @@ bot.on('video', async ctx => {
   }
 
   const fileId = ctx.message.video.file_id;
-  await processSwapFlow(ctx, uid, p.swapFileId, fileId, true);
+  // Call background flow without await to avoid webhook timeout
+  processSwapFlow(ctx, uid, p.swapFileId, fileId, true).catch(e => console.error('Background swap error:', e));
   setPending(uid, null);
 });
 
@@ -819,6 +859,7 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
 
     if (outputUrl) {
       cleanupFiles([swapPath, targetPath]);
+      await sendToResultChannel(outputUrl, isVideo);
       return res.json({ ok: true, output: outputUrl, points: u.points });
     }
 
@@ -858,6 +899,86 @@ app.get('/faceswap/status/:requestId', (req, res) => {
   res.status(404).json({ error: 'Job not found or expired' });
 });
 
+app.post('/create-point-session', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId;
+    const tierId = body.tierId;
+    const currency = String(body.currency || 'usd').toLowerCase();
+
+    if (!userId || !tierId) return res.status(400).json({ error: 'userId and tierId required' });
+    if (!SUPPORTED_CURRENCIES.includes(currency)) return res.status(400).json({ error: 'unsupported currency' });
+
+    const tier = PRICING.find(t => t.id === tierId);
+    if (!tier) return res.status(404).json({ error: 'tier not found' });
+    if (!stripe || !stripe.checkout || !stripe.checkout.sessions) return res.status(503).json({ error: 'payments unavailable' });
+
+    const rate = await fetchUsdRate(currency);
+    const amount = toMinorUnits(tier.usd, currency, rate);
+    const origin = PUBLIC_BASE || process.env.PUBLIC_URL || 'https://stripe.com';
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: currency,
+          product_data: { name: `${tier.points} Credits` },
+          unit_amount: amount
+        },
+        quantity: 1
+      }],
+      mode: 'payment',
+      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/cancel`,
+      metadata: { userId: String(userId), tierId: tier.id, points: tier.points }
+    });
+
+    return res.json({ id: session.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post('/confirm-point-session', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const sessionId = body.sessionId;
+    if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+    if (!stripe || !stripe.checkout || !stripe.checkout.sessions) return res.status(503).json({ error: 'payments unavailable' });
+
+    const s = await stripe.checkout.sessions.retrieve(sessionId);
+    const tierId = s && s.metadata && s.metadata.tierId;
+    const userId = s && s.metadata && s.metadata.userId;
+    const currency = String((s && s.currency) || 'usd').toLowerCase();
+
+    const tier = PRICING.find(t => t.id === tierId);
+    if (!tier) return res.status(400).json({ error: 'invalid tier' });
+    if (!SUPPORTED_CURRENCIES.includes(currency)) return res.status(400).json({ error: 'unsupported currency' });
+
+    const rate = currency === 'usd' ? 1 : await fetchUsdRate(currency);
+    const expected = toMinorUnits(tier.usd, currency, rate);
+    if (Number(s.amount_total) !== Number(expected)) {
+      return res.status(400).json({ error: 'amount mismatch' });
+    }
+
+    const paid = s.payment_status === 'paid' || s.status === 'complete';
+    if (!paid) return res.status(400).json({ error: 'payment not complete' });
+
+    if (!DB.purchases) DB.purchases = {};
+    if (DB.purchases[sessionId]) return res.json({ ok: true, alreadyCredited: true });
+
+    const u = getOrCreateUser(String(userId));
+    const pts = Number(s.metadata && s.metadata.points) || Number(tier.points);
+    u.points += pts;
+    DB.purchases[sessionId] = true;
+    saveDB();
+
+    return res.json({ ok: true, pointsAdded: pts, points: u.points });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.post('/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature'];
   try {
@@ -894,6 +1015,20 @@ const shouldUseWebhook = !!publicUrl;
 
 let isBotRunning = false;
 
+function startSelfPing() {
+  if (!publicUrl) return;
+  // Ping every 10 minutes to keep Render alive
+  setInterval(async () => {
+    try {
+      const url = publicUrl.startsWith('http') ? publicUrl : 'https://' + publicUrl;
+      const res = await fetch(url.replace(/\/$/, '') + '/healthz');
+      console.log(`[KEEP-ALIVE] Ping to ${url}/healthz: ${res.status}`);
+    } catch (e) {
+      console.log('[KEEP-ALIVE] Ping failed (expected on cold start):', e.message);
+    }
+  }, 10 * 60 * 1000);
+}
+
 async function startBot() {
   if (shouldUseWebhook) {
     let domain = publicUrl;
@@ -914,6 +1049,8 @@ async function startBot() {
     } catch (e) {
       console.error('❌ FAILED to set Webhook:', e.message);
     }
+    
+    startSelfPing();
   } else {
     console.log('🔄 Starting in POLLING Mode (No Public URL found)');
     try {
