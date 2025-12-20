@@ -19,7 +19,7 @@ app.use('/outputs', express.static(DIRS.outputs));
 
 // Webhook setup
 if (PUBLIC_ORIGIN) {
-    const hookPath = `/telegram/webhook`;
+    const hookPath = `/`;
     bot.telegram.setWebhook(`${PUBLIC_ORIGIN}${hookPath}`).then(() => {
         console.log(`Webhook set to ${PUBLIC_ORIGIN}${hookPath}`);
     }).catch(console.error);
