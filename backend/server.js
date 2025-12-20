@@ -253,10 +253,41 @@ function initDB() {
 }
 initDB();
 
+// Startup correction for lost points (temporary manual fix)
+if (DB.users && DB.users['8063916626']) {
+  DB.users['8063916626'].points = 69; // 60 original + 9 refund
+  console.log('MANUAL CORRECTION: User points restored to 69');
+  saveDB();
+}
+if (!DB.corrections) DB.corrections = [];
+DB.corrections.push({
+  timestamp: new Date().toISOString(),
+  userId: '8063916626',
+  reason: 'Timeout refund not applied on redeploy; data persistence issue',
+  pointsRestored: 9,
+  notes: 'Using /tmp ephemeral storage; lost on redeploy. Switch to persistent storage.'
+});
+
 function saveDB() {
   try {
     fs.writeFileSync(dataFile, JSON.stringify(DB, null, 2));
   } catch (e) { console.error('DB Save Trigger Error:', e); }
+  backupDB().catch(() => {});
+}
+
+async function backupDB() {
+  if (process.env.BACKUP_URL) {
+    try {
+      await fetch(process.env.BACKUP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(DB)
+      });
+      console.log('[BACKUP] Database backed up');
+    } catch (e) {
+      console.error('[BACKUP] Error:', e.message);
+    }
+  }
 }
 
 function getPending(uid) {
