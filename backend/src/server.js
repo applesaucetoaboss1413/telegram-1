@@ -17,22 +17,25 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(DIRS.uploads));
 app.use('/outputs', express.static(DIRS.outputs));
 
+// Routes - Define GET routes BEFORE webhook to avoid conflicts
+app.get('/', (req, res) => {
+    res.send('TBot Backend v2 Running');
+});
+
 // Webhook setup
 if (PUBLIC_ORIGIN) {
-    const hookPath = `/`;
+    const hookPath = `/telegram-webhook`;
     bot.telegram.setWebhook(`${PUBLIC_ORIGIN}${hookPath}`).then(() => {
         console.log(`Webhook set to ${PUBLIC_ORIGIN}${hookPath}`);
     }).catch(console.error);
-    app.use(hookPath, (req, res, next) => {
+
+    // Use POST specifically for webhook to avoid conflicts with GET routes
+    app.post(hookPath, (req, res, next) => {
         console.log(`[Webhook] ${req.method} ${req.path} received`);
         next();
     }, bot.webhookCallback(hookPath));
 }
 
-// Routes
-app.get('/', (req, res) => {
-    res.send('TBot Backend v2 Running');
-});
 
 // Simple Stripe Checkout creation
 app.get('/create-checkout-session', async (req, res) => {
