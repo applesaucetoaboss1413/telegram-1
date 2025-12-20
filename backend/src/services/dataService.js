@@ -1,12 +1,19 @@
 const fs = require('fs');
 const { DIRS } = require('../config');
 
-// Ensure directory exists
+// Ensure directory exists - handle permission errors gracefully
 try {
     const dir = require('path').dirname(DIRS.data);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(dir)) {
+        try {
+            fs.mkdirSync(dir, { recursive: true });
+        } catch (mkdirErr) {
+            // Permission denied on /data - this is OK, we'll use the file path as-is
+            console.warn(`[DataService] Could not create directory ${dir}:`, mkdirErr.message);
+        }
+    }
 } catch (e) {
-    console.error('Data directory init error:', e);
+    console.error('[DataService] Directory init error:', e.message);
 }
 
 function loadData() {
