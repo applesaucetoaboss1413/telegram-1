@@ -234,8 +234,40 @@ bot.on('video', async ctx => {
 
 // Channel post handlers for channel interactions
 bot.on('channel_post', async ctx => {
+    console.log('[Bot] Channel post received');
     try {
         const message = ctx.channelPost;
+        if (message.text) {
+            const text = message.text.trim();
+            const uid = String(ctx.from.id);
+            if (text === '/start' || text.startsWith('/start@')) {
+                console.log('[Bot] Start command in channel from', uid);
+                const u = getOrCreateUser(uid, {
+                    username: ctx.from.username || '',
+                    first_name: ctx.from.first_name || '',
+                    last_name: ctx.from.last_name || ''
+                });
+                const kb = Markup.inlineKeyboard([
+                    [Markup.button.callback('Image Face Swap', 'imageswap'), Markup.button.callback('Video Face Swap', 'faceswap')],
+                    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
+                    [Markup.button.callback('Help', 'help'), Markup.button.callback('Promote', 'promote')],
+                    [Markup.button.callback('Checkin (Daily)', 'checkin')]
+                ]);
+                await ctx.reply(`Welcome back, ${u.first_name}! You have ${u.points || 0} points.`, kb);
+            } else if (text === '/menu' || text.startsWith('/menu@')) {
+                const kb = Markup.inlineKeyboard([
+                    [Markup.button.callback('Image Face Swap', 'imageswap'), Markup.button.callback('Video Face Swap', 'faceswap')],
+                    [Markup.button.callback('Buy Points', 'buy')]
+                ]);
+                await ctx.reply('Main Menu:', kb);
+            } else if (text === '/pricing' || text.startsWith('/pricing@')) {
+                const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+                await ctx.reply(`Prices:\n${lines.join('\n')}`);
+            } else if (text === '/help' || text.startsWith('/help@')) {
+                await ctx.reply('To use Face Swap: \n1. Choose Image or Video mode.\n2. Send the source photo (the face you want).\n3. Send the target photo or video.');
+            }
+            return;
+        }
         if (message.photo) {
             // Handle photo in channel
             const uid = String(ctx.from.id); // User who posted
