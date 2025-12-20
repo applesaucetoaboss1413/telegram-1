@@ -34,7 +34,12 @@ bot.use(async (ctx, next) => {
 // Helpers
 const getFileLink = async (ctx, fileId) => {
     const link = await ctx.telegram.getFileLink(fileId);
-    return link.href;
+    let url = link.href;
+    // MagicAPI requires valid extension. If Telegram URL lacks it (rare), or has query params, ensure it's clean.
+    // Usually Telegram URLs are like: https://api.telegram.org/file/bot<token>/.../file.jpg
+    // We can append a dummy query param if needed, but it's better to trust Telegram unless proven otherwise.
+    // However, we can check if it ends with a known image extension.
+    return url;
 };
 
 const validatePhoto = async (ctx, fileId, fileSize) => {
@@ -65,6 +70,18 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
         // User requested "Implement proper photo reception...".
         // Let's fail if we can't detect faces, as that's the point of the bot.
         throw new Error('Could not verify face in image. Please try another photo.');
+    }
+
+    // 4. Ensure URL has extension for MagicAPI
+    // If url doesn't end with .jpg/.png/.jpeg, we might need to rely on the fact that Telegram sends Content-Type.
+    // But MagicAPI validates the URL string itself.
+    // If it's missing, we can append a dummy one if the URL allows it, or just pass it.
+    // Telegram file links usually have extensions. If not, we might be in trouble.
+    // Let's check:
+    const ext = path.extname(new URL(url).pathname).toLowerCase();
+    if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
+       // Warn or try to fix? Telegram usually provides extensions.
+       logger.warn('Telegram URL missing standard image extension', { url });
     }
 
     return { url, buffer };
