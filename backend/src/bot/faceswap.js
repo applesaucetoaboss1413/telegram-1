@@ -5,7 +5,7 @@ const querystring = require('querystring');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static');
-const { API_MARKET_KEY, PUBLIC_ORIGIN, DIRS, CHANNEL_ID } = require('../config');
+const { API_MARKET_KEY, PUBLIC_ORIGIN, DIRS, CHANNEL_ID, CHANNEL_VIDEO } = require('../config');
 const { loadData, saveData } = require('../services/dataService');
 
 if (ffmpegPath) {
@@ -37,10 +37,11 @@ async function ffprobeDuration(p) {
     });
 }
 
-function startMagicResultPoll(requestId, chatId, bot) {
+function startMagicResultPoll(requestId, chatId, bot, channelId) {
     let tries = 0;
     const key = API_MARKET_KEY;
-    const resultChatId = CHANNEL_ID || chatId;
+    const resultChatId = channelId || chatId;
+    const fallbackChatId = chatId;
     console.log(`[Faceswap] Starting poll for ${requestId} in chat ${chatId}, results to ${resultChatId}`);
 
     const poll = () => {
@@ -60,18 +61,27 @@ function startMagicResultPoll(requestId, chatId, bot) {
                 if (status && /succeeded|successful|completed|done/i.test(String(status))) {
                     const out = j.output || j.result || j.url || j.image_url || j.video_url;
                     const url = Array.isArray(out) ? out[out.length - 1] : out;
-                    if (resultChatId && url) {
+                    if (url) {
                         try {
                             const dest = path.join(DIRS.outputs, `faceswap_${Date.now()}${path.extname(String(url)) || ''}`);
                             await downloadTo(String(url), dest);
-                            try { await bot.telegram.sendVideo(resultChatId, { source: fs.createReadStream(dest) }); }
-                            catch (_) { try { await bot.telegram.sendPhoto(resultChatId, { source: fs.createReadStream(dest) }); } catch (e2) { await bot.telegram.sendMessage(resultChatId, String(url)); } }
+                            let sent = false;
+                            if (resultChatId) {
+                                try { await bot.telegram.sendVideo(resultChatId, { source: fs.createReadStream(dest) }); sent = true; }
+                                catch (_) { try { await bot.telegram.sendPhoto(resultChatId, { source: fs.createReadStream(dest) }); sent = true; } catch (e2) { try { await bot.telegram.sendMessage(resultChatId, String(url)); sent = true; } catch (e3) { } } }
+                            }
+                            if (!sent && fallbackChatId) {
+                                try { await bot.telegram.sendVideo(fallbackChatId, { source: fs.createReadStream(dest) }); }
+                                catch (_) { try { await bot.telegram.sendPhoto(fallbackChatId, { source: fs.createReadStream(dest) }); } catch (e2) { await bot.telegram.sendMessage(fallbackChatId, String(url)); } }
+                            }
                         } catch (e) {
                             console.error('[Faceswap] Error sending result', e);
                         }
                     }
                 } else if (status && /failed|error|canceled/i.test(String(status))) {
-                    if (resultChatId) { try { await bot.telegram.sendMessage(resultChatId, 'Faceswap failed'); } catch (_) { } }
+                    let sent = false;
+                    if (resultChatId) { try { await bot.telegram.sendMessage(resultChatId, 'Faceswap failed'); sent = true; } catch (_) { } }
+                    if (!sent && fallbackChatId) { try { await bot.telegram.sendMessage(fallbackChatId, 'Faceswap failed'); } catch (_) { } }
                 } else {
                     if (tries < 40) setTimeout(poll, 3000);
                 }
@@ -137,7 +147,7 @@ async function runFaceswap(u, photoPath, videoPath, chatId, bot) {
             return { error: 'MagicAPI submission failed: no request_id returned', required: 0, points: user.points };
         }
 
-        startMagicResultPoll(String(requestId), String(chatId || ''), bot);
+        startMagicResultPoll(String(requestId), String(chatId || ''), bot, CHANNEL_VIDEO || CHANNEL_ID);
         return { started: true, points: user.points };
     } catch (e) {
         console.error('MagicAPI Request Failed:', e);
@@ -185,7 +195,7 @@ async function runFaceswapImage(u, swapPhotoPath, targetPhotoPath, chatId, bot) 
             return { error: 'MagicAPI Image submission failed: no request_id returned', required: 0, points: user.points };
         }
 
-        startMagicResultPoll(String(requestId), String(chatId || ''), bot);
+        startMagicResultPoll(String(requestId), String(chatId || ''), bot, CHANNEL_ID);
         return { started: true, points: user.points };
     } catch (e) {
         console.error('MagicAPI Image Error:', e);

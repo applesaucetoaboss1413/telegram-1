@@ -21,6 +21,7 @@ module.exports = {
     STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || '',
     API_MARKET_KEY: process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY,
     CHANNEL_ID: process.env.CHANNEL_ID,
+    CHANNEL_VIDEO: process.env.CHANNEL_VIDEO,
     PUBLIC_ORIGIN: computeOrigin(),
     PRICING,
     DIRS: {

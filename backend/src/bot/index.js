@@ -37,6 +37,7 @@ async function toast(ctx, text, alert = false) {
 
 // Commands
 bot.start(async ctx => {
+    console.log('[Bot] Start command received from', ctx.from.id);
     const payload = ctx.startPayload || '';
     const userId = String(ctx.from.id);
     const u = getOrCreateUser(userId, {
@@ -152,6 +153,7 @@ bot.action(/buy:(.+)/, async ctx => {
 // Photo/Video handling (The core interaction)
 bot.on('photo', async ctx => {
     try {
+        console.log('[Bot] Photo received from', ctx.from.id);
         const uid = String(ctx.from.id);
         const p = pending[uid];
         if (!p) return; // Ignore random photos if not in a flow

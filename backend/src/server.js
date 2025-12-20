@@ -23,7 +23,10 @@ if (PUBLIC_ORIGIN) {
     bot.telegram.setWebhook(`${PUBLIC_ORIGIN}${hookPath}`).then(() => {
         console.log(`Webhook set to ${PUBLIC_ORIGIN}${hookPath}`);
     }).catch(console.error);
-    app.use(hookPath, bot.webhookCallback(hookPath));
+    app.use(hookPath, (req, res, next) => {
+        console.log(`[Webhook] ${req.method} ${req.path} received`);
+        next();
+    }, bot.webhookCallback(hookPath));
 }
 
 // Routes
