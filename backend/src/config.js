@@ -27,6 +27,6 @@ module.exports = {
     DIRS: {
         uploads: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'uploads') : require('path').join(__dirname, '../../uploads'),
         outputs: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'outputs') : require('path').join(__dirname, '../../outputs'),
-        data: process.env.DATA_PATH || require('path').join(require('os').tmpdir(), 'data.json')
+        data: require('path').join(require('os').tmpdir(), 'data.json')
     }
 };
