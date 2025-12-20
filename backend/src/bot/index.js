@@ -36,6 +36,9 @@ async function toast(ctx, text, alert = false) {
 }
 
 // Commands
+bot.on('message', (ctx) => {
+    console.log('[Bot] Message received:', ctx.message.text || 'non-text');
+});
 bot.start(async ctx => {
     console.log('[Bot] Start command received from', ctx.from.id);
     const payload = ctx.startPayload || '';
