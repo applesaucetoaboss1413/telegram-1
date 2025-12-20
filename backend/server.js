@@ -317,12 +317,28 @@ async function loadFromDatabase() {
   }
 }
 
+async function restoreUserCredits() {
+  const userId = 8063916626;
+  const credits = 60;
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await pgPool.query(
+      'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET points = $3, updated_at = NOW()',
+      [userId, 'You', credits]
+    );
+    console.log(`[RESTORE] User ${userId} credits restored to ${credits}`);
+  } catch (e) {
+    console.error('[RESTORE] Error:', e.message);
+  }
+}
+
 // Initialize PostgreSQL and load data at startup (non-blocking)
 (async () => {
   try {
     if (process.env.DATABASE_URL) {
       await initDatabase();
       await loadFromDatabase();
+      await restoreUserCredits();
     } else {
       console.warn('[DB] DATABASE_URL not set; continuing with JSON storage');
     }
