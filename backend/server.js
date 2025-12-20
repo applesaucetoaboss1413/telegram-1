@@ -1031,6 +1031,10 @@ app.get('/healthz', (req, res) => {
   res.json({ mode: 'backend', env: { node: process.version } });
 });
 
+app.get('/', (req, res) => {
+  res.send('Telegram Bot is running! 🚀');
+});
+
 // Webhook Configuration
 const WEBHOOK_PATH = '/telegram/webhook';
 // Prioritize explicit variables, then Render's automatic one
