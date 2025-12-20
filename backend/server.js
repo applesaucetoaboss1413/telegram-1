@@ -23,6 +23,7 @@ const express = require('express');
 const multer = require('multer');
 const https = require('https');
 const { Telegraf, Markup } = require('telegraf');
+const { getAllUsage, getUsageFor } = require('./services/usageClient');
 
 const PORT = process.env.PORT || 3000;
 
@@ -311,12 +312,12 @@ async function callMagicAPIWithRetry(endpoint, payload, key, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       console.log(`[Attempt ${attempt}/${maxRetries}] Calling MagicAPI...`);
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json', 'accept': 'application/json' },
-        body: JSON.stringify(payload),
-        timeout: 60000
-      });
+      const isForm = typeof payload === 'object' && payload instanceof URLSearchParams
+      const headers = { 'x-magicapi-key': key, 'accept': 'application/json' }
+      if (isForm) headers['Content-Type'] = 'application/x-www-form-urlencoded'
+      else headers['Content-Type'] = 'application/json'
+      const body = isForm ? payload : JSON.stringify(payload)
+      const response = await fetch(endpoint, { method: 'POST', headers, body, timeout: 60000 })
       const responseText = await response.text();
       let data;
       try { data = JSON.parse(responseText); } catch(e) {}
@@ -495,15 +496,17 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   }
 
   const endpoint = isVideo 
-    ? 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/run'
-    : 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/image/run';
+    ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
+    : 'https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap';
   
-  const payload = {
-    input: {
-      swap_image: swapUrl,
-      [isVideo ? 'target_video' : 'target_image']: targetUrl
-    }
-  };
+  let payload
+  if (isVideo) {
+    payload = new URLSearchParams()
+    payload.append('swap_url', swapUrl)
+    payload.append('target_url', targetUrl)
+  } else {
+    payload = { swap_image: swapUrl, target_image: targetUrl }
+  }
 
   try {
       const qPos = queue.size;
@@ -561,6 +564,26 @@ bot.command('status', ctx => {
   const uptime = process.uptime();
   const mem = process.memoryUsage().rss / 1024 / 1024;
   ctx.reply(`System Status:\n🟢 Online\n⏱️ Uptime: ${Math.floor(uptime)}s\n🔄 Pending Jobs: ${pending}\n💾 Memory: ${Math.floor(mem)}MB`);
+});
+
+bot.command('usage', async ctx => {
+  try {
+    const key = process.env.API_MARKET_KEY || process.env.MAGICAPI_KEY;
+    if (!key) return ctx.reply('Usage API key not configured.');
+    const all = await getAllUsage(key);
+    if (!all.ok || !all.data || !Array.isArray(all.data.usageData)) {
+      return ctx.reply('Failed to fetch usage.');
+    }
+    const items = all.data.usageData;
+    const face = items.find(x => String(x.apiName || '').includes('faceswap'));
+    if (!face) return ctx.reply('No faceswap subscription found on this account.');
+    const left = face.apiCallsLeft;
+    const made = face.apiCallsMade;
+    const quota = face.quota;
+    ctx.reply(`Usage: ${made}/${quota} used, ${left} remaining.\nProduct: ${face.apiName}`);
+  } catch (e) {
+    ctx.reply('Error fetching usage: ' + e.message);
+  }
 });
 
 bot.action('buy', async ctx => {
@@ -843,15 +866,17 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     }
 
     const endpoint = isVideo 
-      ? 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/video/run'
-      : 'https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/image/run';
+      ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
+      : 'https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap';
 
-    const payload = {
-      input: {
-        swap_image: swapUrl,
-        [isVideo ? 'target_video' : 'target_image']: targetUrl
-      }
-    };
+    let payload
+    if (isVideo) {
+      payload = new URLSearchParams()
+      payload.append('swap_url', swapUrl)
+      payload.append('target_url', targetUrl)
+    } else {
+      payload = { swap_image: swapUrl, target_image: targetUrl }
+    }
 
     const result = await callMagicAPIWithRetry(endpoint, payload, key);
     const data = (result && result.data) || {};
