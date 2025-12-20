@@ -26,6 +26,9 @@ const { Telegraf, Markup } = require('telegraf');
 const { getAllUsage, getUsageFor } = require('./services/usageClient');
 
 const PORT = process.env.PORT || 3000;
+console.log('DEBUG PUBLIC_URL at startup:', process.env.PUBLIC_URL);
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim();
+console.log('DEBUG NORMALIZED PUBLIC_URL:', PUBLIC_URL);
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
@@ -113,6 +116,90 @@ try {
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.mkdirSync(outputsDir, { recursive: true });
 } catch (e) { console.error('Directory init error:', e); }
+
+const MCP_ENDPOINT = 'https://prod.api.market/api/mcp/magicapi/faceswap-v2';
+let MCP_TOOLS_CACHE = { at: 0, tools: null };
+let MCP_ID_SEQ = 1;
+
+async function mcpRequest(method, params, key) {
+  const id = MCP_ID_SEQ++;
+  const body = { jsonrpc: '2.0', id, method, params: params || {} };
+  const res = await fetch(MCP_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-market-key': key
+    },
+    body: JSON.stringify(body),
+    timeout: 60000
+  });
+  const text = await res.text();
+  let j; try { j = JSON.parse(text); } catch(_) {}
+  if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${text}`);
+  if (!j || j.error) throw new Error(j && j.error ? (j.error.message || 'MCP error') : 'Invalid MCP response');
+  return j;
+}
+
+async function listMcpTools(key) {
+  const now = Date.now();
+  if (MCP_TOOLS_CACHE.tools && (now - MCP_TOOLS_CACHE.at) < 300000) return MCP_TOOLS_CACHE.tools;
+  await mcpRequest('initialize', {
+    protocolVersion: '2024-11-05',
+    capabilities: { tools: {} },
+    clientInfo: { name: 'telegram-bot', version: '1.0.0' }
+  }, key).catch(() => {});
+  const j = await mcpRequest('tools/list', {}, key);
+  const tools = (j.result && j.result.tools) || (j.tools) || [];
+  MCP_TOOLS_CACHE = { at: now, tools };
+  return tools;
+}
+
+function selectTool(tools, type) {
+  const nameIncludes = (n, s) => typeof n === 'string' && n.toLowerCase().includes(String(s).toLowerCase());
+  const candidates = tools.filter(t => {
+    const n = t.name || '';
+    if (type === 'image') return nameIncludes(n, 'faceswap') && nameIncludes(n, 'image');
+    if (type === 'video') return nameIncludes(n, 'faceswap') && nameIncludes(n, 'video');
+    if (type === 'status' || type === 'result') return nameIncludes(n, 'status') || nameIncludes(n, 'result');
+    return false;
+  });
+  if (candidates.length) return candidates[0];
+  const fallback = tools.find(t => {
+    const n = t.name || '';
+    if (type === 'image') return nameIncludes(n, 'image');
+    if (type === 'video') return nameIncludes(n, 'video');
+    if (type === 'status' || type === 'result') return nameIncludes(n, 'status') || nameIncludes(n, 'result');
+    return false;
+  });
+  return fallback || null;
+}
+
+function buildArgsFromSchema(tool, swapUrl, targetUrl) {
+  const props = (tool && tool.inputSchema && tool.inputSchema.properties) || {};
+  const keys = Object.keys(props);
+  let swapKey = keys.find(k => /swap/i.test(k)) || keys.find(k => /source/i.test(k));
+  let targetKey = keys.find(k => /target/i.test(k));
+  const args = {};
+  if (swapKey) args[swapKey] = swapUrl;
+  if (targetKey) args[targetKey] = targetUrl;
+  if (!swapKey && !targetKey && keys.length >= 2) {
+    args[keys[0]] = swapUrl;
+    args[keys[1]] = targetUrl;
+  }
+  return args;
+}
+
+async function mcpCallToolWithRetry(toolName, args, key, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const j = await mcpRequest('tools/call', { name: toolName, arguments: args }, key);
+      return (j.result && j.result) || j;
+    } catch (e) {
+      if (attempt === maxRetries) throw e;
+      await new Promise(r => setTimeout(r, attempt * 1000));
+    }
+  }
+}
 
 let PRICING = [
   { id: 'p60', points: 60, usd: 3.09, stars: 150 },
@@ -222,7 +309,7 @@ bot.use(async (ctx, next) => {
     } else {
       console.log('update', ctx.updateType, (ctx.from && ctx.from.id));
     }
-  } catch (_) {}
+  } catch (e) { console.error('Update logging error:', e); }
   return next();
 });
 
@@ -388,58 +475,30 @@ function pollMagicResult(requestId, chatId) {
     }
 
     try {
-      const kind = isVideo ? 'video' : 'image';
-      const statusUrl = `https://api.magicapi.dev/api/v1/magicapi/faceswap-v2/faceswap/${kind}/status/${requestId}`;
-      const response = await fetch(statusUrl, {
-          method: 'GET',
-          headers: { 
-            'x-magicapi-key': key, 
-            'Content-Type': 'application/json',
-            'accept': 'application/json'
-          }
-      });
-
-      const text = await response.text();
-      let j;
-      try { j = JSON.parse(text); } catch(e) {}
-
-      if (response.ok && j) {
-          const status = (j.status || j.state || '').toLowerCase();
-          const outData = j.output || j.result || j.url || j.image_url || j.video_url || (j.data && j.data.result);
-          
-          if (outData) {
-            // Success
-            let finalUrl = Array.isArray(outData) ? outData[outData.length-1] : outData;
-            if (typeof finalUrl === 'object') finalUrl = finalUrl.video_url || finalUrl.image_url || finalUrl.url || Object.values(finalUrl)[0];
-
-            if (chatId) {
-                if (isVideo) await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Face swap complete!' });
-                else await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Face swap complete!' });
-            }
-            
-            // Post to public channels
-            await sendToResultChannel(finalUrl, isVideo);
-            
-            if (!DB.api_results) DB.api_results = {};
-            DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
-            
-            if (DB.pending_swaps[requestId]) {
-              delete DB.pending_swaps[requestId];
-              saveDB();
-            }
-          } else if (status.includes('fail') || status.includes('error')) {
-             // Failed
-             throw new Error(j.error || j.message || 'Unknown error');
-          } else {
-             // Still processing
-             setTimeout(poll, 3000);
-          }
+      const statusToolName = isVideo ? 'getfaceswapvideostatus' : 'getfaceswapimagestatus';
+      const j = await mcpCallToolWithRetry(statusToolName, { id: requestId }, key);
+      const status = String(j.status || j.state || '').toLowerCase();
+      const outData = j.result_url || j.output || j.url || j.image_url || j.video_url;
+      if (outData) {
+        let finalUrl = Array.isArray(outData) ? outData[outData.length-1] : outData;
+        if (typeof finalUrl === 'object') finalUrl = finalUrl.video_url || finalUrl.image_url || finalUrl.url || Object.values(finalUrl)[0];
+        if (chatId) {
+          if (isVideo) await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Face swap complete!' });
+          else await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Face swap complete!' });
+        }
+        await sendToResultChannel(finalUrl, isVideo);
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+      } else if (status.includes('fail') || status.includes('error')) {
+        throw new Error(j.error || j.message || 'Unknown error');
       } else {
-          // API error or not ready
-          setTimeout(poll, 3000);
+        setTimeout(poll, 3000);
       }
     } catch (e) {
-       // Check if we should stop polling on error
        if (e.message && (e.message.includes('fail') || e.message.includes('error'))) {
           const errorMsg = e.message;
           if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).`).catch(()=>{});
@@ -479,10 +538,10 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   saveDB();
   addAudit(u.id, -cost, 'faceswap_start', { isVideo });
 
-  const swapUrl = await getFileUrl(ctx, swapFileId);
-  const targetUrl = await getFileUrl(ctx, targetFileId);
+  const swapLink = await getFileUrl(ctx, swapFileId);
+  const targetLink = await getFileUrl(ctx, targetFileId);
 
-  if (!swapUrl || !targetUrl) {
+  if (!swapLink || !targetLink) {
     user.points += cost; 
     saveDB();
     return { error: 'Failed to generate file URLs from Telegram.', points: user.points };
@@ -495,18 +554,22 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       return { error: 'Server config error: Missing API Key', points: user.points };
   }
 
-  const endpoint = isVideo 
-    ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
-    : 'https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap';
-  
-  let payload
-  if (isVideo) {
-    payload = new URLSearchParams()
-    payload.append('swap_url', swapUrl)
-    payload.append('target_url', targetUrl)
-  } else {
-    payload = { swap_image: swapUrl, target_image: targetUrl }
+  let swapPath, targetPath;
+  try {
+    const extSwap = 'jpg';
+    const extTarget = isVideo ? 'mp4' : 'jpg';
+    swapPath = path.join(uploadsDir, `tg_swap_${u.id}_${Date.now()}.${extSwap}`);
+    targetPath = path.join(uploadsDir, `tg_target_${u.id}_${Date.now()}.${extTarget}`);
+    await downloadTo(swapLink, swapPath);
+    await downloadTo(targetLink, targetPath);
+  } catch (e) {
+    user.points += cost;
+    saveDB();
+    return { error: 'Failed to stage files to uploads.', points: user.points };
   }
+
+  const swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath)}`;
+  const targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath)}`;
 
   try {
       const qPos = queue.size;
@@ -515,16 +578,20 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       }
 
       const result = await queue.add(async () => {
-          return await callMagicAPIWithRetry(endpoint, payload, key);
+          const toolName = isVideo ? 'runfaceswapvideo' : 'runfaceswapimage';
+          const args = { body: { input: { swap_image: swapUrl, [isVideo ? 'target_video' : 'target_image']: targetUrl } } };
+          const callRes = await mcpCallToolWithRetry(toolName, args, key);
+          return callRes;
       });
 
-      const data = result.data || {};
-      const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && data.result.video_url));
+      const data = result || {};
+      const outputUrl = data.output || data.result_url || data.image_url || data.video_url || data.url;
 
       if (outputUrl) {
+          cleanupFiles([swapPath, targetPath]);
           return { success: true, output: outputUrl, points: user.points };
       } else {
-          const requestId = data.request_id || data.requestId || data.id;
+          const requestId = data.request_id || data.id || data.requestId;
           if (requestId) {
             if (!DB.pending_swaps) DB.pending_swaps = {};
             DB.pending_swaps[requestId] = {
@@ -536,6 +603,7 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
             };
             saveDB();
             pollMagicResult(requestId, ctx.chat.id);
+            cleanupFiles([swapPath, targetPath]);
             return { started: true, requestId, points: user.points };
           }
           throw new Error('No output URL or Request ID in response');
@@ -544,8 +612,9 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   } catch (e) {
     user.points += cost;
     saveDB();
-    console.error('[FACESWAP] Error:', e);
-    return { error: 'Error: ' + e.message, points: user.points };
+    cleanupFiles([swapPath, targetPath]);
+    console.error('FACESWAP MCP error:', e);
+    return { error: 'FaceSwap API error: ' + e.message, points: user.points };
   }
 }
 
@@ -812,6 +881,18 @@ const app = express();
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 app.use('/outputs', express.static(outputsDir));
+const telegrafWebhook = bot.webhookCallback('/telegram/webhook');
+app.post('/telegram/webhook', (req, res, next) => {
+  try {
+    console.log('[WEBHOOK HIT]', req.method, req.url, JSON.stringify(req.body).slice(0, 200));
+  } catch (e) {
+    console.error('[WEBHOOK] logging error:', e);
+  }
+  telegrafWebhook(req, res, (err) => {
+    if (err) console.error('[WEBHOOK] handler error:', err);
+    try { if (!res.headersSent) res.status(200).end(); } catch (_) {}
+  });
+});
 
 const upload = multer();
 
@@ -847,15 +928,8 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     saveDB();
     addAudit(u.id, -cost, 'faceswap_api', { isVideo });
 
-    if (!PUBLIC_BASE) {
-      u.points += cost;
-      saveDB();
-      cleanupFiles([swapPath, targetPath]);
-      return res.status(500).json({ error: 'Server config error: PUBLIC_URL not set' });
-    }
-
-    const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(swapPath)}`;
-    const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(targetPath)}`;
+    const swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath)}`;
+    const targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath)}`;
 
     const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
     if (!key) {
@@ -865,22 +939,10 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
       return res.status(500).json({ error: 'Server config error: Missing API Key', points: u.points });
     }
 
-    const endpoint = isVideo 
-      ? 'https://api.magicapi.dev/api/v1/capix/faceswap/faceswap/v1/video'
-      : 'https://api.magicapi.dev/api/v1/magicapi/faceswap/faceswap';
-
-    let payload
-    if (isVideo) {
-      payload = new URLSearchParams()
-      payload.append('swap_url', swapUrl)
-      payload.append('target_url', targetUrl)
-    } else {
-      payload = { swap_image: swapUrl, target_image: targetUrl }
-    }
-
-    const result = await callMagicAPIWithRetry(endpoint, payload, key);
-    const data = (result && result.data) || {};
-    const outputUrl = data && (data.output || data.image_url || data.video_url || data.url || (data.result && (data.result.video_url || data.result.image_url || data.result.url)));
+    const toolName = isVideo ? 'runfaceswapvideo' : 'runfaceswapimage';
+    const args = { body: { input: { swap_image: swapUrl, [isVideo ? 'target_video' : 'target_image']: targetUrl } } };
+    const data = await mcpCallToolWithRetry(toolName, args, key);
+    const outputUrl = data && (data.output || data.result_url || data.image_url || data.video_url || data.url);
 
     if (outputUrl) {
       cleanupFiles([swapPath, targetPath]);
@@ -909,7 +971,16 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     cleanupFiles([swapPath, targetPath]);
     return res.status(500).json({ error: 'No output URL or request id from API', points: u.points });
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    console.error('FACESWAP MCP error:', e);
+    try {
+      if (u && typeof cost === 'number') {
+        u.points += cost;
+        saveDB();
+        addAudit(u.id, cost, 'refund_api_error', { error: e && e.message });
+      }
+      cleanupFiles([swapPath, targetPath]);
+    } catch (_) {}
+    return res.status(500).json({ error: e.message || String(e) });
   }
 });
 
@@ -1069,7 +1140,7 @@ async function startBot() {
     console.log(`   URL: ${fullUrl}`);
     
     // Mount webhook middleware BEFORE listen to ensure route exists
-    app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
+    // route already registered globally
     
     // Set webhook on Telegram side
     try {
@@ -1077,6 +1148,26 @@ async function startBot() {
       console.log('✅ Webhook successfully set with Telegram.');
     } catch (e) {
       console.error('❌ FAILED to set Webhook:', e.message);
+    }
+    
+    try {
+      const info = await bot.telegram.getWebhookInfo();
+      const ok = info && typeof info.url === 'string' && info.url.replace(/\/+$/,'') === fullUrl.replace(/\/+$/,'');
+      if (!ok) {
+        await bot.telegram.deleteWebhook().catch(()=>{});
+        await bot.launch();
+        isBotRunning = true;
+        console.log('ℹ️ Fallback to Polling due to webhook mismatch');
+      }
+    } catch (_) {
+      try {
+        await bot.telegram.deleteWebhook().catch(()=>{});
+        await bot.launch();
+        isBotRunning = true;
+        console.log('ℹ️ Fallback to Polling due to webhook check error');
+      } catch (e2) {
+        console.error('❌ Polling fallback failed:', e2.message || e2);
+      }
     }
     
     startSelfPing();
