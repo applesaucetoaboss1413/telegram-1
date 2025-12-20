@@ -12,8 +12,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
+    "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.13.2",
     "better-sqlite3": "^12.5.0",
+    "canvas": "^3.2.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "stripe": "^20.0.0",

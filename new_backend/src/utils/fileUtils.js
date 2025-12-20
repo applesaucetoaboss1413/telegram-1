@@ -24,6 +24,20 @@ const downloadTo = (url, dest) => {
     });
 };
 
+const downloadBuffer = (url) => {
+    return new Promise((resolve, reject) => {
+        const proto = url.startsWith('https') ? https : http;
+        proto.get(url, res => {
+            if (res.statusCode !== 200) {
+                return reject(new Error(`Status Code: ${res.statusCode}`));
+            }
+            const data = [];
+            res.on('data', chunk => data.push(chunk));
+            res.on('end', () => resolve(Buffer.concat(data)));
+        }).on('error', err => reject(err));
+    });
+};
+
 const cleanupFile = (filePath) => {
     try {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -32,4 +46,4 @@ const cleanupFile = (filePath) => {
     }
 };
 
-module.exports = { downloadTo, cleanupFile };
+module.exports = { downloadTo, downloadBuffer, cleanupFile };
