@@ -335,6 +335,8 @@ async function restoreUserCredits() {
 // Initialize PostgreSQL and load data at startup (non-blocking)
 (async () => {
   try {
+    console.log('[DB] DATABASE_URL env var length:', process.env.DATABASE_URL?.length || 0);
+    console.log('[DB] DATABASE_URL starts with:', process.env.DATABASE_URL?.substring(0, 50));
     if (process.env.DATABASE_URL) {
       await initDatabase();
       await loadFromDatabase();
@@ -344,6 +346,7 @@ async function restoreUserCredits() {
     }
   } catch (e) {
     console.error('[DB] Startup error:', e.message);
+    console.error('[DB] Error details:', e);
   }
 })();
 
