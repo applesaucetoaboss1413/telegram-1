@@ -35,7 +35,111 @@ async function toast(ctx, text, alert = false) {
     }
 }
 
-// Private interactions disabled - bot only responds in channel
+// Private interactions disabled - bot only responds in channel or group
+bot.on('message', async ctx => {
+    console.log('[Bot] Message received in chat', ctx.chat.id, ctx.message.text || 'non-text');
+    try {
+        const message = ctx.message;
+        if (message.text) {
+            const text = message.text.trim();
+            const uid = String(ctx.from.id);
+            if (text === '/start' || text.startsWith('/start@')) {
+                console.log('[Bot] Start command in chat', ctx.chat.id, 'from', uid);
+                const u = getOrCreateUser(uid, {
+                    username: ctx.from.username || '',
+                    first_name: ctx.from.first_name || '',
+                    last_name: ctx.from.last_name || ''
+                });
+                const kb = Markup.inlineKeyboard([
+                    [Markup.button.callback('Image Face Swap', 'imageswap'), Markup.button.callback('Video Face Swap', 'faceswap')],
+                    [Markup.button.callback('Buy Points', 'buy'), Markup.button.callback('Prices', 'pricing')],
+                    [Markup.button.callback('Help', 'help'), Markup.button.callback('Promote', 'promote')],
+                    [Markup.button.callback('Checkin (Daily)', 'checkin')]
+                ]);
+                await ctx.reply(`Welcome back, ${u.first_name}! You have ${u.points || 0} points.`, kb);
+            } else if (text === '/menu' || text.startsWith('/menu@')) {
+                const kb = Markup.inlineKeyboard([
+                    [Markup.button.callback('Image Face Swap', 'imageswap'), Markup.button.callback('Video Face Swap', 'faceswap')],
+                    [Markup.button.callback('Buy Points', 'buy')]
+                ]);
+                await ctx.reply('Main Menu:', kb);
+            } else if (text === '/pricing' || text.startsWith('/pricing@')) {
+                const lines = PRICING.map(t => `${t.points} points / $${t.usd}`);
+                await ctx.reply(`Prices:\n${lines.join('\n')}`);
+            } else if (text === '/help' || text.startsWith('/help@')) {
+                await ctx.reply('To use Face Swap: \n1. Choose Image or Video mode.\n2. Send the source photo (the face you want).\n3. Send the target photo or video.');
+            }
+            return;
+        }
+        if (message.photo) {
+            console.log('[Bot] Photo received in chat', ctx.chat.id, 'from', ctx.from.id);
+            const uid = String(ctx.from.id);
+            const p = pending[uid];
+            if (!p) return; // Ignore random photos if not in a flow
+
+            const photos = message.photo;
+            const fileId = photos[photos.length - 1].file_id;
+            const link = await ctx.telegram.getFileLink(fileId);
+            const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
+            await downloadTo(String(link), dest);
+
+            if (p.mode === 'faceswap' || p.mode === 'imageswap') {
+                if (!p.swap) {
+                    p.swap = dest;
+                    await ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET VIDEO.' : 'Great! Now send the TARGET PHOTO.');
+                } else {
+                    // This case is only for imageswap where target is a photo
+                    if (p.mode === 'imageswap') {
+                        p.target = dest;
+                        await ctx.reply('Processing Image Face Swap...');
+                        const u = getOrCreateUser(uid);
+                        const r = await runFaceswapImage(u, p.swap, p.target, String(ctx.chat.id), bot);
+                        delete pending[uid];
+                        if (r.error) {
+                            await ctx.reply(`Failed: ${r.error}`);
+                        } else {
+                            await ctx.reply(`Started! Points remaining: ${r.points}`);
+                        }
+                    } else {
+                        // User sent a photo but we expected a video for video swap
+                        await ctx.reply('Please send a VIDEO for the target, or start over.');
+                    }
+                }
+            }
+        } else if (message.video) {
+            console.log('[Bot] Video received in chat', ctx.chat.id, 'from', ctx.from.id);
+            const uid = String(ctx.from.id);
+            const p = pending[uid];
+            if (!p) return;
+
+            if (p.mode === 'faceswap') {
+                if (!p.swap) {
+                    await ctx.reply('Please send the swap PHOTO first.');
+                    return;
+                }
+                const fileId = message.video.file_id;
+                const link = await ctx.telegram.getFileLink(fileId);
+                const dest = path.join(DIRS.uploads, `video_${uid}_${Date.now()}.mp4`);
+                await downloadTo(String(link), dest);
+
+                p.target = dest;
+                await ctx.reply('Processing Video Face Swap...');
+                const u = getOrCreateUser(uid);
+                const r = await runFaceswap(u, p.swap, p.target, String(ctx.chat.id), bot);
+                delete pending[uid];
+
+                if (r.error) {
+                    await ctx.reply(`Failed: ${r.error}`);
+                } else {
+                    await ctx.reply(`Started! Points remaining: ${r.points}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Message handler error:', e);
+        ctx.reply('Sorry, I had trouble processing that.').catch(() => { });
+    }
+});
 
 // Actions
 bot.action('menu', ctx => ctx.reply('Select an option:', Markup.inlineKeyboard([
