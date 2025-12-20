@@ -3,6 +3,7 @@ services:
     name: telegram-backend
     env: node
     plan: free
+    rootDir: backend
     buildCommand: npm install
     startCommand: node src/server.js
     disk:
@@ -26,3 +27,8 @@ services:
         generateValue: true
       - key: PUBLIC_URL
         sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: telegram-backend
+          property: host
