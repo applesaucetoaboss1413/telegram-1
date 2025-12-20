@@ -10,7 +10,7 @@ const PRICING = [
 ];
 
 function computeOrigin() {
-    const raw = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me');
+    const raw = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.PUBLIC_ORIGIN || process.env.VERCEL_URL || (process.env.BOT_USERNAME ? `https://t.me/${process.env.BOT_USERNAME}` : 'https://t.me');
     return String(raw).trim().replace(/\/$/, '').replace(/^['"`]+|['"`]+$/g, '');
 }
 

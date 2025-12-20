@@ -5,7 +5,7 @@ const querystring = require('querystring');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static');
-const { API_MARKET_KEY, PUBLIC_ORIGIN, DIRS } = require('../config');
+const { API_MARKET_KEY, PUBLIC_ORIGIN, DIRS, CHANNEL_ID } = require('../config');
 const { loadData, saveData } = require('../services/dataService');
 
 if (ffmpegPath) {
@@ -40,7 +40,8 @@ async function ffprobeDuration(p) {
 function startMagicResultPoll(requestId, chatId, bot) {
     let tries = 0;
     const key = API_MARKET_KEY;
-    console.log(`[Faceswap] Starting poll for ${requestId} in chat ${chatId}`);
+    const resultChatId = CHANNEL_ID || chatId;
+    console.log(`[Faceswap] Starting poll for ${requestId} in chat ${chatId}, results to ${resultChatId}`);
 
     const poll = () => {
         tries++;
@@ -59,18 +60,18 @@ function startMagicResultPoll(requestId, chatId, bot) {
                 if (status && /succeeded|successful|completed|done/i.test(String(status))) {
                     const out = j.output || j.result || j.url || j.image_url || j.video_url;
                     const url = Array.isArray(out) ? out[out.length - 1] : out;
-                    if (chatId && url) {
+                    if (resultChatId && url) {
                         try {
                             const dest = path.join(DIRS.outputs, `faceswap_${Date.now()}${path.extname(String(url)) || ''}`);
                             await downloadTo(String(url), dest);
-                            try { await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) }); }
-                            catch (_) { try { await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) }); } catch (e2) { await bot.telegram.sendMessage(chatId, String(url)); } }
+                            try { await bot.telegram.sendVideo(resultChatId, { source: fs.createReadStream(dest) }); }
+                            catch (_) { try { await bot.telegram.sendPhoto(resultChatId, { source: fs.createReadStream(dest) }); } catch (e2) { await bot.telegram.sendMessage(resultChatId, String(url)); } }
                         } catch (e) {
                             console.error('[Faceswap] Error sending result', e);
                         }
                     }
                 } else if (status && /failed|error|canceled/i.test(String(status))) {
-                    if (chatId) { try { await bot.telegram.sendMessage(chatId, 'Faceswap failed'); } catch (_) { } }
+                    if (resultChatId) { try { await bot.telegram.sendMessage(resultChatId, 'Faceswap failed'); } catch (_) { } }
                 } else {
                     if (tries < 40) setTimeout(poll, 3000);
                 }
