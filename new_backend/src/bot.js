@@ -7,6 +7,7 @@ const queueService = require('./services/queueService');
 const { downloadTo, downloadBuffer, cleanupFile } = require('./utils/fileUtils');
 const { detectFaces } = require('./services/faceService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const winston = require('winston');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
@@ -16,6 +17,19 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
 // Middleware
 bot.use(session());
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: winston.format.json(),
+    transports: [new winston.transports.Console()]
+});
+bot.use(async (ctx, next) => {
+    try {
+        const t = ctx.updateType;
+        const uid = ctx.from && ctx.from.id;
+        logger.info('update', { type: t, user: uid });
+    } catch (_) {}
+    return next();
+});
 
 // Helpers
 const getFileLink = async (ctx, fileId) => {
@@ -145,6 +159,7 @@ bot.on('photo', async (ctx) => {
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = photo.file_id;
     const fileSize = photo.file_size;
+    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) {}
 
     if (ctx.session.step === 'awaiting_swap_photo') {
         try {

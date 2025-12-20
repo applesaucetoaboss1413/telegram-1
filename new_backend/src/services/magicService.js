@@ -23,13 +23,14 @@ const startFaceSwap = async (swapUrl, targetUrl, isVideo = false) => {
     };
 
     try {
-        logger.info(`Starting FaceSwap: ${isVideo ? 'Video' : 'Image'}`, { swapUrl, targetUrl });
+        logger.info('magicapi_request', { endpoint, isVideo, swap: !!swapUrl, target: !!targetUrl });
         const response = await axios.post(endpoint, payload, {
             headers: {
                 'x-magicapi-key': API_KEY,
                 'Content-Type': 'application/json'
             }
         });
+        logger.info('magicapi_response', { endpoint, status: response.status, hasData: !!response.data });
         
         const requestId = response.data.request_id || response.data.requestId || response.data.id;
         if (!requestId) {
@@ -51,6 +52,7 @@ const checkStatus = async (requestId, isVideo = false) => {
                 'x-magicapi-key': API_KEY
             }
         });
+        logger.info('magicapi_status', { endpoint, status: response.status, ok: response.status >= 200 && response.status < 300 });
         return response.data;
     } catch (error) {
         logger.error('FaceSwap Status Check Failed', { requestId, error: error.message });
