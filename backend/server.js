@@ -584,14 +584,35 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
           return callRes;
       });
 
-      const data = result || {};
-      const outputUrl = data.output || data.result_url || data.image_url || data.video_url || data.url;
+      console.log('DEBUG MCP RESULT (raw):', JSON.stringify(result, null, 2));
+      let outputUrl, requestId;
+      try {
+        const response = result;
+        const data = result || {};
+        outputUrl = data.output || data.result_url || data.image_url || data.video_url || data.url
+          || (data.result && (data.result.output || data.result.result_url || data.result.image_url || data.result.video_url || data.result.url))
+          || (data.data && (data.data.output || data.data.result_url || data.data.image_url || data.data.video_url || data.data.url));
+        if (Array.isArray(outputUrl)) outputUrl = outputUrl[outputUrl.length - 1];
+        if (typeof outputUrl === 'object' && outputUrl) {
+          outputUrl = outputUrl.url || outputUrl.image_url || outputUrl.video_url || Object.values(outputUrl)[0];
+        }
+        requestId = (data.request_id || data.id || data.requestId)
+          || (data.result && (data.result.request_id || data.result.id || data.result.requestId))
+          || (data.data && (data.data.request_id || data.data.id || data.data.requestId));
+        if (!outputUrl && !requestId) {
+          console.log('DEBUG MCP RESPONSE:', JSON.stringify(response, null, 2));
+          throw new Error('No output URL or Request ID in response');
+        }
+      } catch (extractErr) {
+        console.error('DEBUG MCP EXTRACT ERROR:', extractErr.message);
+        console.error('DEBUG MCP RESULT:', JSON.stringify(result, null, 2));
+        throw extractErr;
+      }
 
       if (outputUrl) {
           cleanupFiles([swapPath, targetPath]);
           return { success: true, output: outputUrl, points: user.points };
       } else {
-          const requestId = data.request_id || data.id || data.requestId;
           if (requestId) {
             if (!DB.pending_swaps) DB.pending_swaps = {};
             DB.pending_swaps[requestId] = {
