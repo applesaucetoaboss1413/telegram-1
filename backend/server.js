@@ -818,6 +818,8 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
     targetPath = path.join(uploadsDir, `tg_target_${u.id}_${Date.now()}.${extTarget}`);
     await downloadTo(swapLink, swapPath);
     await downloadTo(targetLink, targetPath);
+    console.log('DEBUG UPLOAD: Saved swap file to', swapPath);
+    console.log('DEBUG UPLOAD: Saved target file to', targetPath);
   } catch (e) {
     user.points += cost;
     saveDB();
@@ -826,6 +828,7 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
 
   const swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath)}`;
   const targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath)}`;
+  console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
 
   try {
       const qPos = queue.size;
@@ -1212,7 +1215,14 @@ bot.on('callback_query', async (ctx) => {
 
 const app = express();
 app.use(express.json());
+if (!fs.existsSync(uploadsDir)) {
+  try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (_) {}
+  console.log('DEBUG: Created uploads directory at', uploadsDir);
+} else {
+  console.log('DEBUG: Uploads directory exists at', uploadsDir);
+}
 app.use('/uploads', express.static(uploadsDir));
+console.log('DEBUG: Static /uploads middleware registered for', uploadsDir);
 app.use('/outputs', express.static(outputsDir));
 const telegrafWebhook = bot.webhookCallback('/telegram/webhook');
 app.post('/telegram/webhook', (req, res, next) => {
@@ -1224,6 +1234,13 @@ app.post('/telegram/webhook', (req, res, next) => {
   telegrafWebhook(req, res, (err) => {
     if (err) console.error('[WEBHOOK] handler error:', err);
     try { if (!res.headersSent) res.status(200).end(); } catch (_) {}
+  });
+});
+app.get('/uploads/test', (req, res) => {
+  res.json({
+    message: 'Uploads static serving is working',
+    uploadsDir,
+    PUBLIC_URL
   });
 });
 
@@ -1246,7 +1263,9 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     const targetPath = path.join(uploadsDir, `target_${userId}_${Date.now()}.${targetExt}`);
     
     fs.writeFileSync(swapPath, swapFile.buffer);
+    console.log('DEBUG UPLOAD: Saved swap file to', swapPath);
     fs.writeFileSync(targetPath, targetFile.buffer);
+    console.log('DEBUG UPLOAD: Saved target file to', targetPath);
     
     const isVideo = targetFile.mimetype && targetFile.mimetype.startsWith('video');
     const u = getOrCreateUser(userId);
@@ -1263,6 +1282,7 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
 
     const swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath)}`;
     const targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath)}`;
+    console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
 
     const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
     if (!key) {
