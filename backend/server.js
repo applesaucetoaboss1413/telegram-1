@@ -39,11 +39,15 @@ cloudinary.config({
 });
 console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDINARY_CLOUD_NAME);
 
-// A2E API helpers
-const a2eApiKey = process.env.A2E_API_KEY;
 const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
 
 async function callA2eApi(endpoint, method = 'GET', body = null) {
+  const a2eApiKey = process.env.A2E_API_KEY;
+  if (!a2eApiKey) {
+    console.error('ERROR: A2E_API_KEY environment variable not set');
+    throw new Error('A2E_API_KEY environment variable not set');
+  }
+  try { console.log('DEBUG: A2E API call to', endpoint, 'with key length:', a2eApiKey.length); } catch (_) {}
   const url = `${a2eBaseUrl}${endpoint}`;
   const options = {
     method,
