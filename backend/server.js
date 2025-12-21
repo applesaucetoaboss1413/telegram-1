@@ -22,6 +22,7 @@ const path = require('path');
 const express = require('express');
 const multer = require('multer');
 const https = require('https');
+const cloudinary = require('cloudinary').v2;
 const { Telegraf, Markup } = require('telegraf');
 const { getAllUsage, getUsageFor } = require('./services/usageClient');
 
@@ -29,6 +30,14 @@ const PORT = process.env.PORT || 3000;
 console.log('DEBUG PUBLIC_URL at startup:', process.env.PUBLIC_URL);
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim();
 console.log('DEBUG NORMALIZED PUBLIC_URL:', PUBLIC_URL);
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDINARY_CLOUD_NAME);
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
@@ -811,24 +820,30 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   }
 
   let swapPath, targetPath;
+  let swapUrl, targetUrl;
   try {
-    const extSwap = 'jpg';
-    const extTarget = isVideo ? 'mp4' : 'jpg';
-    swapPath = path.join(uploadsDir, `tg_swap_${u.id}_${Date.now()}.${extSwap}`);
-    targetPath = path.join(uploadsDir, `tg_target_${u.id}_${Date.now()}.${extTarget}`);
-    await downloadTo(swapLink, swapPath);
-    await downloadTo(targetLink, targetPath);
-    console.log('DEBUG UPLOAD: Saved swap file to', swapPath);
-    console.log('DEBUG UPLOAD: Saved target file to', targetPath);
+    const swapUpload = await cloudinary.uploader.upload(swapLink, { folder: 'faceswap/swap', resource_type: 'auto', public_id: `tg_swap_${u.id}_${Date.now()}` });
+    const targetUpload = await cloudinary.uploader.upload(targetLink, { folder: 'faceswap/target', resource_type: 'auto', public_id: `tg_target_${u.id}_${Date.now()}` });
+    swapUrl = swapUpload.secure_url;
+    targetUrl = targetUpload.secure_url;
+    console.log('DEBUG UPLOAD: Saved swap to Cloudinary:', swapUrl);
+    console.log('DEBUG UPLOAD: Saved target to Cloudinary:', targetUrl);
+    console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
   } catch (e) {
     user.points += cost;
     saveDB();
     return { error: 'Failed to stage files to uploads.', points: user.points };
   }
 
-  const swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath)}`;
-  const targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath)}`;
-  console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
+  if (!swapUrl || !targetUrl) {
+    swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath || '')}`;
+    targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath || '')}`;
+  }
+  if (!swapUrl || !targetUrl) {
+    user.points += cost;
+    saveDB();
+    return { error: 'Failed to generate Cloudinary URLs.', points: user.points };
+  }
 
   try {
       const qPos = queue.size;
@@ -1219,10 +1234,10 @@ if (!fs.existsSync(uploadsDir)) {
   try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (_) {}
   console.log('DEBUG: Created uploads directory at', uploadsDir);
 } else {
-  console.log('DEBUG: Uploads directory exists at', uploadsDir);
+  console.log('DEBUG: Using Cloudinary for image uploads (cloud_name:', process.env.CLOUDINARY_CLOUD_NAME + ')');
+  console.log('DEBUG: Local /uploads middleware not needed; all images uploaded to CDN');
 }
-app.use('/uploads', express.static(uploadsDir));
-console.log('DEBUG: Static /uploads middleware registered for', uploadsDir);
+console.log('DEBUG: Static /uploads middleware registration skipped (Cloudinary in use)');
 app.use('/outputs', express.static(outputsDir));
 const telegrafWebhook = bot.webhookCallback('/telegram/webhook');
 app.post('/telegram/webhook', (req, res, next) => {
@@ -1256,16 +1271,22 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     
     if (!swapFile || !targetFile) return res.status(400).json({ error: 'swap and target files required' });
     
-    const swapExt = swapFile.originalname && swapFile.originalname.includes('.') ? swapFile.originalname.split('.').pop() : 'dat';
-    const targetExt = targetFile.originalname && targetFile.originalname.includes('.') ? targetFile.originalname.split('.').pop() : 'dat';
+    const swapExt = swapFile.originalname && swapFile.originalname.includes('.') ? swapFile.originalname.split('.').pop() : 'jpg';
+    const targetExt = targetFile.originalname && targetFile.originalname.includes('.') ? targetFile.originalname.split('.').pop() : (targetFile.mimetype && targetFile.mimetype.startsWith('video') ? 'mp4' : 'jpg');
     
     const swapPath = path.join(uploadsDir, `swap_${userId}_${Date.now()}.${swapExt}`);
     const targetPath = path.join(uploadsDir, `target_${userId}_${Date.now()}.${targetExt}`);
     
-    fs.writeFileSync(swapPath, swapFile.buffer);
-    console.log('DEBUG UPLOAD: Saved swap file to', swapPath);
-    fs.writeFileSync(targetPath, targetFile.buffer);
-    console.log('DEBUG UPLOAD: Saved target file to', targetPath);
+    const swapUpload = await new Promise((resolve, reject) => {
+      const s = cloudinary.uploader.upload_stream({ folder: 'faceswap/swap', resource_type: 'auto', public_id: `swap_${userId}_${Date.now()}` }, (err, res) => err ? reject(err) : resolve(res));
+      s.end(swapFile.buffer);
+    });
+    const targetUpload = await new Promise((resolve, reject) => {
+      const s = cloudinary.uploader.upload_stream({ folder: 'faceswap/target', resource_type: 'auto', public_id: `target_${userId}_${Date.now()}` }, (err, res) => err ? reject(err) : resolve(res));
+      s.end(targetFile.buffer);
+    });
+    console.log('DEBUG UPLOAD: Saved swap to Cloudinary:', swapUpload && swapUpload.secure_url);
+    console.log('DEBUG UPLOAD: Saved target to Cloudinary:', targetUpload && targetUpload.secure_url);
     
     const isVideo = targetFile.mimetype && targetFile.mimetype.startsWith('video');
     const u = getOrCreateUser(userId);
@@ -1280,8 +1301,9 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     saveDB();
     addAudit(u.id, -cost, 'faceswap_api', { isVideo });
 
-    const swapUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(swapPath)}`;
-    const targetUrl = `${PUBLIC_URL.replace(/\/+$/, '')}/uploads/${path.basename(targetPath)}`;
+    const swapUrl = swapUpload.secure_url;
+    const targetUrl = targetUpload.secure_url;
+    console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
     console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
 
     const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
