@@ -837,9 +837,11 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
           const tools = await listMcpTools(key).catch(() => []);
           const selected = selectTool(tools, isVideo ? 'video' : 'image');
           const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
-          const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
           const defaultTopArgs = isVideo ? { swap_image: swapUrl, target_video: targetUrl } : { swap_image: swapUrl, target_image: targetUrl };
-          const argsTop = Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs;
+          const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
+          const argsTop = (toolName && toolName.includes('faceswap'))
+            ? defaultTopArgs
+            : (Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs);
           const argsWrapped = { input: { ...argsTop } };
           const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
           console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
@@ -859,8 +861,15 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
         const textItem = result.content.find(c => c && c.type === 'text' && typeof c.text === 'string');
         if (textItem) {
           const textContent = textItem.text;
+          let jsonPart = textContent;
+          if (typeof textContent === 'string' && /^Error\s*\d*:/.test(textContent)) {
+            const braceIdx = textContent.indexOf('{');
+            if (braceIdx !== -1) {
+              jsonPart = textContent.slice(braceIdx);
+            }
+          }
           try {
-            rawResponse = JSON.parse(textContent);
+            rawResponse = JSON.parse(jsonPart);
             console.log('DEBUG MCP RESPONSE (parsed):', JSON.stringify(rawResponse, null, 2));
           } catch (e) {
             console.error('DEBUG: Failed to parse text content as JSON:', textContent);
@@ -870,6 +879,9 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       }
 
       const apiResponse = rawResponse || {};
+      if (apiResponse && apiResponse.error) {
+        throw new Error(`FaceSwap API error: ${apiResponse.error}`);
+      }
       const requestId = apiResponse.id;
       const status = apiResponse.status;
       console.log('DEBUG MCP STATUS:', status, 'REQUEST_ID:', requestId);
@@ -1263,9 +1275,11 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     const tools = await listMcpTools(key).catch(() => []);
     const selected = selectTool(tools, isVideo ? 'video' : 'image');
     const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
-    const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
     const defaultTopArgs = isVideo ? { swap_image: swapUrl, target_video: targetUrl } : { swap_image: swapUrl, target_image: targetUrl };
-    const argsTop = Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs;
+    const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
+    const argsTop = (toolName && toolName.includes('faceswap'))
+      ? defaultTopArgs
+      : (Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs);
     const argsWrapped = { input: { ...argsTop } };
     const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
     console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
