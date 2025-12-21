@@ -710,6 +710,14 @@ function pollMagicResult(requestId, chatId) {
       } else if (status.includes('fail') || status.includes('error')) {
         throw new Error(j.error || j.message || 'Unknown error');
       } else {
+        if (status !== 'in_queue' && status !== 'processing') {
+          try {
+            console.log('DEBUG STATUS RESPONSE', JSON.stringify(j, null, 2));
+          } catch (_) {}
+          if (j && (j.error || j.message)) {
+            console.error('DEBUG STATUS ERROR', j.error || j.message);
+          }
+        }
         setTimeout(poll, 3000);
       }
     } catch (e) {
@@ -865,9 +873,21 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   }
 }
 
-bot.command('start', ctx => {
-  const u = getOrCreateUser(String(ctx.from.id));
-  ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap to start.`, 
+bot.command('start', async ctx => {
+  const id = String(ctx.from.id);
+  let u = DB.users[id];
+  if (!u && process.env.DATABASE_URL) {
+    const row = await pgGetOrCreateUser(id, ctx.from && ctx.from.first_name);
+    if (row && typeof row.points === 'number') {
+      u = { id, first_name: row.first_name || null, points: row.points, created_at: Date.now() };
+      DB.users[id] = u;
+      saveDB();
+    }
+  }
+  if (!u) {
+    u = getOrCreateUser(id, { first_name: ctx.from && ctx.from.first_name });
+  }
+  ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap to start.`,
     Markup.inlineKeyboard([
       [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')],
       [Markup.button.callback('Buy Points', 'buy')]
