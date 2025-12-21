@@ -690,9 +690,41 @@ function pollMagicResult(requestId, chatId) {
 
     try {
       const statusToolName = isVideo ? 'getfaceswapvideostatus' : 'getfaceswapimagestatus';
-      const j = await mcpCallToolWithRetry(statusToolName, { id: requestId }, key);
-      const status = String(j.status || j.state || '').toLowerCase();
-      const outData = j.result_url || j.output || j.url || j.image_url || j.video_url;
+      const resp = await mcpCallToolWithRetry(statusToolName, { id: requestId }, key);
+      let apiResponse = resp;
+      if (resp && Array.isArray(resp.content)) {
+        const t = resp.content.find(c => c && c.type === 'text' && typeof c.text === 'string');
+        if (t && typeof t.text === 'string') {
+          try {
+            apiResponse = JSON.parse(t.text);
+          } catch (e) {
+            console.error('DEBUG STATUS ERROR parse_failed', e && e.message ? e.message : String(e));
+          }
+        }
+      }
+      const status = String(apiResponse && (apiResponse.status || apiResponse.state) || '').toLowerCase();
+      if (apiResponse && apiResponse.status === 'FAILED') {
+        try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
+        console.error('DEBUG STATUS ERROR provider_failed', apiResponse);
+        if (job && job.userId) {
+          const u = getOrCreateUser(job.userId);
+          const cost = job.isVideo ? 15 : 9;
+          u.points += cost;
+          saveDB();
+          addAudit(job.userId, cost, 'refund_provider_failed', { requestId, job: apiResponse });
+        }
+        if (chatId) {
+          bot.telegram.sendMessage(chatId, '❌ The image server reported that this face swap failed. Your credits for this attempt have been fully refunded. Please try again with clear, front-facing faces and good lighting.').catch(()=>{});
+        }
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: 'Provider FAILED' };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+        return;
+      }
+      const outData = apiResponse && (apiResponse.result_url || apiResponse.output || apiResponse.url || apiResponse.image_url || apiResponse.video_url);
       if (outData) {
         let finalUrl = Array.isArray(outData) ? outData[outData.length-1] : outData;
         if (typeof finalUrl === 'object') finalUrl = finalUrl.video_url || finalUrl.image_url || finalUrl.url || Object.values(finalUrl)[0];
@@ -708,20 +740,16 @@ function pollMagicResult(requestId, chatId) {
           saveDB();
         }
       } else if (status.includes('fail') || status.includes('error')) {
-        try {
-          console.log('DEBUG STATUS RESPONSE', JSON.stringify(j, null, 2));
-        } catch (_) {}
-        if (j && (j.error || j.message)) {
-          console.error('DEBUG STATUS ERROR', j.error || j.message);
+        try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
+        if (apiResponse && (apiResponse.error || apiResponse.message)) {
+          console.error('DEBUG STATUS ERROR', apiResponse.error || apiResponse.message);
         }
-        throw new Error(j.error || j.message || 'Unknown error');
+        throw new Error((apiResponse && (apiResponse.error || apiResponse.message)) || 'Unknown error');
       } else {
         if (status !== 'in_queue' && status !== 'processing') {
-          try {
-            console.log('DEBUG STATUS RESPONSE', JSON.stringify(j, null, 2));
-          } catch (_) {}
-          if (j && (j.error || j.message)) {
-            console.error('DEBUG STATUS ERROR', j.error || j.message);
+          try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
+          if (apiResponse && (apiResponse.error || apiResponse.message)) {
+            console.error('DEBUG STATUS ERROR', apiResponse.error || apiResponse.message);
           }
         }
         setTimeout(poll, 3000);
