@@ -319,16 +319,16 @@ async function loadFromDatabase() {
 
 async function restoreUserCredits() {
   const userId = 8063916626;
-  const credits = 60;
+  const credits = 69;
   if (!process.env.DATABASE_URL) return;
   try {
     await pgPool.query(
       'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET points = $3, updated_at = NOW()',
       [userId, 'You', credits]
     );
-    console.log(`[RESTORE] User ${userId} credits restored to ${credits}`);
+    console.log('[DB] RESTORE User', userId, 'credits restored to', credits);
   } catch (e) {
-    console.error('[RESTORE] Error:', e.message);
+    console.error('[DB] RESTORE Error:', e.message);
   }
 }
 
@@ -341,6 +341,20 @@ async function restoreUserCredits() {
       await initDatabase();
       await loadFromDatabase();
       await restoreUserCredits();
+      {
+        const u = DB.users['8063916626'];
+        if (u) {
+          u.points = 69;
+        } else {
+          DB.users['8063916626'] = {
+            id: '8063916626',
+            first_name: 'You',
+            points: 69,
+            created_at: Date.now()
+          };
+        }
+        saveDB();
+      }
     } else {
       console.warn('[DB] DATABASE_URL not set; continuing with JSON storage');
     }
