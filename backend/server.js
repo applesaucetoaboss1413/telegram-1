@@ -855,12 +855,18 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
           const tools = await listMcpTools(key).catch(() => []);
           const selected = selectTool(tools, isVideo ? 'video' : 'image');
           const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
-          const defaultTopArgs = isVideo ? { swap_image: swapUrl, target_video: targetUrl } : { swap_image: swapUrl, target_image: targetUrl };
+          // For faceswap tools, always use MCP schema: body.input with target_face_index
+          const defaultTopArgs = isVideo
+            ? { body: { input: { swap_image: swapUrl, target_video: targetUrl, target_face_index: -1 } } }
+            : { body: { input: { swap_image: swapUrl, target_image: targetUrl, target_face_index: -1 } } };
           const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
           const argsTop = (toolName && toolName.includes('faceswap'))
             ? defaultTopArgs
             : (Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs);
-          const argsWrapped = { input: { ...argsTop } };
+          // For non-faceswap tools, wrap in input if needed; faceswap already has body.input
+          const argsWrapped = (toolName && toolName.includes('faceswap'))
+            ? { ...argsTop }
+            : { input: { ...argsTop } };
           const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
           console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
           try {
@@ -1317,12 +1323,18 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     const tools = await listMcpTools(key).catch(() => []);
     const selected = selectTool(tools, isVideo ? 'video' : 'image');
     const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
-    const defaultTopArgs = isVideo ? { swap_image: swapUrl, target_video: targetUrl } : { swap_image: swapUrl, target_image: targetUrl };
+    // For faceswap tools, always use MCP schema: body.input with target_face_index
+    const defaultTopArgs = isVideo
+      ? { body: { input: { swap_image: swapUrl, target_video: targetUrl, target_face_index: -1 } } }
+      : { body: { input: { swap_image: swapUrl, target_image: targetUrl, target_face_index: -1 } } };
     const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
     const argsTop = (toolName && toolName.includes('faceswap'))
       ? defaultTopArgs
       : (Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs);
-    const argsWrapped = { input: { ...argsTop } };
+    // For non-faceswap tools, wrap in input if needed; faceswap already has body.input
+    const argsWrapped = (toolName && toolName.includes('faceswap'))
+      ? { ...argsTop }
+      : { input: { ...argsTop } };
     const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
     console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
     let data;
