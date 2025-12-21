@@ -708,6 +708,12 @@ function pollMagicResult(requestId, chatId) {
           saveDB();
         }
       } else if (status.includes('fail') || status.includes('error')) {
+        try {
+          console.log('DEBUG STATUS RESPONSE', JSON.stringify(j, null, 2));
+        } catch (_) {}
+        if (j && (j.error || j.message)) {
+          console.error('DEBUG STATUS ERROR', j.error || j.message);
+        }
         throw new Error(j.error || j.message || 'Unknown error');
       } else {
         if (status !== 'in_queue' && status !== 'processing') {
