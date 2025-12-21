@@ -64,6 +64,10 @@ async function callA2eApi(endpoint, method = 'GET', body = null) {
 }
 
 async function startFaceSwap(swapUrl, videoUrl, taskName) {
+  console.log('DEBUG FACESWAP INPUT:', { swapUrl, videoUrl });
+  if (!(typeof videoUrl === 'string' && /\.(mp4|mov|avi)(\?.*)?$/i.test(videoUrl))) {
+    throw new Error('A2E faceswap requires a video URL (.mp4, .mov, .avi), not an image');
+  }
   const result = await callA2eApi('/userFaceSwapTask/add', 'POST', {
     name: taskName,
     face_url: swapUrl,
