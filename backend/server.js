@@ -39,6 +39,44 @@ cloudinary.config({
 });
 console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDINARY_CLOUD_NAME);
 
+// A2E API helpers
+const a2eApiKey = process.env.A2E_API_KEY;
+const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
+
+async function callA2eApi(endpoint, method = 'GET', body = null) {
+  const url = `${a2eBaseUrl}${endpoint}`;
+  const options = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${a2eApiKey}`
+    }
+  };
+  if (body) options.body = JSON.stringify(body);
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`A2E ${response.status}`);
+  return await response.json();
+}
+
+async function startFaceSwap(swapUrl, videoUrl, taskName) {
+  const result = await callA2eApi('/userFaceSwapTask/add', 'POST', {
+    name: taskName,
+    face_url: swapUrl,
+    video_url: videoUrl
+  });
+  if (result.code !== 0) throw new Error(result.data?.failed_message || 'FaceSwap failed');
+  return { taskId: result.data._id, status: result.data.current_status };
+}
+
+async function pollFaceSwapStatus(taskId) {
+  const result = await callA2eApi('/userFaceSwapTask/status', 'GET');
+  const task = result.data.find(t => t._id === taskId);
+  if (!task) return { status: 'NOT_FOUND' };
+  if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
+  if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
+  if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
+  return { status: 'UNKNOWN' };
+}
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
 if (!stripe) {
@@ -698,21 +736,10 @@ function pollMagicResult(requestId, chatId) {
     }
 
     try {
-      const statusToolName = isVideo ? 'getfaceswapvideostatus' : 'getfaceswapimagestatus';
-      const resp = await mcpCallToolWithRetry(statusToolName, { id: requestId }, key);
-      let apiResponse = resp;
-      if (resp && Array.isArray(resp.content)) {
-        const t = resp.content.find(c => c && c.type === 'text' && typeof c.text === 'string');
-        if (t && typeof t.text === 'string') {
-          try {
-            apiResponse = JSON.parse(t.text);
-          } catch (e) {
-            console.error('DEBUG STATUS ERROR parse_failed', e && e.message ? e.message : String(e));
-          }
-        }
-      }
-      const status = String(apiResponse && (apiResponse.status || apiResponse.state) || '').toLowerCase();
-      if (apiResponse && apiResponse.status === 'FAILED') {
+      const pollResult = await pollFaceSwapStatus(requestId);
+      console.log('DEBUG A2E POLL:', pollResult);
+      if (pollResult.status === 'FAILED') {
+        const apiResponse = { error: pollResult.error, status: 'FAILED' };
         try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
         console.error('DEBUG STATUS ERROR provider_failed', apiResponse);
         if (job && job.userId) {
@@ -732,11 +759,8 @@ function pollMagicResult(requestId, chatId) {
           saveDB();
         }
         return;
-      }
-      const outData = apiResponse && (apiResponse.result_url || apiResponse.output || apiResponse.url || apiResponse.image_url || apiResponse.video_url);
-      if (outData) {
-        let finalUrl = Array.isArray(outData) ? outData[outData.length-1] : outData;
-        if (typeof finalUrl === 'object') finalUrl = finalUrl.video_url || finalUrl.image_url || finalUrl.url || Object.values(finalUrl)[0];
+      } else if (pollResult.status === 'COMPLETED') {
+        const finalUrl = pollResult.result_url;
         if (chatId) {
           if (isVideo) await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Face swap complete!' });
           else await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Face swap complete!' });
@@ -748,19 +772,9 @@ function pollMagicResult(requestId, chatId) {
           delete DB.pending_swaps[requestId];
           saveDB();
         }
-      } else if (status.includes('fail') || status.includes('error')) {
-        try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
-        if (apiResponse && (apiResponse.error || apiResponse.message)) {
-          console.error('DEBUG STATUS ERROR', apiResponse.error || apiResponse.message);
-        }
-        throw new Error((apiResponse && (apiResponse.error || apiResponse.message)) || 'Unknown error');
+      } else if (pollResult.status === 'IN_PROGRESS') {
+        setTimeout(poll, 3000);
       } else {
-        if (status !== 'in_queue' && status !== 'processing') {
-          try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
-          if (apiResponse && (apiResponse.error || apiResponse.message)) {
-            console.error('DEBUG STATUS ERROR', apiResponse.error || apiResponse.message);
-          }
-        }
         setTimeout(poll, 3000);
       }
     } catch (e) {
@@ -852,32 +866,41 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       }
 
       const result = await queue.add(async () => {
-          const tools = await listMcpTools(key).catch(() => []);
-          const selected = selectTool(tools, isVideo ? 'video' : 'image');
-          const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
-          // For faceswap tools, always use MCP schema: body.input with target_face_index
-          const defaultTopArgs = isVideo
-            ? { body: { input: { swap_image: swapUrl, target_video: targetUrl, target_face_index: -1 } } }
-            : { body: { input: { swap_image: swapUrl, target_image: targetUrl, target_face_index: -1 } } };
-          const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
-          const argsTop = (toolName && toolName.includes('faceswap'))
-            ? defaultTopArgs
-            : (Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs);
-          // For non-faceswap tools, wrap in input if needed; faceswap already has body.input
-          const argsWrapped = (toolName && toolName.includes('faceswap'))
-            ? { ...argsTop }
-            : { input: { ...argsTop } };
-          const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
-          console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
+          const taskName = `faceswap_${u.id}_${Date.now()}`;
+          let taskId, initialStatus;
           try {
-            const callRes = await mcpCallToolWithRetry(toolName, argsTop, key);
-            return callRes;
+            const faceswapResult = await startFaceSwap(swapUrl, targetUrl, taskName);
+            taskId = faceswapResult.taskId;
+            initialStatus = faceswapResult.status;
+            console.log('DEBUG A2E FACESWAP TASK:', { taskId, initialStatus });
+            return { taskId, status: initialStatus };
           } catch (e) {
-            console.error('DEBUG START CALL primary_args_failed', e && e.message ? e.message : String(e));
-            const callRes = await mcpCallToolWithRetry(toolName, argsWrapped, key);
-            return callRes;
+            console.error('DEBUG A2E START ERROR:', e.message);
+            throw e;
           }
       });
+
+      if (result && result.taskId) {
+        const requestId = result.taskId;
+        const status = result.status;
+        if (!DB.pending_swaps) DB.pending_swaps = {};
+        DB.pending_swaps[requestId] = {
+          chatId: ctx.chat.id,
+          userId: u.id,
+          startTime: Date.now(),
+          isVideo: isVideo,
+          status: 'processing'
+        };
+        saveDB();
+        pollMagicResult(requestId, ctx.chat.id);
+        return {
+          started: true,
+          requestId,
+          status,
+          message: `Your faceswap is processing. Task ID: ${requestId}.`,
+          points: user.points
+        };
+      }
 
       console.log('DEBUG MCP RESULT (raw):', JSON.stringify(result, null, 2));
       let rawResponse = result;
@@ -1321,39 +1344,12 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     }
 
     const tools = await listMcpTools(key).catch(() => []);
-    const selected = selectTool(tools, isVideo ? 'video' : 'image');
-    const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
-    // For faceswap tools, always use MCP schema: body.input with target_face_index
-    const defaultTopArgs = isVideo
-      ? { body: { input: { swap_image: swapUrl, target_video: targetUrl, target_face_index: -1 } } }
-      : { body: { input: { swap_image: swapUrl, target_image: targetUrl, target_face_index: -1 } } };
-    const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
-    const argsTop = (toolName && toolName.includes('faceswap'))
-      ? defaultTopArgs
-      : (Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs);
-    // For non-faceswap tools, wrap in input if needed; faceswap already has body.input
-    const argsWrapped = (toolName && toolName.includes('faceswap'))
-      ? { ...argsTop }
-      : { input: { ...argsTop } };
-    const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
-    console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
-    let data;
+    const taskName = `faceswap_${u.id}_${Date.now()}`;
     try {
-      data = await mcpCallToolWithRetry(toolName, argsTop, key);
-    } catch (e) {
-      console.error('DEBUG START CALL primary_args_failed', e && e.message ? e.message : String(e));
-      data = await mcpCallToolWithRetry(toolName, argsWrapped, key);
-    }
-    const outputUrl = data && (data.output || data.result_url || data.image_url || data.video_url || data.url);
-
-    if (outputUrl) {
-      cleanupFiles([swapPath, targetPath]);
-      await sendToResultChannel(outputUrl, isVideo);
-      return res.json({ ok: true, output: outputUrl, points: u.points });
-    }
-
-    const requestId = data.request_id || data.requestId || data.id;
-    if (requestId) {
+      const faceswapResult = await startFaceSwap(swapUrl, targetUrl, taskName);
+      const requestId = faceswapResult.taskId;
+      const initialStatus = faceswapResult.status;
+      console.log('DEBUG A2E FACESWAP TASK:', { requestId, initialStatus });
       if (!DB.pending_swaps) DB.pending_swaps = {};
       DB.pending_swaps[requestId] = {
         userId: u.id,
@@ -1366,6 +1362,12 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
       cleanupFiles([swapPath, targetPath]);
       pollMagicResult(requestId, null);
       return res.json({ ok: true, requestId, message: 'Job started. Poll status at /faceswap/status/' + requestId });
+    } catch (e) {
+      console.error('DEBUG A2E START ERROR:', e.message);
+      u.points += cost;
+      saveDB();
+      cleanupFiles([swapPath, targetPath]);
+      return res.status(500).json({ error: `FaceSwap failed: ${e.message}`, points: u.points });
     }
 
     u.points += cost;
