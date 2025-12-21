@@ -834,10 +834,23 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       }
 
       const result = await queue.add(async () => {
-          const toolName = isVideo ? 'runfaceswapvideo' : 'runfaceswapimage';
-          const args = { body: { input: { swap_image: swapUrl, [isVideo ? 'target_video' : 'target_image']: targetUrl } } };
-          const callRes = await mcpCallToolWithRetry(toolName, args, key);
-          return callRes;
+          const tools = await listMcpTools(key).catch(() => []);
+          const selected = selectTool(tools, isVideo ? 'video' : 'image');
+          const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
+          const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
+          const defaultTopArgs = isVideo ? { swap_image: swapUrl, target_video: targetUrl } : { swap_image: swapUrl, target_image: targetUrl };
+          const argsTop = Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs;
+          const argsWrapped = { input: { ...argsTop } };
+          const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
+          console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
+          try {
+            const callRes = await mcpCallToolWithRetry(toolName, argsTop, key);
+            return callRes;
+          } catch (e) {
+            console.error('DEBUG START CALL primary_args_failed', e && e.message ? e.message : String(e));
+            const callRes = await mcpCallToolWithRetry(toolName, argsWrapped, key);
+            return callRes;
+          }
       });
 
       console.log('DEBUG MCP RESULT (raw):', JSON.stringify(result, null, 2));
@@ -1247,9 +1260,22 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
       return res.status(500).json({ error: 'Server config error: Missing API Key', points: u.points });
     }
 
-    const toolName = isVideo ? 'runfaceswapvideo' : 'runfaceswapimage';
-    const args = { body: { input: { swap_image: swapUrl, [isVideo ? 'target_video' : 'target_image']: targetUrl } } };
-    const data = await mcpCallToolWithRetry(toolName, args, key);
+    const tools = await listMcpTools(key).catch(() => []);
+    const selected = selectTool(tools, isVideo ? 'video' : 'image');
+    const toolName = (selected && selected.name) || (isVideo ? 'runfaceswapvideo' : 'runfaceswapimage');
+    const topArgsFromSchema = selected ? buildArgsFromSchema(selected, swapUrl, targetUrl) : {};
+    const defaultTopArgs = isVideo ? { swap_image: swapUrl, target_video: targetUrl } : { swap_image: swapUrl, target_image: targetUrl };
+    const argsTop = Object.keys(topArgsFromSchema).length ? topArgsFromSchema : defaultTopArgs;
+    const argsWrapped = { input: { ...argsTop } };
+    const cleanedArgs = JSON.parse(JSON.stringify(argsTop));
+    console.log('DEBUG FACESWAP START args', JSON.stringify(cleanedArgs, null, 2));
+    let data;
+    try {
+      data = await mcpCallToolWithRetry(toolName, argsTop, key);
+    } catch (e) {
+      console.error('DEBUG START CALL primary_args_failed', e && e.message ? e.message : String(e));
+      data = await mcpCallToolWithRetry(toolName, argsWrapped, key);
+    }
     const outputUrl = data && (data.output || data.result_url || data.image_url || data.video_url || data.url);
 
     if (outputUrl) {
