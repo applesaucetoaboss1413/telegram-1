@@ -7,6 +7,7 @@ const queue = new PQueue(process.env.NODE_ENV === 'test' ? { concurrency: 1 } : 
 if (process.env.NODE_ENV !== 'test') {
   console.log('Server script started (V6 - JSON/URL Fix)');
   console.log('Deploy tick', Date.now());
+  console.log('DEBUG: Server init - API keys will be validated when services are called');
 }
 
 process.on('uncaughtException', (err) => {
@@ -707,7 +708,7 @@ function pollMagicResult(requestId, chatId) {
   let tries = 0;
   const job = DB.pending_swaps[requestId];
   const isVideo = job ? job.isVideo : true; 
-  const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
+  // API key validation now happens at call time in callA2eApi
   
   const poll = async () => {
     tries++;
@@ -828,13 +829,6 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
     user.points += cost; 
     saveDB();
     return { error: 'Failed to generate file URLs from Telegram.', points: user.points };
-  }
-
-  const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
-  if (!key) {
-      user.points += cost; 
-      saveDB();
-      return { error: 'Server config error: Missing API Key', points: user.points };
   }
 
   let swapPath, targetPath;
@@ -1339,13 +1333,7 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
     console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
 
-    const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
-    if (!key) {
-      u.points += cost;
-      saveDB();
-      cleanupFiles([swapPath, targetPath]);
-      return res.status(500).json({ error: 'Server config error: Missing API Key', points: u.points });
-    }
+    // API key validation now happens at call time in callA2eApi function
 
     const tools = await listMcpTools(key).catch(() => []);
     const taskName = `faceswap_${u.id}_${Date.now()}`;
