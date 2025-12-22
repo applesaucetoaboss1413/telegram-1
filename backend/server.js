@@ -8,6 +8,7 @@ if (process.env.NODE_ENV !== 'test') {
   console.log('Server script started (V6 - JSON/URL Fix)');
   console.log('Deploy tick', Date.now());
   console.log('DEBUG: Server init - API keys will be validated when services are called');
+  console.log('DEPLOY_MARK: faceswap-image2video-3a27d19 file', __filename);
 }
 
 process.on('uncaughtException', (err) => {
@@ -1788,3 +1789,4 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 module.exports = { app };
+// DEPLOY_MARK: faceswap-image2video-3a27d19
