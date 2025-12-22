@@ -80,6 +80,7 @@ async function startFaceSwap(swapUrl, videoUrl, taskName) {
     face_url: swapUrl,
     video_url: videoUrl
   });
+  try { console.log('[A2E START]', { type: 'faceswap', status: (result && result.code) ?? 200, json: result }); } catch (_) {}
   try { console.log('[FACESWAP START] JSON', JSON.stringify(result)); } catch (_) {}
   if (result.code !== 0) throw new Error(result.data?.failed_message || 'FaceSwap failed');
   const id = result.data?._id || result.id || result.task_id;
@@ -139,6 +140,7 @@ async function startImageToVideo(imageUrl, prompt, taskName) {
     throw new Error(`A2E ${response.status} ${text}`);
   }
   const result = json || {};
+  try { console.log('[A2E START]', { type: 'image2video', status: response.status, json: result }); } catch (_) {}
   try { console.log('[IMAGE2VIDEO START] JSON', JSON.stringify(result)); } catch (_) {}
   if (result.code !== undefined && result.code !== 0) throw new Error(result.data?.failed_message || result.message || 'Image2Video failed');
   const id = result.data?._id || result.id || result.task_id;
@@ -148,26 +150,49 @@ async function startImageToVideo(imageUrl, prompt, taskName) {
 }
 
 async function pollImageToVideoStatus(taskId) {
-  const endpoint = `/userImage2Video/status?_id=${encodeURIComponent(taskId)}`;
-  const result = await callA2eApi(endpoint, 'GET');
-  try { console.log('[IMAGE2VIDEO STATUS RAW]', JSON.stringify(result)); } catch (_) {}
-  let task = null;
-  if (result && result.data) {
-    if (Array.isArray(result.data)) {
-      task = result.data.find(t => (t && (t._id || t.id || t.task_id)) === taskId);
-    } else if (typeof result.data === 'object') {
-      const rid = result.data._id || result.data.id || result.data.task_id;
-      task = (!rid || rid === taskId) ? result.data : null;
+  const a2eApiKey = process.env.A2E_API_KEY;
+  if (!a2eApiKey) throw new Error('A2E_API_KEY environment variable not set');
+  const attempt = async (queryKey) => {
+    const endpoint = `/userImage2Video/status?${queryKey}=${encodeURIComponent(taskId)}`;
+    const url = `${a2eBaseUrl}${endpoint}`;
+    try { console.log('[A2E STATUS REQUEST]', { type: 'image2video', taskId, url, method: 'GET' }); } catch (_) {}
+    const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${a2eApiKey}`, 'Accept': 'application/json' } });
+    const text = await res.text();
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (_) {}
+    if (!res.ok) {
+      try { console.error('[A2E STATUS ERROR]', { type: 'image2video', taskId, httpStatus: res.status, body: text }); } catch (_) {}
+      if (res.status === 400) return { status: 'BAD_REQUEST', body: text };
+      if (res.status === 404) return { status: 'NOT_FOUND', body: text };
+      if (res.status >= 500) return { status: 'SERVER_ERROR', code: res.status, body: text };
+      return { status: 'UNKNOWN', body: text };
     }
-  } else if (result && (result._id || result.id || result.task_id)) {
-    const rid = result._id || result.id || result.task_id;
-    task = (!rid || rid === taskId) ? result : null;
+    const result = payload || {};
+    try { console.log('[IMAGE2VIDEO STATUS RAW]', JSON.stringify(result)); } catch (_) {}
+    let task = null;
+    if (result && result.data) {
+      if (Array.isArray(result.data)) {
+        task = result.data.find(t => (t && (t._id || t.id || t.task_id)) === taskId);
+      } else if (typeof result.data === 'object') {
+        const rid = result.data._id || result.data.id || result.data.task_id;
+        task = (!rid || rid === taskId) ? result.data : null;
+      }
+    } else if (result && (result._id || result.id || result.task_id)) {
+      const rid = result._id || result.id || result.task_id;
+      task = (!rid || rid === taskId) ? result : null;
+    }
+    if (!task) return { status: 'NOT_FOUND' };
+    if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
+    if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
+    if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
+    return { status: 'UNKNOWN' };
+  };
+  const first = await attempt('task_id');
+  if (first.status === 'BAD_REQUEST') {
+    const second = await attempt('_id');
+    return second;
   }
-  if (!task) return { status: 'NOT_FOUND' };
-  if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
-  if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
-  if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
-  return { status: 'UNKNOWN' };
+  return first;
 }
 
 async function startHeadSwap(swapUrl, targetUrl, taskName) {
@@ -1048,6 +1073,7 @@ function pollMagicResult(requestId, chatId) {
       const endpoint = `/userFaceSwapTask/status?_id=${encodeURIComponent(requestId)}`;
       const pollUrl = `${a2eBaseUrl}${endpoint}`;
       try { console.log('[FACESWAP POLL] taskId', requestId, 'url', pollUrl); } catch (_) {}
+      try { console.log('[A2E STATUS REQUEST]', { type: 'faceswap', taskId: requestId, url: pollUrl, method: 'GET' }); } catch (_) {}
       const pollResult = await pollFaceSwapStatus(requestId);
       console.log('DEBUG A2E POLL:', pollResult);
       if (pollResult.status === 'NOT_FOUND') {
@@ -1143,6 +1169,8 @@ function pollMagicResult(requestId, chatId) {
 function pollImage2Video(requestId, chatId) {
   let tries = 0;
   let notFoundCount = 0;
+  let badRequestCount = 0;
+  let serverErrorCount = 0;
   const job = DB.pending_swaps[requestId];
   const poll = async () => {
     tries++;
@@ -1167,6 +1195,21 @@ function pollImage2Video(requestId, chatId) {
       try { console.log('[IMAGE2VIDEO POLL] taskId', requestId, 'url', pollUrl); } catch (_) {}
       const pollResult = await pollImageToVideoStatus(requestId);
       try { console.log('[IMAGE2VIDEO] poll', JSON.stringify({ requestId, tries, status: pollResult && pollResult.status })); } catch (_) {}
+      if (pollResult.status === 'BAD_REQUEST') {
+        badRequestCount++;
+        try { console.error('[IMAGE2VIDEO STATUS 400]', { taskId: requestId, body: pollResult && pollResult.body }); } catch (_) {}
+        if (badRequestCount >= 3) {
+          if (chatId) bot.telegram.sendMessage(chatId, `Image→Video status call is invalid (400) for this job. Please try again later or contact support with this task id: ${requestId}.`).catch(()=>{});
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'BAD_REQUEST' };
+          if (DB.pending_swaps[requestId]) {
+            delete DB.pending_swaps[requestId];
+            saveDB();
+          }
+          return;
+        }
+        return setTimeout(poll, 3000);
+      }
       if (pollResult.status === 'NOT_FOUND') {
         notFoundCount++;
         if (notFoundCount >= 3) {
@@ -1181,6 +1224,20 @@ function pollImage2Video(requestId, chatId) {
           return;
         }
         return setTimeout(poll, 3000);
+      }
+      if (pollResult.status === 'SERVER_ERROR') {
+        serverErrorCount++;
+        if (serverErrorCount >= 5) {
+          if (chatId) bot.telegram.sendMessage(chatId, 'Image→Video provider is temporarily unavailable. Please try again later.').catch(()=>{});
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'Provider unavailable' };
+          if (DB.pending_swaps[requestId]) {
+            delete DB.pending_swaps[requestId];
+            saveDB();
+          }
+          return;
+        }
+        return setTimeout(poll, 6000);
       }
       if (pollResult.status === 'FAILED') {
         if (chatId) {
