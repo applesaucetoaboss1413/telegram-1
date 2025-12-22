@@ -45,6 +45,7 @@ console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDIN
 
 const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
 const A2E_IMAGE2VIDEO_URL = 'https://video.a2e.ai/api/v1/userImage2Video/start';
+const QUALITY_NEGATIVE_PROMPT = 'bad anatomy, low quality, worst quality, blurry, text, watermark, logo, extra limbs, mutated hands, deformed, disfigured, poorly drawn, out of frame, ugly, tiling, noisy, sketch, cartoon, 3D render, monochrome, horror, unwanted styles';
 
 async function callA2eApi(endpoint, method = 'GET', body = null) {
   const a2eApiKey = process.env.A2E_API_KEY;
@@ -92,7 +93,10 @@ async function pollFaceSwapStatus(taskId) {
 }
 
 async function startImageToVideo(imageUrl, prompt, taskName) {
-  const payload = { name: taskName, image_url: imageUrl, prompt };
+  const finalPrompt = (prompt && typeof prompt === 'string' && prompt.trim())
+    ? prompt.trim()
+    : 'high quality detailed video';
+  const payload = { name: taskName, image_url: imageUrl, prompt: finalPrompt, negative_prompt: QUALITY_NEGATIVE_PROMPT };
   try { console.log('DEBUG A2E IMAGE2VIDEO START PAYLOAD', JSON.stringify(payload)); } catch (_) {}
   const a2eApiKey = process.env.A2E_API_KEY;
   if (!a2eApiKey) {
@@ -2017,7 +2021,12 @@ bot.on('text', async ctx => {
       pollImage2Video(requestId, ctx.chat.id);
   } catch (e) {
     try { console.error('[IMAGE2VIDEO] start_error', e && e.message); } catch (_) {}
-    ctx.reply(`Failed to start Image→Video: ${e.message}`);
+    const msg = String(e && e.message || '');
+    if (msg.includes('A2E 400') || msg.toLowerCase().includes('validation failed')) {
+      ctx.reply('Image→Video rejected this request. Try rephrasing your prompt and resend.');
+    } else {
+      ctx.reply(`Failed to start Image→Video: ${e.message}`);
+    }
   }
 });
 
