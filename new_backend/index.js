@@ -23,7 +23,8 @@ async function start() {
         });
 
         // Start Bot
-        if (process.env.BOT_TOKEN) {
+        const token = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+        if (token) {
             await bot.launch();
             logger.info('Telegram Bot Started');
         } else {

@@ -2,14 +2,21 @@ const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
 const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus } = require('./database');
-const { startFaceSwap } = require('./services/magicService');
+const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
 const { downloadTo, downloadBuffer, cleanupFile } = require('./utils/fileUtils');
 const { detectFaces } = require('./services/faceService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const winston = require('winston');
+const { uploadFromUrl } = require('./services/cloudinaryService');
+let runImage2VideoFlow;
+try {
+    runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
+} catch (_) {
+    runImage2VideoFlow = null;
+}
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
 const fs = require('fs');
 
@@ -127,6 +134,8 @@ bot.command('start', (ctx) => {
         Markup.inlineKeyboard([
             [Markup.button.callback('🎬 Video Face Swap (15 pts)', 'mode_video')],
             [Markup.button.callback('🖼️ Image Face Swap (9 pts)', 'mode_image')],
+            [Markup.button.callback('⚡ FaceSwap Preview', 'mode_faceswap_preview')],
+            [Markup.button.callback('🎥 Image‑to‑Video', 'mode_image2video')],
             [Markup.button.callback('💰 Buy 100 Points ($5.00)', 'buy_points')]
         ])
     );
@@ -169,8 +178,18 @@ bot.action('mode_image', (ctx) => {
     ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
 });
 
+bot.action('mode_faceswap_preview', (ctx) => {
+    ctx.session = { mode: 'faceswap_preview', step: 'awaiting_swap_photo' };
+    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
+});
+
+bot.action('mode_image2video', (ctx) => {
+    ctx.session = { mode: 'image2video', step: 'awaiting_photo' };
+    ctx.reply('Step 1: Send the image to animate.');
+});
+
 bot.on('photo', async (ctx) => {
-    if (!ctx.session || !ctx.session.step) return;
+    if (!ctx.session || ctx.session.step) return;
 
     const userId = String(ctx.from.id);
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
@@ -182,7 +201,8 @@ bot.on('photo', async (ctx) => {
         try {
             await ctx.reply('🔍 Verifying photo...');
             const { url } = await validatePhoto(ctx, fileId, fileSize);
-            ctx.session.swapUrl = url;
+            const uploaded = await uploadFromUrl(url, 'image');
+            ctx.session.swapUrl = uploaded;
             ctx.session.step = 'awaiting_target';
             
             const type = ctx.session.mode === 'video' ? 'VIDEO' : 'PHOTO';
@@ -197,8 +217,22 @@ bot.on('photo', async (ctx) => {
         try {
             await ctx.reply('🔍 Verifying target photo...');
             const { url } = await validatePhoto(ctx, fileId, fileSize);
-            await handleSwapRequest(ctx, userId, ctx.session.swapUrl, url, 'image');
+            const uploaded = await uploadFromUrl(url, 'image');
+            await handleSwapRequest(ctx, userId, ctx.session.swapUrl, uploaded, 'image');
             ctx.session = null;
+        } catch (e) {
+            ctx.reply(`❌ ${e.message}`);
+        }
+    }
+
+    if (ctx.session.step === 'awaiting_photo' && ctx.session.mode === 'image2video') {
+        try {
+            await ctx.reply('🔍 Verifying image...');
+            const { url } = await validatePhoto(ctx, fileId, fileSize);
+            const uploaded = await uploadFromUrl(url, 'image');
+            ctx.session.imageUrl = uploaded;
+            ctx.session.step = 'awaiting_prompt';
+            ctx.reply('✅ Image received. Now send the prompt to guide the video.');
         } catch (e) {
             ctx.reply(`❌ ${e.message}`);
         }
@@ -213,7 +247,15 @@ bot.on('video', async (ctx) => {
 
     if (ctx.session.step === 'awaiting_target' && ctx.session.mode === 'video') {
         const url = await getFileLink(ctx, fileId);
-        await handleSwapRequest(ctx, userId, ctx.session.swapUrl, url, 'video');
+        const uploaded = await uploadFromUrl(url, 'video');
+        await handleSwapRequest(ctx, userId, ctx.session.swapUrl, uploaded, 'video');
+        ctx.session = null;
+    }
+
+    if (ctx.session.step === 'awaiting_target' && ctx.session.mode === 'faceswap_preview') {
+        const url = await getFileLink(ctx, fileId);
+        const uploaded = await uploadFromUrl(url, 'video');
+        await handlePreviewRequest(ctx, userId, ctx.session.swapUrl, uploaded);
         ctx.session = null;
     }
 });
@@ -230,10 +272,10 @@ async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
     updateUserPoints(userId, -cost);
     addTransaction(userId, -cost, 'faceswap_start');
 
-    await ctx.reply('⏳ Processing... This may take a minute.');
+    await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
 
     try {
-        const requestId = await startFaceSwap(swapUrl, targetUrl, type === 'video');
+        const requestId = await startFaceSwap(swapUrl, targetUrl);
         createJob(requestId, userId, String(ctx.chat.id), type);
         // Queue service will pick it up automatically next poll
     } catch (e) {
@@ -243,6 +285,61 @@ async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
         ctx.reply(`❌ Error starting job: ${e.message}. Points refunded.`);
     }
 }
+
+async function handlePreviewRequest(ctx, userId, swapUrl, targetUrl) {
+    const user = getUser(userId);
+    const cost = 9;
+    if (user.points < cost) {
+        return ctx.reply(`❌ Not enough points. You need ${cost}, but have ${user.points}.`);
+    }
+    updateUserPoints(userId, -cost);
+    addTransaction(userId, -cost, 'faceswap_preview_start');
+    await ctx.reply('⏳ Processing preview...');
+    try {
+        const requestId = await startFaceSwapPreview(swapUrl, targetUrl);
+        createJob(requestId, userId, String(ctx.chat.id), 'preview', { service: 'faceswap_preview' });
+    } catch (e) {
+        updateUserPoints(userId, cost);
+        addTransaction(userId, cost, 'refund_api_error');
+        ctx.reply(`❌ Error starting preview: ${e.message}. Points refunded.`);
+    }
+}
+
+bot.on('text', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'image2video' || ctx.session.step !== 'awaiting_prompt') return;
+    const userId = String(ctx.from.id);
+    const prompt = ctx.message.text || '';
+    const user = getUser(userId);
+    const cost = 15;
+    if (user.points < cost) {
+        return ctx.reply(`❌ Not enough points. You need ${cost}, but have ${user.points}.`);
+    }
+    updateUserPoints(userId, -cost);
+    addTransaction(userId, -cost, 'image2video_start');
+    await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
+    try {
+        if (runImage2VideoFlow) {
+            const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
+                try { if (m) ctx.reply(m); } catch (_) {}
+            }, 120000);
+            await ctx.reply('✅ Video Ready!');
+            await ctx.reply(url);
+            ctx.session = null;
+        } else {
+            const requestId = await startImage2Video(ctx.session.imageUrl, prompt);
+            createJob(requestId, userId, String(ctx.chat.id), 'video', { service: 'image2video' });
+            ctx.session = null;
+        }
+    } catch (e) {
+        updateUserPoints(userId, cost);
+        addTransaction(userId, cost, 'refund_api_error');
+        const msg = e.message && /unexpected.*provider/i.test(e.message)
+            ? '❌ The video provider returned an unexpected error. Your request did not complete; please try again in a few minutes.'
+            : `❌ ${e.message}. Points refunded.`;
+        ctx.reply(msg);
+        ctx.session = null;
+    }
+});
 
 // Graceful Stop
 process.once('SIGINT', () => bot.stop('SIGINT'));

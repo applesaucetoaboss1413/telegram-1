@@ -71,6 +71,13 @@ const updateJobStatus = (requestId, status, resultUrl = null, error = null) => {
     `).run(status, resultUrl, error, requestId);
 };
 
+const updateJobMeta = (requestId, meta = {}) => {
+    db.prepare(`
+        UPDATE jobs
+        SET meta = ?
+        WHERE request_id = ?
+    `).run(JSON.stringify(meta), requestId);
+};
 const getPendingJobs = () => {
     return db.prepare("SELECT * FROM jobs WHERE status = 'processing'").all();
 };
@@ -90,6 +97,7 @@ module.exports = {
     updateUserPoints,
     createJob,
     updateJobStatus,
+    updateJobMeta,
     getPendingJobs,
     getJob,
     addTransaction
