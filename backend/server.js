@@ -44,6 +44,7 @@ cloudinary.config({
 console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDINARY_CLOUD_NAME);
 
 const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
+const A2E_IMAGE2VIDEO_URL = 'https://video.a2e.ai/api/v1/userImage2Video/start';
 
 async function callA2eApi(endpoint, method = 'GET', body = null) {
   const a2eApiKey = process.env.A2E_API_KEY;
@@ -93,9 +94,33 @@ async function pollFaceSwapStatus(taskId) {
 async function startImageToVideo(imageUrl, prompt, taskName) {
   const payload = { name: taskName, image_url: imageUrl, prompt };
   try { console.log('DEBUG A2E IMAGE2VIDEO START PAYLOAD', JSON.stringify(payload)); } catch (_) {}
-  const result = await callA2eApi('/userImageToVideoTask/add', 'POST', payload);
-  if (result.code !== 0) throw new Error(result.data?.failed_message || 'Image2Video failed');
-  return { taskId: result.data._id, status: result.data.current_status, cost: result.data.coins || result.data.cost || null };
+  const a2eApiKey = process.env.A2E_API_KEY;
+  if (!a2eApiKey) {
+    console.error('ERROR: A2E_API_KEY environment variable not set');
+    throw new Error('A2E_API_KEY environment variable not set');
+  }
+  try { console.log('[A2E] Image2Video POST', A2E_IMAGE2VIDEO_URL, 'payload:', payload); } catch (_) {}
+  const response = await fetch(A2E_IMAGE2VIDEO_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${a2eApiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const text = await response.text();
+  let json;
+  try { json = JSON.parse(text); } catch (_) { json = null; }
+  if (!response.ok) {
+    console.error('[A2E] Image2Video start error', response.status, text);
+    throw new Error(`A2E ${response.status} ${text}`);
+  }
+  const result = json || {};
+  if (result.code !== undefined && result.code !== 0) throw new Error(result.data?.failed_message || result.message || 'Image2Video failed');
+  const id = result.data?._id || result.id || result.task_id;
+  const status = result.data?.current_status || result.status;
+  const cost = (result.data && (result.data.coins || result.data.cost)) || null;
+  return { taskId: id, status, cost };
 }
 
 async function pollImageToVideoStatus(taskId) {
