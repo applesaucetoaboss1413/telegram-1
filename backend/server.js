@@ -90,9 +90,47 @@ async function startFaceSwap(swapUrl, videoUrl, taskName) {
   return { taskId: id, status };
 }
 
-async function pollFaceSwapStatus(taskId) {
-  const endpoint = `/userFaceSwapTask/status?_id=${encodeURIComponent(taskId)}`;
+async function startFaceSwapPreview(faceUrl, videoUrl) {
+  const result = await callA2eApi('/userFaceSwapPreview/add', 'POST', {
+    face_url: faceUrl,
+    video_url: videoUrl
+  });
+  try { console.log('[FACESWAP PREVIEW START] JSON', JSON.stringify(result)); } catch (_) {}
+  if (!result || (result.code !== undefined && result.code !== 0)) throw new Error(result.data?.failed_message || result.message || 'FaceSwap Preview failed');
+  const id = result.data?._id || result.id || result.task_id;
+  const status = result.data?.current_status || result.status;
+  return { previewId: id, status };
+}
+
+async function pollFaceSwapPreviewStatus(previewId) {
+  const endpoint = `/userFaceSwapPreview/status?_id=${encodeURIComponent(previewId)}`;
   const result = await callA2eApi(endpoint, 'GET');
+  try { console.log('[FACESWAP PREVIEW STATUS RAW]', JSON.stringify(result)); } catch (_) {}
+  let task = null;
+  if (result && result.data) {
+    if (Array.isArray(result.data)) {
+      task = result.data.find(t => (t && (t._id || t.id || t.task_id)) === previewId);
+    } else if (typeof result.data === 'object') {
+      const rid = result.data._id || result.data.id || result.data.task_id;
+      task = (!rid || rid === previewId) ? result.data : null;
+    }
+  } else if (result && (result._id || result.id || result.task_id)) {
+    const rid = result._id || result.id || result.task_id;
+    task = (!rid || rid === previewId) ? result : null;
+  }
+  if (!task) return { status: 'NOT_FOUND' };
+  if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
+  if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
+  if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
+  return { status: 'UNKNOWN' };
+}
+async function pollFaceSwapStatus(taskId) {
+  let result = null;
+  try {
+    result = await callA2eApi(`/userFaceSwapTask/${encodeURIComponent(taskId)}`, 'GET');
+  } catch (e) {
+    result = await callA2eApi(`/userFaceSwapTask/status?_id=${encodeURIComponent(taskId)}`, 'GET');
+  }
   try { console.log('[FACESWAP STATUS RAW]', JSON.stringify(result)); } catch (_) {}
   let task = null;
   if (result && result.data) {
@@ -1152,6 +1190,76 @@ function pollMagicResult(requestId, chatId) {
   setTimeout(poll, intervalMs);
 }
 
+function pollFaceSwapPreview(requestId, chatId) {
+  let tries = 0;
+  let notFoundCount = 0;
+  const intervalMs = Math.max(1000, FACESWAP_POLL_INTERVAL_SECONDS * 1000);
+  const poll = async () => {
+    tries++;
+    const waitedSeconds = tries * FACESWAP_POLL_INTERVAL_SECONDS;
+    if (waitedSeconds >= FACESWAP_MAX_WAIT_SECONDS) {
+      try {
+        const jobInfo = DB.pending_swaps[requestId];
+        const userId = jobInfo && jobInfo.userId;
+        addAudit(userId, 0, 'timeout_faceswap_preview', { requestId });
+      } catch (e) {}
+      if (chatId) bot.telegram.sendMessage(chatId, 'Preview timed out.').catch(()=>{});
+      if (DB.pending_swaps[requestId]) {
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
+        delete DB.pending_swaps[requestId];
+        saveDB();
+      }
+      return;
+    }
+    try {
+      const pollResult = await pollFaceSwapPreviewStatus(requestId);
+      if (pollResult.status === 'NOT_FOUND') {
+        notFoundCount++;
+        if (notFoundCount >= 3) {
+          if (chatId) bot.telegram.sendMessage(chatId, 'Preview task not found at provider. Please restart.').catch(()=>{});
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'Task ID not found' };
+          if (DB.pending_swaps[requestId]) {
+            delete DB.pending_swaps[requestId];
+            saveDB();
+          }
+          return;
+        }
+        return setTimeout(poll, intervalMs);
+      }
+      if (pollResult.status === 'FAILED') {
+        if (chatId) bot.telegram.sendMessage(chatId, '❌ Preview failed. Try clearer inputs.').catch(()=>{});
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: pollResult.error || 'Provider FAILED' };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+        return;
+      } else if (pollResult.status === 'COMPLETED') {
+        const finalUrl = pollResult.result_url;
+        if (chatId) {
+          await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Preview complete!' }).catch(async () => {
+            await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Preview complete!' }).catch(()=>{});
+          });
+        }
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+      } else {
+        setTimeout(poll, intervalMs);
+      }
+    } catch (e) {
+      setTimeout(poll, intervalMs);
+    }
+  };
+  setTimeout(poll, intervalMs);
+}
+
 function pollImage2Video(requestId, chatId) {
   let tries = 0;
   let notFoundCount = 0;
@@ -1896,6 +2004,15 @@ bot.action('faceswap', ctx => {
   ctx.reply('Mode set: **Video Face Swap** 🎥\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** video.');
 });
 
+bot.command('faceswap_preview', ctx => {
+  setPending(String(ctx.chat.id), { mode: 'faceswap_preview', step: 'swap' });
+  ctx.reply('Mode set: **FaceSwap Quick Preview** ⚡\n\n1. Send the **SWAP** photo.\n2. Then send the **TARGET** video.');
+});
+bot.action('faceswap_preview', ctx => {
+  ack(ctx, 'Mode set: FaceSwap Preview');
+  setPending(String(ctx.chat.id), { mode: 'faceswap_preview', step: 'swap' });
+  ctx.reply('Mode set: **FaceSwap Quick Preview** ⚡\n\n1. Send the **SWAP** photo.\n2. Then send the **TARGET** video.');
+});
 bot.command('imageswap', ctx => {
   setPending(String(ctx.chat.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Mode set: **Image Face Swap** 📸\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** photo.');
@@ -2010,6 +2127,7 @@ bot.on('photo', async ctx => {
     p.step = 'target';
     setPending(cid, p);
     if (p.mode === 'faceswap') ctx.reply('Great! Now send the TARGET video.');
+    else if (p.mode === 'faceswap_preview') ctx.reply('Great! Now send the TARGET video.');
     else if (p.mode === 'imageswap') ctx.reply('Great! Now send the TARGET photo.');
     else if (p.mode === 'headswap') ctx.reply('Now, upload the Source Video or Image you want to swap that face onto.');
   } else if (p.step === 'target' && p.mode === 'imageswap') {
@@ -2213,7 +2331,7 @@ bot.on('video', async ctx => {
     }
     return;
   }
-  if (!p || p.mode !== 'faceswap' || p.step !== 'target') {
+  if (!p || (p.mode !== 'faceswap' && p.mode !== 'faceswap_preview') || p.step !== 'target') {
     return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
       Markup.inlineKeyboard([
         [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
@@ -2222,9 +2340,37 @@ bot.on('video', async ctx => {
   }
 
   const fileId = ctx.message.video.file_id;
-  // Call background flow without await to avoid webhook timeout
-  processSwapFlow(ctx, uid, p.swapFileId, fileId, true).catch(e => console.error('Background swap error:', e));
-  setPending(cid, null);
+  if (p.mode === 'faceswap') {
+    processSwapFlow(ctx, uid, p.swapFileId, fileId, true).catch(e => console.error('Background swap error:', e));
+    setPending(cid, null);
+  } else {
+    try {
+      const swapLink = await getFileUrl(ctx, p.swapFileId);
+      const targetLink = await getFileUrl(ctx, fileId);
+      const swapUpload = await cloudinary.uploader.upload(swapLink, { folder: 'faceswap_preview/swap', resource_type: 'auto', public_id: `preview_swap_${uid}_${Date.now()}` });
+      const targetUpload = await cloudinary.uploader.upload(targetLink, { folder: 'faceswap_preview/target', resource_type: 'video', public_id: `preview_target_${uid}_${Date.now()}` });
+      const swapUrl = swapUpload.secure_url;
+      const videoUrl = targetUpload.secure_url;
+      const startRes = await startFaceSwapPreview(swapUrl, videoUrl);
+      const requestId = startRes.previewId;
+      const initialStatus = startRes.status;
+      if (!DB.pending_swaps) DB.pending_swaps = {};
+      DB.pending_swaps[requestId] = {
+        chatId: ctx.chat.id,
+        userId: uid,
+        startTime: Date.now(),
+        isVideo: true,
+        status: 'processing',
+        type: 'faceswap_preview'
+      };
+      saveDB();
+      setPending(cid, null);
+      ctx.reply(`Preview started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+      pollFaceSwapPreview(requestId, ctx.chat.id);
+    } catch (e) {
+      ctx.reply(`Failed to start preview: ${e && e.message || String(e)}`);
+    }
+  }
 });
 
 bot.command('reset', ctx => {
