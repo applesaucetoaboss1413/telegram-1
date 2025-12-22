@@ -253,7 +253,55 @@ let MCP_TOOLS_CACHE = { at: 0, tools: null };
 let MCP_ID_SEQ = 1;
 
 const { Pool, Client } = require('pg');
-const pgPool = new Pool({ connectionString: process.env.DATABASE_URL });
+function buildPgUrlFromEnv() {
+  const host = process.env.PGHOST;
+  const db = process.env.PGDATABASE;
+  const user = process.env.PGUSER;
+  const pass = process.env.PGPASSWORD;
+  if (host && db && user && pass) {
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}/${encodeURIComponent(db)}?sslmode=require`;
+  }
+  return process.env.DATABASE_URL;
+}
+let __pgConnStr = buildPgUrlFromEnv();
+function hasDb() { return !!buildPgUrlFromEnv(); }
+let pgPool = new Pool({ connectionString: __pgConnStr, ssl: { rejectUnauthorized: false } });
+pgPool.query('SELECT now()').then(r => {
+  try { console.log('[DB] Connected to Postgres. now() =', r.rows && r.rows[0] && r.rows[0].now); } catch (_) {}
+}).catch(e => {
+  console.error('[DB] Connection test failed:', e && e.message);
+});
+
+async function initNeonFromApi() {
+  try {
+    if (buildPgUrlFromEnv()) return;
+    const key = process.env.NEON_API_KEY;
+    const projectId = process.env.NEON_PROJECT_ID;
+    if (!key || !projectId) return;
+    const dbName = process.env.PGDATABASE || 'neondb';
+    const roleName = process.env.PGUSER || 'neondb_owner';
+    const url = `https://console.neon.tech/api/v2/projects/${projectId}/connection_uri?database_name=${encodeURIComponent(dbName)}&role_name=${encodeURIComponent(roleName)}&pooled=true`;
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Accept': 'application/json'
+      }
+    });
+    const j = await res.json().catch(() => ({}));
+    const uri = j && (j.uri || j.connection_uri || j.connectionUri);
+    if (uri) {
+      process.env.DATABASE_URL = uri;
+      __pgConnStr = uri;
+      pgPool = new Pool({ connectionString: uri, ssl: { rejectUnauthorized: false } });
+      const r = await pgPool.query('SELECT now()');
+      try { console.log('[DB] Neon connection established via API. now() =', r.rows[0].now); } catch (_) {}
+    } else {
+      console.warn('[DB] Neon API did not return a connection URI');
+    }
+  } catch (e) {
+    console.error('[DB] Neon API init error:', e && e.message);
+  }
+}
 
 async function mcpRequest(method, params, key) {
   const id = MCP_ID_SEQ++;
@@ -362,6 +410,73 @@ function resolvePublicBase(url, origin, renderExternal, publicUrl) {
 const PUBLIC_BASE_INFO = resolvePublicBase(process.env.PUBLIC_URL, process.env.PUBLIC_ORIGIN, process.env.RENDER_EXTERNAL_URL);
 const PUBLIC_BASE = PUBLIC_BASE_INFO.base;
 
+const FREE_TEST_ID = '8063916626';
+function isFreeAccess(uid) {
+  const ids = String(process.env.FREE_ACCESS_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (ids.includes(String(uid))) return true;
+  if (String(uid) === FREE_TEST_ID) return true;
+  try {
+    const u = DB.users[String(uid)];
+    if (u && u.free_access === true) return true;
+  } catch (_) {}
+  return false;
+}
+async function ensurePgUser(uid, fname) {
+  const c = await pgPool.connect();
+  try {
+    const r = await c.query('SELECT * FROM users WHERE user_id = $1', [uid]);
+    if (r.rows.length) return r.rows[0];
+    const ins = await c.query('INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) RETURNING *', [uid, fname || null, 0]);
+    return ins.rows[0];
+  } finally {
+    c.release();
+  }
+}
+async function getCredits(uid) {
+  const c = await pgPool.connect();
+  try {
+    const r = await c.query('SELECT points FROM users WHERE user_id = $1', [uid]);
+    return r.rows.length ? Number(r.rows[0].points) : 0;
+  } finally {
+    c.release();
+  }
+}
+async function debitCredits(uid, cost) {
+  if (isFreeAccess(uid)) return { ok: true, bypass: true };
+  const c = await pgPool.connect();
+  try {
+    await c.query('BEGIN');
+    const r = await c.query('SELECT points FROM users WHERE user_id = $1 FOR UPDATE', [uid]);
+    const before = r.rows.length ? Number(r.rows[0].points) : 0;
+    if (before < cost) {
+      await c.query('ROLLBACK');
+      return { ok: false, before, after: before };
+    }
+    const upd = await c.query('UPDATE users SET points = points - $2, updated_at = NOW() WHERE user_id = $1 RETURNING points', [uid, cost]);
+    const after = Number(upd.rows[0].points);
+    await c.query('COMMIT');
+    try { console.log('[CREDITS] debit', JSON.stringify({ uid, before, cost, after })); } catch (_) {}
+    return { ok: true, before, after };
+  } catch (e) {
+    try { await c.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    c.release();
+  }
+}
+async function creditRefund(uid, cost, tag) {
+  if (isFreeAccess(uid)) return { ok: true, bypass: true };
+  const c = await pgPool.connect();
+  try {
+    const upd = await c.query('UPDATE users SET points = points + $2, updated_at = NOW() WHERE user_id = $1 RETURNING points', [uid, cost]);
+    const after = upd.rows.length ? Number(upd.rows[0].points) : null;
+    try { console.log('[CREDITS] refund', JSON.stringify({ uid, cost, after, tag: tag || 'generic' })); } catch (_) {}
+    return { ok: true, after };
+  } finally {
+    c.release();
+  }
+}
+
 let DB = { 
   users: {}, 
   purchases: {}, 
@@ -388,13 +503,14 @@ function initDB() {
 initDB();
 
 async function initDatabase() {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client({ connectionString: buildPgUrlFromEnv(), ssl: { rejectUnauthorized: false } });
   await client.connect();
   await client.query(`
     CREATE TABLE IF NOT EXISTS users (
       user_id BIGINT PRIMARY KEY,
       first_name TEXT,
       points INT DEFAULT 0,
+      free_access BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
@@ -439,7 +555,8 @@ async function loadFromDatabase() {
       DB.users[row.user_id] = {
         id: String(row.user_id),
         first_name: row.first_name,
-        points: row.points
+        points: row.points,
+        free_access: row.free_access === true
       };
     });
     console.log('[DB] Loaded users from PostgreSQL');
@@ -450,14 +567,14 @@ async function loadFromDatabase() {
 
 async function restoreUserCredits() {
   const userId = 8063916626;
-  const credits = 69;
+  const credits = 60;
   if (!process.env.DATABASE_URL) return;
   try {
     await pgPool.query(
-      'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET points = $3, updated_at = NOW()',
-      [userId, 'You', credits]
+      'INSERT INTO users (user_id, first_name, points, free_access) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO UPDATE SET points = $3, free_access = $4, updated_at = NOW()',
+      [userId, 'You', credits, true]
     );
-    console.log('[DB] RESTORE User', userId, 'credits restored to', credits);
+    console.log('[DB] RESTORE User', userId, 'credits set to', credits, 'free_access=true');
   } catch (e) {
     console.error('[DB] RESTORE Error:', e.message);
   }
@@ -468,19 +585,22 @@ async function restoreUserCredits() {
   try {
     console.log('[DB] DATABASE_URL env var length:', process.env.DATABASE_URL?.length || 0);
     console.log('[DB] DATABASE_URL starts with:', process.env.DATABASE_URL?.substring(0, 50));
-    if (process.env.DATABASE_URL) {
+    if (hasDb()) {
+      await initNeonFromApi();
       await initDatabase();
       await loadFromDatabase();
       await restoreUserCredits();
       {
         const u = DB.users['8063916626'];
         if (u) {
-          u.points = 69;
+          u.points = 60;
+          u.free_access = true;
         } else {
           DB.users['8063916626'] = {
             id: '8063916626',
             first_name: 'You',
-            points: 69,
+            points: 60,
+            free_access: true,
             created_at: Date.now()
           };
         }
@@ -571,20 +691,14 @@ function getOrCreateUser(id, fields) {
     DB.users[id] = u;
     saveDB();
     if (process.env.DATABASE_URL) {
-      pgPool.query(
-        'INSERT INTO users (user_id, first_name, points) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING',
-        [id, u.first_name, u.points]
-      ).catch(() => {});
+      ensurePgUser(id, u.first_name).catch(() => {});
     }
   }
   if (fields) { 
     Object.assign(u, fields); 
     saveDB(); 
     if (process.env.DATABASE_URL) {
-      pgPool.query(
-        'UPDATE users SET first_name = $2, points = $3, updated_at = NOW() WHERE user_id = $1',
-        [id, u.first_name, u.points]
-      ).catch(() => {});
+      pgPool.query('UPDATE users SET first_name = $2, updated_at = NOW() WHERE user_id = $1', [id, u.first_name]).catch(() => {});
     }
   }
   return u;
@@ -798,17 +912,11 @@ function pollMagicResult(requestId, chatId) {
        try {
          const jobInfo = DB.pending_swaps[requestId];
          const userId = jobInfo && jobInfo.userId;
-         const costRefund = jobInfo ? (jobInfo.isVideo ? 15 : 9) : 10;
-         if (userId && DB.users[userId]) {
-           DB.users[userId].points += costRefund;
-           saveDB();
-           addAudit(userId, costRefund, 'refund_timeout', { requestId });
-           console.log(`TIMEOUT REFUND: User ${userId} refunded ${costRefund} points`);
-         }
+         addAudit(userId, 0, 'timeout', { requestId });
        } catch (e) {
          console.error('Timeout refund error:', e && e.message);
        }
-       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
+       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out.').catch(()=>{});
        if (DB.pending_swaps[requestId]) {
           if (!DB.api_results) DB.api_results = {};
           DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
@@ -829,15 +937,8 @@ function pollMagicResult(requestId, chatId) {
         const apiResponse = { error: pollResult.error, status: 'FAILED' };
         try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
         console.error('DEBUG STATUS ERROR provider_failed', apiResponse);
-        if (job && job.userId) {
-          const u = getOrCreateUser(job.userId);
-          const cost = job.isVideo ? 15 : 9;
-          u.points += cost;
-          saveDB();
-          addAudit(job.userId, cost, 'refund_provider_failed', { requestId, job: apiResponse });
-        }
         if (chatId) {
-          bot.telegram.sendMessage(chatId, '❌ The image server reported that this face swap failed. Your credits for this attempt have been fully refunded. Please try again with clear, front-facing faces and good lighting.').catch(()=>{});
+          bot.telegram.sendMessage(chatId, '❌ The image server reported that this face swap failed. Please try again with clear, front-facing faces and good lighting.').catch(()=>{});
         }
         if (!DB.api_results) DB.api_results = {};
         DB.api_results[requestId] = { status: 'failed', error: 'Provider FAILED' };
@@ -848,6 +949,16 @@ function pollMagicResult(requestId, chatId) {
         return;
       } else if (pollResult.status === 'COMPLETED') {
         const finalUrl = pollResult.result_url;
+        try {
+          const uid = job && job.userId;
+          const charge = job && job.cost ? job.cost : (isVideo ? 15 : 9);
+          if (uid && !isFreeAccess(uid)) {
+            await debitCredits(uid, charge);
+            addAudit(uid, -charge, 'faceswap_complete_debit', { requestId });
+          }
+        } catch (e) {
+          console.error('[CREDITS] debit on success failed:', e && e.message);
+        }
         if (chatId) {
           if (isVideo) await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Face swap complete!' });
           else await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Face swap complete!' });
@@ -901,15 +1012,9 @@ function pollImage2Video(requestId, chatId) {
        try {
          const jobInfo = DB.pending_swaps[requestId];
          const userId = jobInfo && jobInfo.userId;
-         const costRefund = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
-         if (userId && DB.users[userId]) {
-           DB.users[userId].points += costRefund;
-           saveDB();
-           addAudit(userId, costRefund, 'refund_timeout_img2vid', { requestId });
-            try { console.log('[CREDITS] timeout_refund', JSON.stringify({ uid: userId, points: DB.users[userId].points, requestId })); } catch (_) {}
-          }
+         addAudit(userId, 0, 'timeout_img2vid', { requestId });
        } catch (e) {}
-       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
+       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out.').catch(()=>{});
        if (DB.pending_swaps[requestId]) {
           if (!DB.api_results) DB.api_results = {};
           DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
@@ -922,16 +1027,8 @@ function pollImage2Video(requestId, chatId) {
       const pollResult = await pollImageToVideoStatus(requestId);
       try { console.log('[IMAGE2VIDEO] poll', JSON.stringify({ requestId, tries, status: pollResult && pollResult.status })); } catch (_) {}
       if (pollResult.status === 'FAILED') {
-        if (job && job.userId) {
-          const u = getOrCreateUser(job.userId);
-          const costRefund = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
-          u.points += costRefund;
-          saveDB();
-          addAudit(job.userId, costRefund, 'refund_img2vid_failed', { requestId, error: pollResult.error });
-          try { console.log('[CREDITS] failed_refund', JSON.stringify({ uid: job.userId, points: u.points, requestId })); } catch (_) {}
-        }
         if (chatId) {
-          bot.telegram.sendMessage(chatId, '❌ Image→Video failed. Your credits have been refunded. Try a different prompt or clearer photo.').catch(()=>{});
+          bot.telegram.sendMessage(chatId, '❌ Image→Video failed. Try a different prompt or clearer photo.').catch(()=>{});
         }
         if (!DB.api_results) DB.api_results = {};
         DB.api_results[requestId] = { status: 'failed', error: pollResult.error || 'Provider FAILED' };
@@ -943,6 +1040,16 @@ function pollImage2Video(requestId, chatId) {
       } else if (pollResult.status === 'COMPLETED') {
         const finalUrl = pollResult.result_url;
         try { console.log('[IMAGE2VIDEO] completed', JSON.stringify({ requestId, finalUrl })); } catch (_) {}
+        try {
+          const uid = job && job.userId;
+          const charge = job && job.cost ? job.cost : Number(process.env.A2E_IMAGE2VIDEO_COST || 30);
+          if (uid && !isFreeAccess(uid)) {
+            await debitCredits(uid, charge);
+            addAudit(uid, -charge, 'image2video_complete_debit', { requestId });
+          }
+        } catch (e) {
+          console.error('[CREDITS] img2vid debit failed:', e && e.message);
+        }
         if (chatId) {
           await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Image→Video complete!' });
         }
@@ -1040,14 +1147,9 @@ function pollTalking(requestId, chatId, type) {
       try {
         const jobInfo = DB.pending_swaps[requestId];
         const userId = jobInfo && jobInfo.userId;
-        const costRefund = jobInfo && jobInfo.cost ? jobInfo.cost : 0;
-        if (userId && DB.users[userId]) {
-          DB.users[userId].points += costRefund;
-          saveDB();
-          addAudit(userId, costRefund, 'refund_timeout_talking', { requestId });
-        }
+        addAudit(userId, 0, 'timeout_talking', { requestId });
       } catch (e) {}
-      if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
+      if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out.').catch(()=>{});
       if (DB.pending_swaps[requestId]) {
         if (!DB.api_results) DB.api_results = {};
         DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
@@ -1059,15 +1161,8 @@ function pollTalking(requestId, chatId, type) {
     try {
       const pollResult = await pollTalkingStatus(requestId, type);
       if (pollResult.status === 'FAILED') {
-        if (job && job.userId) {
-          const u = getOrCreateUser(job.userId);
-          const costRefund = job && job.cost ? job.cost : 0;
-          u.points += costRefund;
-          saveDB();
-          addAudit(job.userId, costRefund, 'refund_talking_failed', { requestId, error: pollResult.error });
-        }
         if (chatId) {
-          bot.telegram.sendMessage(chatId, '❌ Talking generation failed. Your credits have been refunded. Try a clearer photo or shorter script.').catch(()=>{});
+          bot.telegram.sendMessage(chatId, '❌ Talking generation failed. Try a clearer photo or shorter script.').catch(()=>{});
         }
         if (!DB.api_results) DB.api_results = {};
         DB.api_results[requestId] = { status: 'failed', error: pollResult.error || 'Provider FAILED' };
@@ -1078,6 +1173,16 @@ function pollTalking(requestId, chatId, type) {
         return;
       } else if (pollResult.status === 'COMPLETED') {
         const finalUrl = pollResult.result_url;
+        try {
+          const uid = job && job.userId;
+          const charge = job && job.cost ? job.cost : 0;
+          if (uid && charge && !isFreeAccess(uid)) {
+            await debitCredits(uid, charge);
+            addAudit(uid, -charge, 'talking_complete_debit', { requestId });
+          }
+        } catch (e) {
+          console.error('[CREDITS] talking debit failed:', e && e.message);
+        }
         if (chatId) {
           await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Talking generation complete!' });
         }
@@ -1134,12 +1239,14 @@ bot.on('audio', async ctx => {
       const seconds = Math.max(3, Math.round(duration));
       const u = getOrCreateUser(uid);
       const cost = 6 * seconds;
-      if ((u.points || 0) < cost) {
-        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      await ensurePgUser(uid, u.first_name);
+      if (!isFreeAccess(uid)) {
+        const current = await getCredits(uid);
+        if (current < cost) {
+          return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
+        }
       }
-      u.points -= cost;
-      saveDB();
-      addAudit(uid, -cost, 'talking_start', { mode: p.mode, seconds });
+      addAudit(uid, 0, 'talking_start', { mode: p.mode, seconds });
       const taskName = `${p.mode}_${uid}_${Date.now()}`;
       let startRes;
       if (p.mode === 'talkingphoto') {
@@ -1220,15 +1327,26 @@ bot.on('voice', async ctx => {
 
 async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 15 : 9;
-  const user = DB.users[u.id];
-  
-  if ((user.points || 0) < cost) {
-      return { error: 'not enough points', required: cost, points: user.points };
+  if (!isFreeAccess(u.id)) {
+    const hasDb = !!__pgConnStr;
+    if (hasDb) {
+      try {
+        await ensurePgUser(u.id, u.first_name);
+        const current = await getCredits(u.id);
+        if (current < cost) {
+          return { error: 'not enough points', required: cost, points: current };
+        }
+      } catch (e) {
+        return { error: 'credit check failed', points: null };
+      }
+    } else {
+      const current = (DB.users[u.id] && DB.users[u.id].points) || 0;
+      if (current < cost) {
+        return { error: 'not enough points', required: cost, points: current };
+      }
+    }
   }
-  
-  user.points -= cost;
-  saveDB();
-  addAudit(u.id, -cost, 'faceswap_start', { isVideo });
+  addAudit(u.id, 0, 'faceswap_start', { isVideo });
 
   const swapLink = await getFileUrl(ctx, swapFileId);
   const targetLink = await getFileUrl(ctx, targetFileId);
@@ -1265,6 +1383,16 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
     return { error: 'Failed to generate Cloudinary URLs.', points: user.points };
   }
 
+  if (!/\.(mp4|mov|avi)(\?.*)?$/i.test(targetUrl)) {
+    console.error('DEBUG TARGET VALIDATION FAILED:', targetUrl);
+    user.points += cost;
+    saveDB();
+    addAudit(u.id, cost, 'refund_invalid_target', { targetUrl });
+    ctx.reply('For Face Swap, please send a video (mp4/mov/avi) as the target, not an image.').catch(()=>{});
+    return { error: 'For Face Swap, please send a video (mp4/mov/avi) as the target, not an image.', points: user.points };
+  }
+  console.log('DEBUG FACESWAP INPUT:', { swapUrl, videoUrl: targetUrl });
+
   try {
       const qPos = queue.size;
       if (qPos > 0) {
@@ -1295,7 +1423,8 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
           userId: u.id,
           startTime: Date.now(),
           isVideo: isVideo,
-          status: 'processing'
+          status: 'processing',
+          cost
         };
         saveDB();
         pollMagicResult(requestId, ctx.chat.id);
@@ -1304,7 +1433,7 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
           requestId,
           status,
           message: `Your faceswap is processing. Task ID: ${requestId}.`,
-          points: user.points
+          points: await getCredits(u.id)
         };
       }
 
@@ -1377,8 +1506,6 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
       }
 
   } catch (e) {
-    user.points += cost;
-    saveDB();
     cleanupFiles([swapPath, targetPath]);
     console.error('FACESWAP MCP error:', e);
     return { error: 'FaceSwap API error: ' + e.message, points: user.points };
@@ -1769,14 +1896,22 @@ bot.on('text', async ctx => {
       const u = getOrCreateUser(uid);
       const secondsEst = Math.max(3, Math.round(((script.split(/\s+/).length) / 2.5)));
       const cost = 6 * secondsEst;
-      if ((u.points || 0) < cost) {
-        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      const hasDb = !!__pgConnStr;
+      if (!isFreeAccess(uid)) {
+        if (hasDb) {
+          await ensurePgUser(uid, u.first_name);
+          const current = await getCredits(uid);
+          if (current < cost) {
+            return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
+          }
+        } else {
+          const current = (u.points || 0);
+          if (current < cost) {
+            return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
+          }
+        }
       }
-      try { console.log('[CREDITS] before', JSON.stringify({ uid, points: u.points, cost })); } catch (_) {}
-      u.points -= cost;
-      saveDB();
-      try { console.log('[CREDITS] after', JSON.stringify({ uid, points: u.points })); } catch (_) {}
-      addAudit(uid, -cost, 'talking_start', { mode: p.mode, secondsEst });
+      addAudit(uid, 0, 'talking_start', { mode: p.mode, secondsEst });
       const taskName = `${p.mode}_${uid}_${Date.now()}`;
       let startRes;
       if (p.mode === 'talkingphoto') {
@@ -1820,14 +1955,22 @@ bot.on('text', async ctx => {
   try {
     const u = getOrCreateUser(uid);
     const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 30);
-    if ((u.points || 0) < cost) {
-      return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+    const hasDb = !!__pgConnStr;
+    if (!isFreeAccess(uid)) {
+      if (hasDb) {
+        await ensurePgUser(uid, u.first_name);
+        const current = await getCredits(uid);
+        if (current < cost) {
+          return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
+        }
+      } else {
+        const current = (u.points || 0);
+        if (current < cost) {
+          return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
+        }
+      }
     }
-    try { console.log('[CREDITS] before', JSON.stringify({ uid, points: u.points, cost })); } catch (_) {}
-    u.points -= cost;
-    saveDB();
-    try { console.log('[CREDITS] after', JSON.stringify({ uid, points: u.points })); } catch (_) {}
-    addAudit(uid, -cost, 'image2video_start', { prompt, imageUrl: p.imageUrl });
+    addAudit(uid, 0, 'image2video_start', { prompt, imageUrl: p.imageUrl });
     try { console.log('[IMAGE2VIDEO] start', JSON.stringify({ uid, imageUrl: p.imageUrl, prompt })); } catch (_) {}
     const taskName = `image2video_${uid}_${Date.now()}`;
     const startRes = await startImageToVideo(p.imageUrl, prompt, taskName);
@@ -1851,12 +1994,7 @@ bot.on('text', async ctx => {
       ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
       pollImage2Video(requestId, ctx.chat.id);
   } catch (e) {
-    const u = getOrCreateUser(uid);
-    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 30);
-    u.points += cost;
-    saveDB();
-    addAudit(uid, cost, 'refund_img2vid_start_failed', { error: e && e.message });
-    try { console.error('[IMAGE2VIDEO] start_error', e && e.message); console.log('[CREDITS] refund', JSON.stringify({ uid, points: u.points })); } catch (_) {}
+    try { console.error('[IMAGE2VIDEO] start_error', e && e.message); } catch (_) {}
     ctx.reply(`Failed to start Image→Video: ${e.message}`);
   }
 });
@@ -1973,8 +2111,11 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
       const s = cloudinary.uploader.upload_stream({ folder: 'faceswap/swap', resource_type: 'auto', public_id: `swap_${userId}_${Date.now()}` }, (err, res) => err ? reject(err) : resolve(res));
       s.end(swapFile.buffer);
     });
+    if (!(targetFile.mimetype && targetFile.mimetype.startsWith('video'))) {
+      return res.status(400).json({ error: 'For Face Swap, please send a video (mp4/mov/avi) as the target, not an image.' });
+    }
     const targetUpload = await new Promise((resolve, reject) => {
-      const s = cloudinary.uploader.upload_stream({ folder: 'faceswap/target', resource_type: 'auto', public_id: `target_${userId}_${Date.now()}` }, (err, res) => err ? reject(err) : resolve(res));
+      const s = cloudinary.uploader.upload_stream({ folder: 'faceswap/target', resource_type: 'video', public_id: `target_${userId}_${Date.now()}` }, (err, res) => err ? reject(err) : resolve(res));
       s.end(targetFile.buffer);
     });
     console.log('DEBUG UPLOAD: Saved swap to Cloudinary:', swapUpload && swapUpload.secure_url);
@@ -1982,24 +2123,36 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     
     const isVideo = targetFile.mimetype && targetFile.mimetype.startsWith('video');
     const u = getOrCreateUser(userId);
-    
-    const cost = isVideo ? 15 : 9;
-    if ((u.points || 0) < cost) {
-         cleanupFiles([swapPath, targetPath]);
-         return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
+    const cost = 15;
+    const hasDb = !!__pgConnStr;
+    if (!isFreeAccess(userId)) {
+      if (hasDb) {
+        await ensurePgUser(userId);
+        const current = await getCredits(userId);
+        if (current < cost) {
+          cleanupFiles([swapPath, targetPath]);
+          return res.status(402).json({ error: 'not enough points', required: cost, points: current });
+        }
+      } else {
+        if ((u.points || 0) < cost) {
+          cleanupFiles([swapPath, targetPath]);
+          return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
+        }
+      }
     }
-    
-    u.points -= cost;
-    saveDB();
-    addAudit(u.id, -cost, 'faceswap_api', { isVideo });
+    addAudit(String(userId), 0, 'faceswap_api_start', { isVideo });
 
     const swapUrl = swapUpload.secure_url;
     const targetUrl = targetUpload.secure_url;
     console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
     console.log('DEBUG UPLOAD: Generated URLs:', { swapUrl, targetUrl });
 
-    // API key validation now happens at call time in callA2eApi function
-
+    if (!/\.(mp4|mov|avi)(\?.*)?$/i.test(targetUrl)) {
+      console.error('DEBUG TARGET VALIDATION FAILED:', targetUrl);
+      cleanupFiles([swapPath, targetPath]);
+      return res.status(400).json({ error: 'For Face Swap, please send a video (mp4/mov/avi) as the target, not an image.' });
+    }
+    console.log('DEBUG FACESWAP INPUT:', { swapUrl, videoUrl: targetUrl });
     const tools = await listMcpTools(key).catch(() => []);
     const taskName = `faceswap_${u.id}_${Date.now()}`;
     try {
@@ -2021,23 +2174,23 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
       return res.json({ ok: true, requestId, message: 'Job started. Poll status at /faceswap/status/' + requestId });
     } catch (e) {
       console.error('DEBUG A2E START ERROR:', e.message);
-      u.points += cost;
-      saveDB();
       cleanupFiles([swapPath, targetPath]);
       return res.status(500).json({ error: `FaceSwap failed: ${e.message}`, points: u.points });
     }
 
-    u.points += cost;
-    saveDB();
+    if (!process.env.DATABASE_URL) {
+      u.points += cost;
+      saveDB();
+    }
     cleanupFiles([swapPath, targetPath]);
     return res.status(500).json({ error: 'No output URL or request id from API', points: u.points });
   } catch (e) {
     console.error('FACESWAP MCP error:', e);
     try {
-      if (u && typeof cost === 'number') {
-        u.points += cost;
-        saveDB();
-        addAudit(u.id, cost, 'refund_api_error', { error: e && e.message });
+      const uid = String((req.body && req.body.userId) || '');
+      if (uid && typeof 15 === 'number') {
+        await creditRefund(uid, 15, 'faceswap_api_error').catch(()=>{});
+        addAudit(uid, 15, 'refund_api_error', { error: e && e.message });
       }
       cleanupFiles([swapPath, targetPath]);
     } catch (_) {}
@@ -2056,6 +2209,18 @@ app.get('/faceswap/status/:requestId', (req, res) => {
   res.status(404).json({ error: 'Job not found or expired' });
 });
 
+app.get('/debug/credits/:userId', async (req, res) => {
+  try {
+    const uid = String(req.params.userId || '').trim();
+    if (!uid) return res.status(400).json({ error: 'userId required' });
+    await ensurePgUser(uid);
+    const points = await getCredits(uid);
+    const u = DB.users[uid] || {};
+    return res.json({ userId: uid, points, free_access: !!u.free_access });
+  } catch (e) {
+    return res.status(500).json({ error: e && e.message });
+  }
+});
 app.post('/create-point-session', async (req, res) => {
   try {
     const body = req.body || {};
