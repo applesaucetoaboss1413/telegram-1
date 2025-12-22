@@ -2,6 +2,8 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const fetch = require('node-fetch');
 const { default: PQueue } = require('p-queue');
 
+console.log('BOOT FILE:', __filename);
+
 const queue = new PQueue(process.env.NODE_ENV === 'test' ? { concurrency: 1 } : { concurrency: 1, timeout: 300000 });
 
 if (process.env.NODE_ENV !== 'test') {
