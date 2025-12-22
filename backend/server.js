@@ -86,6 +86,23 @@ async function pollFaceSwapStatus(taskId) {
   if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
   return { status: 'UNKNOWN' };
 }
+
+async function startImageToVideo(imageUrl, prompt, taskName) {
+  const payload = { name: taskName, image_url: imageUrl, prompt };
+  try { console.log('DEBUG A2E IMAGE2VIDEO START PAYLOAD', JSON.stringify(payload)); } catch (_) {}
+  const result = await callA2eApi('/userImageToVideoTask/add', 'POST', payload);
+  if (result.code !== 0) throw new Error(result.data?.failed_message || 'Image2Video failed');
+  return { taskId: result.data._id, status: result.data.current_status, cost: result.data.coins || result.data.cost || null };
+}
+
+async function pollImageToVideoStatus(taskId) {
+  const result = await callA2eApi('/userImageToVideoTask/status', 'GET');
+  const task = result.data.find(t => t._id === taskId);
+  if (!task) return { status: 'NOT_FOUND' };
+  if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
+  if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
+  if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
+  return { status: 'UNKNOWN' };
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
 if (!stripe) {
@@ -554,6 +571,7 @@ bot.telegram.setMyCommands([
   { command: 'status', description: 'System status' },
   { command: 'faceswap', description: 'Video face swap' },
   { command: 'imageswap', description: 'Image face swap' },
+  { command: 'image2video', description: 'Image to Video' },
   { command: 'reset', description: 'Reset state' },
   { command: 'debug', description: 'Show current state' }
 ]).catch(() => {});
@@ -811,6 +829,73 @@ function pollMagicResult(requestId, chatId) {
     }
   };
   
+  setTimeout(poll, 2000);
+}
+
+function pollImage2Video(requestId, chatId) {
+  let tries = 0;
+  const job = DB.pending_swaps[requestId];
+  const poll = async () => {
+    tries++;
+    if (tries > 100) {
+       try {
+         const jobInfo = DB.pending_swaps[requestId];
+         const userId = jobInfo && jobInfo.userId;
+         const costRefund = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
+         if (userId && DB.users[userId]) {
+           DB.users[userId].points += costRefund;
+           saveDB();
+           addAudit(userId, costRefund, 'refund_timeout_img2vid', { requestId });
+         }
+       } catch (e) {}
+       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
+       if (DB.pending_swaps[requestId]) {
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
+          delete DB.pending_swaps[requestId];
+          saveDB();
+       }
+       return;
+    }
+    try {
+      const pollResult = await pollImageToVideoStatus(requestId);
+      if (pollResult.status === 'FAILED') {
+        if (job && job.userId) {
+          const u = getOrCreateUser(job.userId);
+          const costRefund = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
+          u.points += costRefund;
+          saveDB();
+          addAudit(job.userId, costRefund, 'refund_img2vid_failed', { requestId, error: pollResult.error });
+        }
+        if (chatId) {
+          bot.telegram.sendMessage(chatId, '❌ Image→Video failed. Your credits have been refunded. Try a different prompt or clearer photo.').catch(()=>{});
+        }
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: pollResult.error || 'Provider FAILED' };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+        return;
+      } else if (pollResult.status === 'COMPLETED') {
+        const finalUrl = pollResult.result_url;
+        if (chatId) {
+          await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Image→Video complete!' });
+        }
+        await sendToResultChannel(finalUrl, true);
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+      } else {
+        setTimeout(poll, 3000);
+      }
+    } catch (e) {
+      setTimeout(poll, 3000);
+    }
+  };
   setTimeout(poll, 2000);
 }
 
@@ -1158,6 +1243,16 @@ bot.action('imageswap', ctx => {
   ctx.reply('Mode set: **Image Face Swap** 📸\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** photo.');
 });
 
+bot.command('image2video', ctx => {
+  setPending(String(ctx.from.id), { mode: 'image2video', step: 'image' });
+  ctx.reply('Mode set: **Image → Video** 🎞️\n\n1. Please send the source photo.\n2. Then you will be asked for a motion prompt.');
+});
+bot.action('image2video', ctx => {
+  ack(ctx, 'Mode set: Image→Video');
+  setPending(String(ctx.from.id), { mode: 'image2video', step: 'image' });
+  ctx.reply('Mode set: **Image → Video** 🎞️\n\n1. Please send the source photo.\n2. Then you will be asked for a motion prompt.');
+});
+
 async function processSwapFlow(ctx, uid, swapFileId, targetFileId, isVideo) {
     let processingMsg;
     try {
@@ -1199,9 +1294,12 @@ bot.on('photo', async ctx => {
   const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
 
   if (!p) {
-    const newState = { mode: 'imageswap', step: 'target', swapFileId: fileId };
-    setPending(uid, newState);
-    return ctx.reply('Got your SWAP photo. Now send the TARGET photo to complete the swap.');
+    return ctx.reply('Select a mode to continue.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Image → Video', 'image2video')],
+        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
+      ])
+    );
   }
 
   if (p.step === 'swap') {
@@ -1216,6 +1314,66 @@ bot.on('photo', async ctx => {
     setPending(uid, null);
   } else if (p.step === 'target' && p.mode === 'faceswap') {
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
+  } else if (p.step === 'image' && p.mode === 'image2video') {
+    try {
+      const link = await ctx.telegram.getFileLink(fileId);
+      const imageUrl = link.href;
+      const uploadRes = await cloudinary.uploader.upload(imageUrl, { folder: 'image2video/source', resource_type: 'image', public_id: `img2vid_${uid}_${Date.now()}` });
+      const cdnUrl = uploadRes.secure_url;
+      p.imageUrl = cdnUrl;
+      p.step = 'prompt';
+      setPending(uid, p);
+      ctx.reply('Got the photo. Please reply with a motion prompt (e.g., "turn head left, blink slowly").');
+    } catch (e) {
+      ctx.reply('Failed to stage image. Please try again.');
+    }
+  }
+});
+
+bot.on('text', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (!p || p.mode !== 'image2video' || p.step !== 'prompt') return;
+  const prompt = (ctx.message && ctx.message.text) || '';
+  if (!prompt || prompt.length < 3) {
+    return ctx.reply('Please enter a longer prompt describing motion.');
+  }
+  try {
+    const u = getOrCreateUser(uid);
+    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
+    if ((u.points || 0) < cost) {
+      return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+    }
+    u.points -= cost;
+    saveDB();
+    addAudit(uid, -cost, 'image2video_start', { prompt, imageUrl: p.imageUrl });
+    const taskName = `image2video_${uid}_${Date.now()}`;
+    const startRes = await startImageToVideo(p.imageUrl, prompt, taskName);
+    const requestId = startRes.taskId;
+    const initialStatus = startRes.status;
+    if (!DB.pending_swaps) DB.pending_swaps = {};
+    DB.pending_swaps[requestId] = {
+      chatId: ctx.chat.id,
+      userId: uid,
+      startTime: Date.now(),
+      isVideo: true,
+      status: 'processing',
+      type: 'image2video',
+      prompt,
+      imageUrl: p.imageUrl,
+      cost
+    };
+    saveDB();
+    setPending(uid, null);
+    ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+    pollImage2Video(requestId, ctx.chat.id);
+  } catch (e) {
+    const u = getOrCreateUser(uid);
+    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
+    u.points += cost;
+    saveDB();
+    addAudit(uid, cost, 'refund_img2vid_start_failed', { error: e && e.message });
+    ctx.reply(`Failed to start Image→Video: ${e.message}`);
   }
 });
 
