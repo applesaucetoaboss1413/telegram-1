@@ -45,7 +45,7 @@ console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDIN
 
 const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
 const A2E_IMAGE2VIDEO_URL = 'https://video.a2e.ai/api/v1/userImage2Video/start';
-const A2E_API_RESOURCE_BASE = 'https://api.a2e.ai/api/v1';
+const A2E_IMAGE2VIDEO_STATUS_BASE = process.env.A2E_VIDEO_BASE || 'https://video.a2e.ai/api/v1';
 const QUALITY_NEGATIVE_PROMPT = 'bad anatomy, low quality, worst quality, blurry, text, watermark, logo, extra limbs, mutated hands, deformed, disfigured, poorly drawn, out of frame, ugly, tiling, noisy, sketch, cartoon, 3D render, monochrome, horror, unwanted styles';
 const FACESWAP_MAX_WAIT_SECONDS = Number(process.env.FACESWAP_MAX_WAIT_SECONDS || 900);
 const FACESWAP_POLL_INTERVAL_SECONDS = Number(process.env.FACESWAP_POLL_INTERVAL_SECONDS || 3);
@@ -191,7 +191,7 @@ async function startImageToVideo(imageUrl, prompt, taskName) {
 async function pollImageToVideoStatus(taskId) {
   const a2eApiKey = process.env.A2E_API_KEY;
   if (!a2eApiKey) throw new Error('A2E_API_KEY environment variable not set');
-  const url = `${A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
+  const url = `${A2E_IMAGE2VIDEO_STATUS_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
   try { console.log('[A2E STATUS REQUEST]', { type: 'image2video', taskId, url, method: 'GET' }); } catch (_) {}
   const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${a2eApiKey}`, 'Accept': 'application/json' } });
   const text = await res.text();

@@ -45,11 +45,13 @@ export async function startImage2Video(payload: Image2VideoStartPayload): Promis
 }
 
 export async function checkImage2VideoStatus(taskId: string): Promise<PollResult> {
-  const res = await fetch(`${A2E_VIDEO_BASE}/userImage2Video/${encodeURIComponent(taskId)}`, {
+  const endpoint = `${A2E_VIDEO_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
+  const res = await fetch(endpoint, {
     method: 'GET',
     headers: { Authorization: `Bearer ${A2E_API_KEY}`, Accept: 'application/json' },
   });
   const text = await res.text();
+  try { console.log('[A2E STATUS REQUEST]', { type: 'image2video', taskId, url: endpoint, httpStatus: res.status, body: text.slice(0, 300) }); } catch {}
   const isHtml = /<\/?html/i.test(text);
   if (isHtml) return { status: 'provider_error_html', error: 'HTML 404' };
   if (res.status >= 500) return { status: 'server_error', error: `HTTP ${res.status}` };
@@ -63,4 +65,3 @@ export async function checkImage2VideoStatus(taskId: string): Promise<PollResult
   if (s === 'failed') return { status: 'failed', error: data.failed_message || '' };
   return { status: 'processing' };
 }
-

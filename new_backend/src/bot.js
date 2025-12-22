@@ -9,12 +9,7 @@ const { detectFaces } = require('./services/faceService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
-let runImage2VideoFlow;
-try {
-    runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
-} catch (_) {
-    runImage2VideoFlow = null;
-}
+const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 
 const bot = new Telegraf(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
@@ -318,18 +313,12 @@ bot.on('text', async (ctx) => {
     addTransaction(userId, -cost, 'image2video_start');
     await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
     try {
-        if (runImage2VideoFlow) {
-            const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
-                try { if (m) ctx.reply(m); } catch (_) {}
-            }, 120000);
-            await ctx.reply('✅ Video Ready!');
-            await ctx.reply(url);
-            ctx.session = null;
-        } else {
-            const requestId = await startImage2Video(ctx.session.imageUrl, prompt);
-            createJob(requestId, userId, String(ctx.chat.id), 'video', { service: 'image2video' });
-            ctx.session = null;
-        }
+        const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
+            try { if (m) ctx.reply(m); } catch (_) {}
+        }, 120000);
+        await ctx.reply('✅ Video Ready!');
+        await ctx.reply(url);
+        ctx.session = null;
     } catch (e) {
         updateUserPoints(userId, cost);
         addTransaction(userId, cost, 'refund_api_error');
