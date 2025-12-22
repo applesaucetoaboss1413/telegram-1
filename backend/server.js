@@ -1688,9 +1688,13 @@ bot.command('check_last_swap', async ctx => {
     const u = getOrCreateUser(uid);
     const lastId = u && u.last_faceswap_task_id;
     if (!lastId) {
-      return ctx.reply('No previous FaceSwap job found. Please start a new swap.');
+      return ctx.reply('No recent FaceSwap job to check.');
     }
+    const endpoint = `/userFaceSwapTask/status?_id=${encodeURIComponent(lastId)}`;
+    const pollUrl = `${a2eBaseUrl}${endpoint}`;
+    try { console.log('[CHECK_LAST_SWAP POLL] taskId', lastId, 'url', pollUrl); } catch (_) {}
     const st = await pollFaceSwapStatus(lastId);
+    try { console.log('[CHECK_LAST_SWAP STATUS RAW]', JSON.stringify(st)); } catch (_) {}
     if (st.status === 'COMPLETED' && st.result_url) {
       await ctx.reply('Recovered completed FaceSwap. Sending the result now...');
       await bot.telegram.sendVideo(ctx.chat.id, st.result_url, { caption: '✅ FaceSwap recovered result' }).catch(async () => {
@@ -1699,6 +1703,10 @@ bot.command('check_last_swap', async ctx => {
       u.last_faceswap_status = 'completed';
       u.last_faceswap_created_at = Date.now();
       saveDB();
+    } else if (st.status === 'IN_PROGRESS') {
+      ctx.reply('Last FaceSwap job is still processing. Please check again later or start a new one.');
+    } else if (st.status === 'NOT_FOUND' || st.status === 'FAILED') {
+      ctx.reply('Last FaceSwap job could not be found at the provider. Please start a new one.');
     } else {
       ctx.reply('Last FaceSwap job is still not ready or could not be found. Please start a new one.');
     }
