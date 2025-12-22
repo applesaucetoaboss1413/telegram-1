@@ -78,13 +78,30 @@ async function startFaceSwap(swapUrl, videoUrl, taskName) {
     face_url: swapUrl,
     video_url: videoUrl
   });
+  try { console.log('[FACESWAP START] JSON', JSON.stringify(result)); } catch (_) {}
   if (result.code !== 0) throw new Error(result.data?.failed_message || 'FaceSwap failed');
-  return { taskId: result.data._id, status: result.data.current_status };
+  const id = result.data?._id || result.id || result.task_id;
+  const status = result.data?.current_status || result.status;
+  try { console.log('[FACESWAP START] id', id, 'status', status); } catch (_) {}
+  return { taskId: id, status };
 }
 
 async function pollFaceSwapStatus(taskId) {
-  const result = await callA2eApi('/userFaceSwapTask/status', 'GET');
-  const task = result.data.find(t => t._id === taskId);
+  const endpoint = `/userFaceSwapTask/status?_id=${encodeURIComponent(taskId)}`;
+  const result = await callA2eApi(endpoint, 'GET');
+  try { console.log('[FACESWAP STATUS RAW]', JSON.stringify(result)); } catch (_) {}
+  let task = null;
+  if (result && result.data) {
+    if (Array.isArray(result.data)) {
+      task = result.data.find(t => (t && (t._id || t.id || t.task_id)) === taskId);
+    } else if (typeof result.data === 'object') {
+      const rid = result.data._id || result.data.id || result.data.task_id;
+      task = (!rid || rid === taskId) ? result.data : null;
+    }
+  } else if (result && (result._id || result.id || result.task_id)) {
+    const rid = result._id || result.id || result.task_id;
+    task = (!rid || rid === taskId) ? result : null;
+  }
   if (!task) return { status: 'NOT_FOUND' };
   if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
   if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
@@ -975,6 +992,7 @@ function pollMagicResult(requestId, chatId) {
   const job = DB.pending_swaps[requestId];
   const isVideo = job ? job.isVideo : true; 
   // API key validation now happens at call time in callA2eApi
+  let notFoundCount = 0;
   
   const poll = async () => {
     tries++;
@@ -1001,8 +1019,26 @@ function pollMagicResult(requestId, chatId) {
     }
 
     try {
+      const endpoint = `/userFaceSwapTask/status?_id=${encodeURIComponent(requestId)}`;
+      const pollUrl = `${a2eBaseUrl}${endpoint}`;
+      try { console.log('[FACESWAP POLL] taskId', requestId, 'url', pollUrl); } catch (_) {}
       const pollResult = await pollFaceSwapStatus(requestId);
       console.log('DEBUG A2E POLL:', pollResult);
+      if (pollResult.status === 'NOT_FOUND') {
+        notFoundCount++;
+        if (notFoundCount >= 3) {
+          try { console.error(`[FACESWAP] A2E keeps returning NOT_FOUND for taskId=${requestId}; check start/poll mismatch.`); } catch (_) {}
+          if (chatId) bot.telegram.sendMessage(chatId, 'Task ID not found at provider. Please restart the job.').catch(()=>{});
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'Task ID not found' };
+          if (DB.pending_swaps[requestId]) {
+            delete DB.pending_swaps[requestId];
+            saveDB();
+          }
+          return;
+        }
+        return setTimeout(poll, 3000);
+      }
       if (pollResult.status === 'FAILED') {
         const apiResponse = { error: pollResult.error, status: 'FAILED' };
         try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
