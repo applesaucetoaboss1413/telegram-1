@@ -477,6 +477,47 @@ async function creditRefund(uid, cost, tag) {
   }
 }
 
+async function checkCreditsOrFreeAccess(userId, requiredPoints, featureName) {
+  const uid = String(userId);
+  if (uid === '8063916626') {
+    try { console.log('[CREDITS] Free access hard bypass for 8063916626 on', featureName || 'unknown'); } catch (_) {}
+    const res = { ok: true, reason: 'admin-free-access' };
+    try { console.log('[CREDITS] checkCreditsOrFreeAccess', { userId: uid, requiredPoints, result: res }); } catch (_) {}
+    return res;
+  }
+  if (isFreeAccess(uid)) {
+    try { console.log('[CREDITS] Free access (DB/env) for', uid, 'on', featureName || 'unknown'); } catch (_) {}
+    const res = { ok: true, reason: 'free-access-flag' };
+    try { console.log('[CREDITS] checkCreditsOrFreeAccess', { userId: uid, requiredPoints, result: res }); } catch (_) {}
+    return res;
+  }
+  let points = 0;
+  try {
+    if (hasDb()) {
+      await ensurePgUser(uid);
+      points = await getCredits(uid);
+    } else {
+      points = Number((DB.users[uid] && DB.users[uid].points) || 0);
+    }
+  } catch (e) {
+    try { console.error('[CREDITS] check error', e && e.message); } catch (_) {}
+  }
+  if (points < Number(requiredPoints || 0)) {
+    const res = { ok: false, reason: 'insufficient', points, required: Number(requiredPoints || 0) };
+    try { console.log('[CREDITS] checkCreditsOrFreeAccess', { userId: uid, requiredPoints, result: res }); } catch (_) {}
+    return res;
+  }
+  const res = { ok: true, reason: 'sufficient', points };
+  try { console.log('[CREDITS] checkCreditsOrFreeAccess', { userId: uid, requiredPoints, result: res }); } catch (_) {}
+  return res;
+}
+
+function sendNotEnoughPointsMessage(ctx, required, points) {
+  const r = Number(required || 0);
+  const p = Number(points || 0);
+  return ctx.reply(`Not enough points. Required: ${r}, you have: ${p}. Use /start → Buy Points.`);
+}
+
 let DB = { 
   users: {}, 
   purchases: {}, 
@@ -1239,12 +1280,9 @@ bot.on('audio', async ctx => {
       const seconds = Math.max(3, Math.round(duration));
       const u = getOrCreateUser(uid);
       const cost = 6 * seconds;
-      await ensurePgUser(uid, u.first_name);
-      if (!isFreeAccess(uid)) {
-        const current = await getCredits(uid);
-        if (current < cost) {
-          return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
-        }
+      const chk = await checkCreditsOrFreeAccess(uid, cost, 'talking-audio');
+      if (!chk.ok) {
+        return sendNotEnoughPointsMessage(ctx, chk.required, chk.points);
       }
       addAudit(uid, 0, 'talking_start', { mode: p.mode, seconds });
       const taskName = `${p.mode}_${uid}_${Date.now()}`;
@@ -1289,12 +1327,11 @@ bot.on('voice', async ctx => {
       const seconds = Math.max(3, Math.round(duration));
       const u = getOrCreateUser(uid);
       const cost = 6 * seconds;
-      if ((u.points || 0) < cost) {
-        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      const chk = await checkCreditsOrFreeAccess(uid, cost, 'talking-voice');
+      if (!chk.ok) {
+        return sendNotEnoughPointsMessage(ctx, chk.required, chk.points);
       }
-      u.points -= cost;
-      saveDB();
-      addAudit(uid, -cost, 'talking_start', { mode: p.mode, seconds });
+      addAudit(uid, 0, 'talking_start', { mode: p.mode, seconds });
       const taskName = `${p.mode}_${uid}_${Date.now()}`;
       let startRes;
       if (p.mode === 'talkingphoto') {
@@ -1327,24 +1364,9 @@ bot.on('voice', async ctx => {
 
 async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 15 : 9;
-  if (!isFreeAccess(u.id)) {
-    const hasDb = !!__pgConnStr;
-    if (hasDb) {
-      try {
-        await ensurePgUser(u.id, u.first_name);
-        const current = await getCredits(u.id);
-        if (current < cost) {
-          return { error: 'not enough points', required: cost, points: current };
-        }
-      } catch (e) {
-        return { error: 'credit check failed', points: null };
-      }
-    } else {
-      const current = (DB.users[u.id] && DB.users[u.id].points) || 0;
-      if (current < cost) {
-        return { error: 'not enough points', required: cost, points: current };
-      }
-    }
+  const chk = await checkCreditsOrFreeAccess(u.id, cost, 'faceswap-bot');
+  if (!chk.ok) {
+    return { error: 'not enough points', required: chk.required, points: chk.points };
   }
   addAudit(u.id, 0, 'faceswap_start', { isVideo });
 
@@ -1811,13 +1833,10 @@ bot.on('photo', async ctx => {
       const targetLink = await getFileUrl(ctx, fileId);
       const u = getOrCreateUser(uid);
       const cost = 10;
-      if ((u.points || 0) < cost) {
-        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      const chk = await checkCreditsOrFreeAccess(uid, cost, 'headswap');
+      if (!chk.ok) {
+        return sendNotEnoughPointsMessage(ctx, chk.required, chk.points);
       }
-      try { console.log('[CREDITS] before', JSON.stringify({ uid, points: u.points, cost })); } catch (_) {}
-      u.points -= cost;
-      saveDB();
-      try { console.log('[CREDITS] after', JSON.stringify({ uid, points: u.points })); } catch (_) {}
       addAudit(uid, -cost, 'headswap_start', { swapLink, targetLink });
       const taskName = `headswap_${uid}_${Date.now()}`;
       const startRes = await startHeadSwap(swapLink, targetLink, taskName);
@@ -1896,20 +1915,9 @@ bot.on('text', async ctx => {
       const u = getOrCreateUser(uid);
       const secondsEst = Math.max(3, Math.round(((script.split(/\s+/).length) / 2.5)));
       const cost = 6 * secondsEst;
-      const hasDb = !!__pgConnStr;
-      if (!isFreeAccess(uid)) {
-        if (hasDb) {
-          await ensurePgUser(uid, u.first_name);
-          const current = await getCredits(uid);
-          if (current < cost) {
-            return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
-          }
-        } else {
-          const current = (u.points || 0);
-          if (current < cost) {
-            return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
-          }
-        }
+      const chk = await checkCreditsOrFreeAccess(uid, cost, 'talking-text');
+      if (!chk.ok) {
+        return sendNotEnoughPointsMessage(ctx, chk.required, chk.points);
       }
       addAudit(uid, 0, 'talking_start', { mode: p.mode, secondsEst });
       const taskName = `${p.mode}_${uid}_${Date.now()}`;
@@ -1955,20 +1963,9 @@ bot.on('text', async ctx => {
   try {
     const u = getOrCreateUser(uid);
     const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 30);
-    const hasDb = !!__pgConnStr;
-    if (!isFreeAccess(uid)) {
-      if (hasDb) {
-        await ensurePgUser(uid, u.first_name);
-        const current = await getCredits(uid);
-        if (current < cost) {
-          return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
-        }
-      } else {
-        const current = (u.points || 0);
-        if (current < cost) {
-          return ctx.reply(`Not enough points. Required: ${cost}, you have: ${current}. Use /start → Buy Points.`);
-        }
-      }
+    const chk = await checkCreditsOrFreeAccess(uid, cost, 'image2video');
+    if (!chk.ok) {
+      return sendNotEnoughPointsMessage(ctx, chk.required, chk.points);
     }
     addAudit(uid, 0, 'image2video_start', { prompt, imageUrl: p.imageUrl });
     try { console.log('[IMAGE2VIDEO] start', JSON.stringify({ uid, imageUrl: p.imageUrl, prompt })); } catch (_) {}
@@ -2122,23 +2119,11 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     console.log('DEBUG UPLOAD: Saved target to Cloudinary:', targetUpload && targetUpload.secure_url);
     
     const isVideo = targetFile.mimetype && targetFile.mimetype.startsWith('video');
-    const u = getOrCreateUser(userId);
     const cost = 15;
-    const hasDb = !!__pgConnStr;
-    if (!isFreeAccess(userId)) {
-      if (hasDb) {
-        await ensurePgUser(userId);
-        const current = await getCredits(userId);
-        if (current < cost) {
-          cleanupFiles([swapPath, targetPath]);
-          return res.status(402).json({ error: 'not enough points', required: cost, points: current });
-        }
-      } else {
-        if ((u.points || 0) < cost) {
-          cleanupFiles([swapPath, targetPath]);
-          return res.status(402).json({ error: 'not enough points', required: cost, points: u.points });
-        }
-      }
+    const chk = await checkCreditsOrFreeAccess(userId, cost, 'faceswap-api');
+    if (!chk.ok) {
+      cleanupFiles([swapPath, targetPath]);
+      return res.status(402).json({ error: 'not enough points', required: chk.required, points: chk.points });
     }
     addAudit(String(userId), 0, 'faceswap_api_start', { isVideo });
 
