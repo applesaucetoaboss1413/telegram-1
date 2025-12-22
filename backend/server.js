@@ -106,6 +106,7 @@ async function pollImageToVideoStatus(taskId) {
   if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
   if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
   return { status: 'UNKNOWN' };
+}
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
 if (!stripe) {
