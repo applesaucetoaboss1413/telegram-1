@@ -107,6 +107,60 @@ async function pollImageToVideoStatus(taskId) {
   if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
   return { status: 'UNKNOWN' };
 }
+
+async function startHeadSwap(swapUrl, targetUrl, taskName) {
+  const result = await callA2eApi('/userHeadSwapTask/add', 'POST', {
+    name: taskName,
+    face_url: swapUrl,
+    target_url: targetUrl
+  });
+  if (result.code !== 0) throw new Error(result.data?.failed_message || 'HeadSwap failed');
+  return { taskId: result.data._id, status: result.data.current_status };
+}
+
+async function pollHeadSwapStatus(taskId) {
+  const result = await callA2eApi('/userHeadSwapTask/status', 'GET');
+  const task = result.data.find(t => t._id === taskId);
+  if (!task) return { status: 'NOT_FOUND' };
+  if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
+  if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
+  if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
+  return { status: 'UNKNOWN' };
+}
+
+async function startTalkingPhoto(imageUrl, payload, taskName) {
+  const body = { name: taskName, image_url: imageUrl };
+  if (payload && payload.script_text) body.script_text = payload.script_text;
+  if (payload && payload.audio_url) body.audio_url = payload.audio_url;
+  const result = await callA2eApi('/userTalkingPhoto/start', 'POST', body);
+  if (!result || (result.code !== undefined && result.code !== 0)) throw new Error(result.data?.failed_message || result.message || 'Talking Photo failed');
+  const id = result.data?._id || result.id || result.task_id;
+  const status = result.data?.current_status || result.status;
+  return { taskId: id, status };
+}
+
+async function startTalkingVideo(videoUrl, payload, taskName) {
+  const body = { name: taskName, video_url: videoUrl };
+  if (payload && payload.script_text) body.script_text = payload.script_text;
+  if (payload && payload.audio_url) body.audio_url = payload.audio_url;
+  const result = await callA2eApi('/userTalkingVideo/start', 'POST', body);
+  if (!result || (result.code !== undefined && result.code !== 0)) throw new Error(result.data?.failed_message || result.message || 'Talking Video failed');
+  const id = result.data?._id || result.id || result.task_id;
+  const status = result.data?.current_status || result.status;
+  return { taskId: id, status };
+}
+
+async function pollTalkingStatus(taskId, type) {
+  const endpoint = type === 'video' ? '/userTalkingVideo/status' : '/userTalkingPhoto/status';
+  const result = await callA2eApi(endpoint, 'GET');
+  const task = result.data && Array.isArray(result.data) ? result.data.find(t => t._id === taskId) : (result.data && result.data.task && result.data.task._id === taskId ? result.data.task : null);
+  if (!task) return { status: 'NOT_FOUND' };
+  const st = task.current_status || task.status;
+  if (st === 'completed') return { status: 'COMPLETED', result_url: task.result_url || task.video_url || task.url };
+  if (st === 'failed') return { status: 'FAILED', error: task.failed_message || task.error };
+  if (st === 'processing' || st === 'in_progress') return { status: 'IN_PROGRESS' };
+  return { status: 'UNKNOWN' };
+}
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 let stripe = global.__stripe || null;
 if (!stripe) {
@@ -479,16 +533,18 @@ async function backupDB() {
   }
 }
 
-function getPending(uid) {
-  const res = (DB.pending_flows || {})[uid];
+function getPending(uidOrChat) {
+  const key = String(uidOrChat);
+  const res = (DB.pending_flows || {})[key];
   return res;
 }
-function setPending(uid, val) {
+function setPending(uidOrChat, val) {
+  const key = String(uidOrChat);
   if (!DB.pending_flows) DB.pending_flows = {};
   if (val) {
-    DB.pending_flows[uid] = val;
+    DB.pending_flows[key] = val;
   } else {
-    delete DB.pending_flows[uid];
+    delete DB.pending_flows[key];
   }
   saveDB();
 }
@@ -850,7 +906,8 @@ function pollImage2Video(requestId, chatId) {
            DB.users[userId].points += costRefund;
            saveDB();
            addAudit(userId, costRefund, 'refund_timeout_img2vid', { requestId });
-         }
+            try { console.log('[CREDITS] timeout_refund', JSON.stringify({ uid: userId, points: DB.users[userId].points, requestId })); } catch (_) {}
+          }
        } catch (e) {}
        if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
        if (DB.pending_swaps[requestId]) {
@@ -863,6 +920,7 @@ function pollImage2Video(requestId, chatId) {
     }
     try {
       const pollResult = await pollImageToVideoStatus(requestId);
+      try { console.log('[IMAGE2VIDEO] poll', JSON.stringify({ requestId, tries, status: pollResult && pollResult.status })); } catch (_) {}
       if (pollResult.status === 'FAILED') {
         if (job && job.userId) {
           const u = getOrCreateUser(job.userId);
@@ -870,6 +928,7 @@ function pollImage2Video(requestId, chatId) {
           u.points += costRefund;
           saveDB();
           addAudit(job.userId, costRefund, 'refund_img2vid_failed', { requestId, error: pollResult.error });
+          try { console.log('[CREDITS] failed_refund', JSON.stringify({ uid: job.userId, points: u.points, requestId })); } catch (_) {}
         }
         if (chatId) {
           bot.telegram.sendMessage(chatId, '❌ Image→Video failed. Your credits have been refunded. Try a different prompt or clearer photo.').catch(()=>{});
@@ -883,8 +942,144 @@ function pollImage2Video(requestId, chatId) {
         return;
       } else if (pollResult.status === 'COMPLETED') {
         const finalUrl = pollResult.result_url;
+        try { console.log('[IMAGE2VIDEO] completed', JSON.stringify({ requestId, finalUrl })); } catch (_) {}
         if (chatId) {
           await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Image→Video complete!' });
+        }
+        await sendToResultChannel(finalUrl, true);
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+      } else {
+        setTimeout(poll, 3000);
+      }
+    } catch (e) {
+      try { console.error('[IMAGE2VIDEO] poll_error', e && e.message); } catch (_) {}
+      setTimeout(poll, 3000);
+    }
+  };
+  setTimeout(poll, 2000);
+}
+
+function pollHeadSwap(requestId, chatId) {
+  let tries = 0;
+  const job = DB.pending_swaps[requestId];
+  const poll = async () => {
+    tries++;
+    if (tries > 100) {
+      try {
+        const jobInfo = DB.pending_swaps[requestId];
+        const userId = jobInfo && jobInfo.userId;
+        const costRefund = 10;
+        if (userId && DB.users[userId]) {
+          DB.users[userId].points += costRefund;
+          saveDB();
+          addAudit(userId, costRefund, 'refund_timeout_headswap', { requestId });
+        }
+      } catch (e) {}
+      if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
+      if (DB.pending_swaps[requestId]) {
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
+        delete DB.pending_swaps[requestId];
+        saveDB();
+      }
+      return;
+    }
+    try {
+      const pollResult = await pollHeadSwapStatus(requestId);
+      if (pollResult.status === 'FAILED') {
+        if (job && job.userId) {
+          const u = getOrCreateUser(job.userId);
+          const costRefund = 10;
+          u.points += costRefund;
+          saveDB();
+          addAudit(job.userId, costRefund, 'refund_headswap_failed', { requestId, error: pollResult.error });
+        }
+        if (chatId) {
+          bot.telegram.sendMessage(chatId, '❌ Head Swap failed. Your credits have been refunded. Try a clearer frontal photo.').catch(()=>{});
+        }
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: pollResult.error || 'Provider FAILED' };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+        return;
+      } else if (pollResult.status === 'COMPLETED') {
+        const finalUrl = pollResult.result_url;
+        if (chatId) {
+          await bot.telegram.sendPhoto(chatId, finalUrl, { caption: '✅ Head Swap complete!' });
+        }
+        await sendToResultChannel(finalUrl, false);
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'success', output: finalUrl, url: finalUrl };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+      } else {
+        setTimeout(poll, 3000);
+      }
+    } catch (e) {
+      setTimeout(poll, 3000);
+    }
+  };
+  setTimeout(poll, 2000);
+}
+
+function pollTalking(requestId, chatId, type) {
+  let tries = 0;
+  const job = DB.pending_swaps[requestId];
+  const poll = async () => {
+    tries++;
+    if (tries > 100) {
+      try {
+        const jobInfo = DB.pending_swaps[requestId];
+        const userId = jobInfo && jobInfo.userId;
+        const costRefund = jobInfo && jobInfo.cost ? jobInfo.cost : 0;
+        if (userId && DB.users[userId]) {
+          DB.users[userId].points += costRefund;
+          saveDB();
+          addAudit(userId, costRefund, 'refund_timeout_talking', { requestId });
+        }
+      } catch (e) {}
+      if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out. Points have been refunded.').catch(()=>{});
+      if (DB.pending_swaps[requestId]) {
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
+        delete DB.pending_swaps[requestId];
+        saveDB();
+      }
+      return;
+    }
+    try {
+      const pollResult = await pollTalkingStatus(requestId, type);
+      if (pollResult.status === 'FAILED') {
+        if (job && job.userId) {
+          const u = getOrCreateUser(job.userId);
+          const costRefund = job && job.cost ? job.cost : 0;
+          u.points += costRefund;
+          saveDB();
+          addAudit(job.userId, costRefund, 'refund_talking_failed', { requestId, error: pollResult.error });
+        }
+        if (chatId) {
+          bot.telegram.sendMessage(chatId, '❌ Talking generation failed. Your credits have been refunded. Try a clearer photo or shorter script.').catch(()=>{});
+        }
+        if (!DB.api_results) DB.api_results = {};
+        DB.api_results[requestId] = { status: 'failed', error: pollResult.error || 'Provider FAILED' };
+        if (DB.pending_swaps[requestId]) {
+          delete DB.pending_swaps[requestId];
+          saveDB();
+        }
+        return;
+      } else if (pollResult.status === 'COMPLETED') {
+        const finalUrl = pollResult.result_url;
+        if (chatId) {
+          await bot.telegram.sendVideo(chatId, finalUrl, { caption: '✅ Talking generation complete!' });
         }
         await sendToResultChannel(finalUrl, true);
         if (!DB.api_results) DB.api_results = {};
@@ -902,6 +1097,126 @@ function pollImage2Video(requestId, chatId) {
   };
   setTimeout(poll, 2000);
 }
+bot.on('sticker', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (p && p.mode === 'image2video' && p.step === 'image') {
+    return ctx.reply('Please send a photo to begin Image → Video.');
+  }
+});
+bot.on('document', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (p && p.mode === 'image2video' && p.step === 'image') {
+    return ctx.reply('Please send a photo (not a document) to begin Image → Video.');
+  }
+});
+bot.on('animation', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (p && p.mode === 'image2video' && p.step === 'image') {
+    return ctx.reply('Please send a static photo (not a GIF) to begin Image → Video.');
+  }
+});
+bot.on('audio', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (p && p.mode === 'image2video' && p.step === 'image') {
+    return ctx.reply('Please send a photo to begin Image → Video.');
+  }
+  if (p && (p.mode === 'talkingphoto' || p.mode === 'talkingvideo') && p.step === 'audio_or_text') {
+    try {
+      const link = await ctx.telegram.getFileLink(ctx.message.audio.file_id);
+      const audioUrl = link.href;
+      const uploadRes = await cloudinary.uploader.upload(audioUrl, { folder: 'talking/audio', resource_type: 'video', public_id: `talking_audio_${uid}_${Date.now()}` });
+      const cdnUrl = uploadRes.secure_url;
+      const duration = Number(ctx.message.audio.duration || 5);
+      const seconds = Math.max(3, Math.round(duration));
+      const u = getOrCreateUser(uid);
+      const cost = 6 * seconds;
+      if ((u.points || 0) < cost) {
+        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      }
+      u.points -= cost;
+      saveDB();
+      addAudit(uid, -cost, 'talking_start', { mode: p.mode, seconds });
+      const taskName = `${p.mode}_${uid}_${Date.now()}`;
+      let startRes;
+      if (p.mode === 'talkingphoto') {
+        startRes = await startTalkingPhoto(p.baseUrl, { audio_url: cdnUrl }, taskName);
+      } else {
+        startRes = await startTalkingVideo(p.baseUrl, { audio_url: cdnUrl }, taskName);
+      }
+      const requestId = startRes.taskId;
+      const initialStatus = startRes.status;
+      if (!DB.pending_swaps) DB.pending_swaps = {};
+      DB.pending_swaps[requestId] = {
+        chatId: ctx.chat.id,
+        userId: uid,
+        startTime: Date.now(),
+        isVideo: true,
+        status: 'processing',
+        type: p.mode,
+        seconds,
+        cost
+      };
+      saveDB();
+      setPending(uid, null);
+      ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+      pollTalking(requestId, ctx.chat.id, p.mode === 'talkingvideo' ? 'video' : 'photo');
+    } catch (e) {
+      ctx.reply('Failed to stage audio. Please try again.');
+    }
+  }
+});
+bot.on('voice', async ctx => {
+  const uid = String(ctx.from.id);
+  const p = getPending(uid);
+  if (p && (p.mode === 'talkingphoto' || p.mode === 'talkingvideo') && p.step === 'audio_or_text') {
+    try {
+      const link = await ctx.telegram.getFileLink(ctx.message.voice.file_id);
+      const audioUrl = link.href;
+      const uploadRes = await cloudinary.uploader.upload(audioUrl, { folder: 'talking/audio', resource_type: 'video', public_id: `talking_voice_${uid}_${Date.now()}` });
+      const cdnUrl = uploadRes.secure_url;
+      const duration = Number(ctx.message.voice.duration || 5);
+      const seconds = Math.max(3, Math.round(duration));
+      const u = getOrCreateUser(uid);
+      const cost = 6 * seconds;
+      if ((u.points || 0) < cost) {
+        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      }
+      u.points -= cost;
+      saveDB();
+      addAudit(uid, -cost, 'talking_start', { mode: p.mode, seconds });
+      const taskName = `${p.mode}_${uid}_${Date.now()}`;
+      let startRes;
+      if (p.mode === 'talkingphoto') {
+        startRes = await startTalkingPhoto(p.baseUrl, { audio_url: cdnUrl }, taskName);
+      } else {
+        startRes = await startTalkingVideo(p.baseUrl, { audio_url: cdnUrl }, taskName);
+      }
+      const requestId = startRes.taskId;
+      const initialStatus = startRes.status;
+      if (!DB.pending_swaps) DB.pending_swaps = {};
+      DB.pending_swaps[requestId] = {
+        chatId: ctx.chat.id,
+        userId: uid,
+        startTime: Date.now(),
+        isVideo: true,
+        status: 'processing',
+        type: p.mode,
+        seconds,
+        cost
+      };
+      saveDB();
+      setPending(uid, null);
+      ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+      pollTalking(requestId, ctx.chat.id, p.mode === 'talkingvideo' ? 'video' : 'photo');
+    } catch (e) {
+      ctx.reply('Failed to stage audio. Please try again.');
+    }
+  }
+});
 
 async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   const cost = isVideo ? 15 : 9;
@@ -1084,9 +1399,13 @@ bot.command('start', async ctx => {
   if (!u) {
     u = getOrCreateUser(id, { first_name: ctx.from && ctx.from.first_name });
   }
-  ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap to start.`,
+  ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap or /image2video to start.`,
     Markup.inlineKeyboard([
+      [Markup.button.callback('Image → Video', 'image2video')],
       [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')],
+      [Markup.button.callback('Head Swap', 'headswap')],
+      [Markup.button.callback('Actor Swap (Viggle)', 'actor_swap'), Markup.button.callback('Wan 2.6 Gen', 'wan26')],
+      [Markup.button.callback('Subtitle Remover', 'subtitle_remove')],
       [Markup.button.callback('Buy Points', 'buy')]
     ])
   );
@@ -1147,6 +1466,7 @@ bot.action(/buy:(.+)/, async ctx => {
 bot.action('cancel', ctx => {
   ack(ctx, 'Cancelled');
   ctx.deleteMessage().catch(()=>{});
+  try { setPending(String(ctx.chat.id), null); } catch (_) {}
   ctx.reply('Cancelled.');
 });
 
@@ -1228,33 +1548,71 @@ bot.catch((err, ctx) => {
 });
 
 bot.command('faceswap', ctx => {
-  setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
+  setPending(String(ctx.chat.id), { mode: 'faceswap', step: 'swap' });
   ctx.reply('Mode set: **Video Face Swap** 🎥\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** video.');
 });
 bot.action('faceswap', ctx => {
   ack(ctx, 'Mode set: Video');
-  setPending(String(ctx.from.id), { mode: 'faceswap', step: 'swap' });
+  setPending(String(ctx.chat.id), { mode: 'faceswap', step: 'swap' });
   ctx.reply('Mode set: **Video Face Swap** 🎥\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** video.');
 });
 
 bot.command('imageswap', ctx => {
-  setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
+  setPending(String(ctx.chat.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Mode set: **Image Face Swap** 📸\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** photo.');
 });
 bot.action('imageswap', ctx => {
   ack(ctx, 'Mode set: Image');
-  setPending(String(ctx.from.id), { mode: 'imageswap', step: 'swap' });
+  setPending(String(ctx.chat.id), { mode: 'imageswap', step: 'swap' });
   ctx.reply('Mode set: **Image Face Swap** 📸\n\n1. Please send the **SWAP** photo (the face you want to use).\n2. Then you will be asked for the **TARGET** photo.');
 });
 
 bot.command('image2video', ctx => {
-  setPending(String(ctx.from.id), { mode: 'image2video', step: 'image' });
+  try { console.log('[IMAGE2VIDEO] start command from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'image2video', step: 'image' });
   ctx.reply('Mode set: **Image → Video** 🎞️\n\n1. Please send the source photo.\n2. Then you will be asked for a motion prompt.');
 });
 bot.action('image2video', ctx => {
   ack(ctx, 'Mode set: Image→Video');
-  setPending(String(ctx.from.id), { mode: 'image2video', step: 'image' });
+  try { console.log('[IMAGE2VIDEO] start button from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'image2video', step: 'image' });
   ctx.reply('Mode set: **Image → Video** 🎞️\n\n1. Please send the source photo.\n2. Then you will be asked for a motion prompt.');
+});
+
+bot.command('headswap', ctx => {
+  try { console.log('[HEADSWAP] start command from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'headswap', step: 'swap' });
+  ctx.reply('Please upload a clear, frontal photo of the face/head you want to use.\nAvoid glasses, side views, or blurry pictures. Use a clear frontal view.');
+});
+bot.action('headswap', ctx => {
+  ack(ctx, 'Mode set: Head Swap');
+  try { console.log('[HEADSWAP] start button from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'headswap', step: 'swap' });
+  ctx.reply('Please upload a clear, frontal photo of the face/head you want to use.\nAvoid glasses, side views, or blurry pictures. Use a clear frontal view.');
+});
+
+bot.command('talkingphoto', ctx => {
+  try { console.log('[TALKINGPHOTO] start command from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'talkingphoto', step: 'base' });
+  ctx.reply('Send the base photo to animate, then you will be asked for an audio file or a text script.');
+});
+bot.action('talkingphoto', ctx => {
+  ack(ctx, 'Mode set: Talking Photo');
+  try { console.log('[TALKINGPHOTO] start button from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'talkingphoto', step: 'base' });
+  ctx.reply('Send the base photo to animate, then you will be asked for an audio file or a text script.');
+});
+
+bot.command('talkingvideo', ctx => {
+  try { console.log('[TALKINGVIDEO] start command from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'talkingvideo', step: 'base' });
+  ctx.reply('Send the base video to animate, then you will be asked for an audio file or a text script.');
+});
+bot.action('talkingvideo', ctx => {
+  ack(ctx, 'Mode set: Talking Video');
+  try { console.log('[TALKINGVIDEO] start button from', String(ctx.from && ctx.from.id)); } catch (_) {}
+  setPending(String(ctx.chat.id), { mode: 'talkingvideo', step: 'base' });
+  ctx.reply('Send the base video to animate, then you will be asked for an audio file or a text script.');
 });
 
 async function processSwapFlow(ctx, uid, swapFileId, targetFileId, isVideo) {
@@ -1294,14 +1652,16 @@ async function processSwapFlow(ctx, uid, swapFileId, targetFileId, isVideo) {
 
 bot.on('photo', async ctx => {
   const uid = String(ctx.from.id);
-  const p = getPending(uid);
+  const cid = String(ctx.chat.id);
+  const p = getPending(cid);
   const fileId = ctx.message.photo[ctx.message.photo.length-1].file_id;
 
   if (!p) {
     return ctx.reply('Select a mode to continue.',
       Markup.inlineKeyboard([
         [Markup.button.callback('Image → Video', 'image2video')],
-        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')]
+        [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')],
+        [Markup.button.callback('Head Swap', 'headswap')]
       ])
     );
   }
@@ -1309,13 +1669,57 @@ bot.on('photo', async ctx => {
   if (p.step === 'swap') {
     p.swapFileId = fileId;
     p.step = 'target';
-    setPending(uid, p);
-    ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET video.' : 'Great! Now send the TARGET photo.');
+    setPending(cid, p);
+    if (p.mode === 'faceswap') ctx.reply('Great! Now send the TARGET video.');
+    else if (p.mode === 'imageswap') ctx.reply('Great! Now send the TARGET photo.');
+    else if (p.mode === 'headswap') ctx.reply('Now, upload the Source Video or Image you want to swap that face onto.');
   } else if (p.step === 'target' && p.mode === 'imageswap') {
     p.targetFileId = fileId;
     // Call background flow without await to avoid webhook timeout
     processSwapFlow(ctx, uid, p.swapFileId, p.targetFileId, false).catch(e => console.error('Background swap error:', e));
-    setPending(uid, null);
+    setPending(cid, null);
+  } else if (p.step === 'target' && p.mode === 'headswap') {
+    try {
+      const swapLink = await getFileUrl(ctx, p.swapFileId);
+      const targetLink = await getFileUrl(ctx, fileId);
+      const u = getOrCreateUser(uid);
+      const cost = 10;
+      if ((u.points || 0) < cost) {
+        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      }
+      try { console.log('[CREDITS] before', JSON.stringify({ uid, points: u.points, cost })); } catch (_) {}
+      u.points -= cost;
+      saveDB();
+      try { console.log('[CREDITS] after', JSON.stringify({ uid, points: u.points })); } catch (_) {}
+      addAudit(uid, -cost, 'headswap_start', { swapLink, targetLink });
+      const taskName = `headswap_${uid}_${Date.now()}`;
+      const startRes = await startHeadSwap(swapLink, targetLink, taskName);
+      const requestId = startRes.taskId;
+      const initialStatus = startRes.status;
+      try { console.log('[HEADSWAP] task', JSON.stringify({ uid, requestId, status: initialStatus })); } catch (_) {}
+      if (!DB.pending_swaps) DB.pending_swaps = {};
+      DB.pending_swaps[requestId] = {
+        chatId: ctx.chat.id,
+        userId: uid,
+        startTime: Date.now(),
+        isVideo: false,
+        status: 'processing',
+        type: 'headswap',
+        cost
+      };
+      saveDB();
+      setPending(uid, null);
+      ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+      pollHeadSwap(requestId, ctx.chat.id);
+    } catch (e) {
+      const u = getOrCreateUser(uid);
+      const cost = 10;
+      u.points += cost;
+      saveDB();
+      addAudit(uid, cost, 'refund_headswap_start_failed', { error: e && e.message });
+      try { console.error('[HEADSWAP] start_error', e && e.message); console.log('[CREDITS] refund', JSON.stringify({ uid, points: u.points })); } catch (_) {}
+      ctx.reply(`Failed to start Head Swap: ${e.message}`);
+    }
   } else if (p.step === 'target' && p.mode === 'faceswap') {
     ctx.reply('I need a VIDEO for the target, not a photo. Please send a video file.');
   } else if (p.step === 'image' && p.mode === 'image2video') {
@@ -1324,10 +1728,25 @@ bot.on('photo', async ctx => {
       const imageUrl = link.href;
       const uploadRes = await cloudinary.uploader.upload(imageUrl, { folder: 'image2video/source', resource_type: 'image', public_id: `img2vid_${uid}_${Date.now()}` });
       const cdnUrl = uploadRes.secure_url;
+      try { console.log('[IMAGE2VIDEO] cloudinary', JSON.stringify({ uid, cdnUrl })); } catch (_) {}
       p.imageUrl = cdnUrl;
-      p.step = 'prompt';
-      setPending(uid, p);
+    p.step = 'prompt';
+    setPending(cid, p);
       ctx.reply('Got the photo. Please reply with a motion prompt (e.g., "turn head left, blink slowly").');
+    } catch (e) {
+      try { console.error('[IMAGE2VIDEO] cloudinary_error', e && e.message); } catch (_) {}
+      ctx.reply('Failed to stage image. Please try again.');
+    }
+  } else if (p.step === 'base' && p.mode === 'talkingphoto') {
+    try {
+      const link = await ctx.telegram.getFileLink(fileId);
+      const imageUrl = link.href;
+      const uploadRes = await cloudinary.uploader.upload(imageUrl, { folder: 'talking/base', resource_type: 'image', public_id: `talking_photo_${uid}_${Date.now()}` });
+      const cdnUrl = uploadRes.secure_url;
+      p.baseUrl = cdnUrl;
+      p.step = 'audio_or_text';
+      setPending(cid, p);
+      ctx.reply('Got the photo. Please send an audio file, or type the text script to be spoken.');
     } catch (e) {
       ctx.reply('Failed to stage image. Please try again.');
     }
@@ -1336,7 +1755,63 @@ bot.on('photo', async ctx => {
 
 bot.on('text', async ctx => {
   const uid = String(ctx.from.id);
-  const p = getPending(uid);
+  const cid = String(ctx.chat.id);
+  const p = getPending(cid);
+  if (p && p.mode === 'image2video' && p.step === 'image') {
+    return ctx.reply('Please send a single photo to begin the Image → Video flow.');
+  }
+  if (p && (p.mode === 'talkingphoto' || p.mode === 'talkingvideo') && p.step === 'audio_or_text') {
+    const script = (ctx.message && ctx.message.text) || '';
+    if (!script || script.length < 3) {
+      return ctx.reply('Please enter a longer text script.');
+    }
+    try {
+      const u = getOrCreateUser(uid);
+      const secondsEst = Math.max(3, Math.round(((script.split(/\s+/).length) / 2.5)));
+      const cost = 6 * secondsEst;
+      if ((u.points || 0) < cost) {
+        return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
+      }
+      try { console.log('[CREDITS] before', JSON.stringify({ uid, points: u.points, cost })); } catch (_) {}
+      u.points -= cost;
+      saveDB();
+      try { console.log('[CREDITS] after', JSON.stringify({ uid, points: u.points })); } catch (_) {}
+      addAudit(uid, -cost, 'talking_start', { mode: p.mode, secondsEst });
+      const taskName = `${p.mode}_${uid}_${Date.now()}`;
+      let startRes;
+      if (p.mode === 'talkingphoto') {
+        startRes = await startTalkingPhoto(p.baseUrl, { script_text: script }, taskName);
+      } else {
+        startRes = await startTalkingVideo(p.baseUrl, { script_text: script }, taskName);
+      }
+      const requestId = startRes.taskId;
+      const initialStatus = startRes.status;
+      if (!DB.pending_swaps) DB.pending_swaps = {};
+      DB.pending_swaps[requestId] = {
+        chatId: ctx.chat.id,
+        userId: uid,
+        startTime: Date.now(),
+        isVideo: true,
+        status: 'processing',
+        type: p.mode,
+        seconds: secondsEst,
+        cost
+      };
+      saveDB();
+      setPending(cid, null);
+      ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+      pollTalking(requestId, ctx.chat.id, p.mode === 'talkingvideo' ? 'video' : 'photo');
+    } catch (e) {
+      const u = getOrCreateUser(uid);
+      const secondsEst = Math.max(3, Math.round(((ctx.message && ctx.message.text ? ctx.message.text.split(/\s+/).length : 10) / 2.5)));
+      const cost = 6 * secondsEst;
+      u.points += cost;
+      saveDB();
+      addAudit(uid, cost, 'refund_talking_start_failed', { error: e && e.message });
+      ctx.reply(`Failed to start: ${e.message}`);
+    }
+    return;
+  }
   if (!p || p.mode !== 'image2video' || p.step !== 'prompt') return;
   const prompt = (ctx.message && ctx.message.text) || '';
   if (!prompt || prompt.length < 3) {
@@ -1344,17 +1819,21 @@ bot.on('text', async ctx => {
   }
   try {
     const u = getOrCreateUser(uid);
-    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
+    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 30);
     if ((u.points || 0) < cost) {
       return ctx.reply(`Not enough points. Required: ${cost}, you have: ${u.points}. Use /start → Buy Points.`);
     }
+    try { console.log('[CREDITS] before', JSON.stringify({ uid, points: u.points, cost })); } catch (_) {}
     u.points -= cost;
     saveDB();
+    try { console.log('[CREDITS] after', JSON.stringify({ uid, points: u.points })); } catch (_) {}
     addAudit(uid, -cost, 'image2video_start', { prompt, imageUrl: p.imageUrl });
+    try { console.log('[IMAGE2VIDEO] start', JSON.stringify({ uid, imageUrl: p.imageUrl, prompt })); } catch (_) {}
     const taskName = `image2video_${uid}_${Date.now()}`;
     const startRes = await startImageToVideo(p.imageUrl, prompt, taskName);
     const requestId = startRes.taskId;
     const initialStatus = startRes.status;
+    try { console.log('[IMAGE2VIDEO] task', JSON.stringify({ uid, requestId, status: initialStatus })); } catch (_) {}
     if (!DB.pending_swaps) DB.pending_swaps = {};
     DB.pending_swaps[requestId] = {
       chatId: ctx.chat.id,
@@ -1368,22 +1847,42 @@ bot.on('text', async ctx => {
       cost
     };
     saveDB();
-    setPending(uid, null);
-    ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
-    pollImage2Video(requestId, ctx.chat.id);
+      setPending(cid, null);
+      ctx.reply(`Job started: ${requestId}. Status: ${initialStatus || 'processing'}`);
+      pollImage2Video(requestId, ctx.chat.id);
   } catch (e) {
     const u = getOrCreateUser(uid);
-    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 10);
+    const cost = Number(process.env.A2E_IMAGE2VIDEO_COST || 30);
     u.points += cost;
     saveDB();
     addAudit(uid, cost, 'refund_img2vid_start_failed', { error: e && e.message });
+    try { console.error('[IMAGE2VIDEO] start_error', e && e.message); console.log('[CREDITS] refund', JSON.stringify({ uid, points: u.points })); } catch (_) {}
     ctx.reply(`Failed to start Image→Video: ${e.message}`);
   }
 });
 
 bot.on('video', async ctx => {
   const uid = String(ctx.from.id);
-  const p = getPending(uid);
+  const cid = String(ctx.chat.id);
+  const p = getPending(cid);
+  if (p && p.mode === 'image2video' && p.step === 'image') {
+    return ctx.reply('Please send a photo, not a video, to start Image → Video.');
+  }
+  if (p && p.mode === 'talkingvideo' && p.step === 'base') {
+    try {
+      const link = await ctx.telegram.getFileLink(ctx.message.video.file_id);
+      const videoUrl = link.href;
+      const uploadRes = await cloudinary.uploader.upload(videoUrl, { folder: 'talking/base', resource_type: 'video', public_id: `talking_video_${uid}_${Date.now()}` });
+      const cdnUrl = uploadRes.secure_url;
+      p.baseUrl = cdnUrl;
+      p.step = 'audio_or_text';
+      setPending(cid, p);
+      ctx.reply('Got the video. Please send an audio file, or type the text script to be spoken.');
+    } catch (e) {
+      ctx.reply('Failed to stage video. Please try again.');
+    }
+    return;
+  }
   if (!p || p.mode !== 'faceswap' || p.step !== 'target') {
     return ctx.reply('Please select a mode (Video/Image Swap) from the menu first.',
       Markup.inlineKeyboard([
@@ -1395,7 +1894,7 @@ bot.on('video', async ctx => {
   const fileId = ctx.message.video.file_id;
   // Call background flow without await to avoid webhook timeout
   processSwapFlow(ctx, uid, p.swapFileId, fileId, true).catch(e => console.error('Background swap error:', e));
-  setPending(uid, null);
+  setPending(cid, null);
 });
 
 bot.command('reset', ctx => {
@@ -1432,18 +1931,18 @@ if (!fs.existsSync(uploadsDir)) {
 }
 console.log('DEBUG: Static /uploads middleware registration skipped (Cloudinary in use)');
 app.use('/outputs', express.static(outputsDir));
-const telegrafWebhook = bot.webhookCallback('/telegram/webhook');
-app.post('/telegram/webhook', (req, res, next) => {
-  try {
-    console.log('[WEBHOOK HIT]', req.method, req.url, JSON.stringify(req.body).slice(0, 200));
-  } catch (e) {
-    console.error('[WEBHOOK] logging error:', e);
-  }
-  telegrafWebhook(req, res, (err) => {
-    if (err) console.error('[WEBHOOK] handler error:', err);
-    try { if (!res.headersSent) res.status(200).end(); } catch (_) {}
+  const telegrafWebhook = bot.webhookCallback('/telegram/webhook');
+  app.post('/telegram/webhook', (req, res, next) => {
+    try {
+      console.log('[WEBHOOK HIT]', req.method, req.url, JSON.stringify(req.body).slice(0, 200));
+    } catch (e) {
+      console.error('[WEBHOOK] logging error:', e);
+    }
+    telegrafWebhook(req, res, (err) => {
+      if (err) console.error('[WEBHOOK] handler error:', err);
+      try { if (!res.headersSent) res.status(200).end(); } catch (_) {}
+    });
   });
-});
 app.get('/uploads/test', (req, res) => {
   res.json({
     message: 'Uploads static serving is working',
@@ -1713,7 +2212,8 @@ async function startBot() {
     }
     
     try {
-      const info = await bot.telegram.getWebhookInfo();
+  const info = await bot.telegram.getWebhookInfo();
+      try { console.log('[TELEGRAM] getWebhookInfo:', JSON.stringify(info)); } catch (_) {}
       const ok = info && typeof info.url === 'string' && info.url.replace(/\/+$/,'') === fullUrl.replace(/\/+$/,'');
       if (!ok) {
         await bot.telegram.deleteWebhook().catch(()=>{});
