@@ -46,6 +46,8 @@ console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDIN
 const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
 const A2E_IMAGE2VIDEO_URL = 'https://video.a2e.ai/api/v1/userImage2Video/start';
 const QUALITY_NEGATIVE_PROMPT = 'bad anatomy, low quality, worst quality, blurry, text, watermark, logo, extra limbs, mutated hands, deformed, disfigured, poorly drawn, out of frame, ugly, tiling, noisy, sketch, cartoon, 3D render, monochrome, horror, unwanted styles';
+const FACESWAP_MAX_WAIT_SECONDS = Number(process.env.FACESWAP_MAX_WAIT_SECONDS || 900);
+const FACESWAP_POLL_INTERVAL_SECONDS = Number(process.env.FACESWAP_POLL_INTERVAL_SECONDS || 3);
 
 async function callA2eApi(endpoint, method = 'GET', body = null) {
   const a2eApiKey = process.env.A2E_API_KEY;
@@ -1007,18 +1009,28 @@ function pollMagicResult(requestId, chatId) {
   const isVideo = job ? job.isVideo : true; 
   // API key validation now happens at call time in callA2eApi
   let notFoundCount = 0;
+  let lastStatus = null;
+  const intervalMs = Math.max(1000, FACESWAP_POLL_INTERVAL_SECONDS * 1000);
   
   const poll = async () => {
     tries++;
-    if (tries > 100) { // 5 minutes approx
+    const waitedSeconds = tries * FACESWAP_POLL_INTERVAL_SECONDS;
+    if (waitedSeconds >= FACESWAP_MAX_WAIT_SECONDS) {
        try {
          const jobInfo = DB.pending_swaps[requestId];
          const userId = jobInfo && jobInfo.userId;
          addAudit(userId, 0, 'timeout', { requestId });
+         if (userId && DB.users[userId]) {
+           DB.users[userId].last_faceswap_task_id = requestId;
+           DB.users[userId].last_faceswap_status = 'timed_out';
+           DB.users[userId].last_faceswap_created_at = Date.now();
+           saveDB();
+         }
        } catch (e) {
          console.error('Timeout refund error:', e && e.message);
        }
-       if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out.').catch(()=>{});
+       try { console.log('[FACESWAP TIMEOUT]', { taskId: requestId, waitedSeconds, lastStatus }); } catch (_) {}
+       if (chatId) bot.telegram.sendMessage(chatId, 'FaceSwap is still processing or took too long. You can run /check_last_swap to see if it eventually completed.').catch(()=>{});
        if (DB.pending_swaps[requestId]) {
           if (!DB.api_results) DB.api_results = {};
           DB.api_results[requestId] = { status: 'failed', error: 'Timeout' };
@@ -1029,7 +1041,7 @@ function pollMagicResult(requestId, chatId) {
     }
 
     if (tries % 10 === 0 && chatId) {
-        bot.telegram.sendMessage(chatId, `Still processing... (${tries * 3}s elapsed)`).catch(()=>{});
+        bot.telegram.sendMessage(chatId, `Still processing... (${waitedSeconds}s elapsed)`).catch(()=>{});
     }
 
     try {
@@ -1039,6 +1051,7 @@ function pollMagicResult(requestId, chatId) {
       const pollResult = await pollFaceSwapStatus(requestId);
       console.log('DEBUG A2E POLL:', pollResult);
       if (pollResult.status === 'NOT_FOUND') {
+        lastStatus = 'NOT_FOUND';
         notFoundCount++;
         if (notFoundCount >= 3) {
           try { console.error(`[FACESWAP] A2E keeps returning NOT_FOUND for taskId=${requestId}; check start/poll mismatch.`); } catch (_) {}
@@ -1051,9 +1064,10 @@ function pollMagicResult(requestId, chatId) {
           }
           return;
         }
-        return setTimeout(poll, 3000);
+        return setTimeout(poll, intervalMs);
       }
       if (pollResult.status === 'FAILED') {
+        lastStatus = 'FAILED';
         const apiResponse = { error: pollResult.error, status: 'FAILED' };
         try { console.log('DEBUG STATUS RESPONSE', JSON.stringify(apiResponse, null, 2)); } catch (_) {}
         console.error('DEBUG STATUS ERROR provider_failed', apiResponse);
@@ -1068,6 +1082,7 @@ function pollMagicResult(requestId, chatId) {
         }
         return;
       } else if (pollResult.status === 'COMPLETED') {
+        lastStatus = 'COMPLETED';
         const finalUrl = pollResult.result_url;
         try {
           const uid = job && job.userId;
@@ -1091,9 +1106,11 @@ function pollMagicResult(requestId, chatId) {
           saveDB();
         }
       } else if (pollResult.status === 'IN_PROGRESS') {
-        setTimeout(poll, 3000);
+        lastStatus = 'IN_PROGRESS';
+        setTimeout(poll, intervalMs);
       } else {
-        setTimeout(poll, 3000);
+        lastStatus = 'UNKNOWN';
+        setTimeout(poll, intervalMs);
       }
     } catch (e) {
        if (e.message && (e.message.includes('fail') || e.message.includes('error'))) {
@@ -1115,12 +1132,12 @@ function pollMagicResult(requestId, chatId) {
             saveDB();
           }
        } else {
-          setTimeout(poll, 3000);
+          setTimeout(poll, intervalMs);
        }
     }
   };
   
-  setTimeout(poll, 2000);
+  setTimeout(poll, intervalMs);
 }
 
 function pollImage2Video(requestId, chatId) {
@@ -1663,6 +1680,31 @@ bot.command('status', ctx => {
   const uptime = process.uptime();
   const mem = process.memoryUsage().rss / 1024 / 1024;
   ctx.reply(`System Status:\n🟢 Online\n⏱️ Uptime: ${Math.floor(uptime)}s\n🔄 Pending Jobs: ${pending}\n💾 Memory: ${Math.floor(mem)}MB`);
+});
+
+bot.command('check_last_swap', async ctx => {
+  try {
+    const uid = String(ctx.from.id);
+    const u = getOrCreateUser(uid);
+    const lastId = u && u.last_faceswap_task_id;
+    if (!lastId) {
+      return ctx.reply('No previous FaceSwap job found. Please start a new swap.');
+    }
+    const st = await pollFaceSwapStatus(lastId);
+    if (st.status === 'COMPLETED' && st.result_url) {
+      await ctx.reply('Recovered completed FaceSwap. Sending the result now...');
+      await bot.telegram.sendVideo(ctx.chat.id, st.result_url, { caption: '✅ FaceSwap recovered result' }).catch(async () => {
+        await bot.telegram.sendPhoto(ctx.chat.id, st.result_url, { caption: '✅ FaceSwap recovered result' }).catch(()=>{});
+      });
+      u.last_faceswap_status = 'completed';
+      u.last_faceswap_created_at = Date.now();
+      saveDB();
+    } else {
+      ctx.reply('Last FaceSwap job is still not ready or could not be found. Please start a new one.');
+    }
+  } catch (e) {
+    ctx.reply('Failed to check last FaceSwap: ' + (e && e.message || String(e)));
+  }
 });
 
 bot.command('usage', async ctx => {
