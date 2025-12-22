@@ -137,6 +137,7 @@ async function startImageToVideo(imageUrl, prompt, taskName) {
     throw new Error(`A2E ${response.status} ${text}`);
   }
   const result = json || {};
+  try { console.log('[IMAGE2VIDEO START] JSON', JSON.stringify(result)); } catch (_) {}
   if (result.code !== undefined && result.code !== 0) throw new Error(result.data?.failed_message || result.message || 'Image2Video failed');
   const id = result.data?._id || result.id || result.task_id;
   const status = result.data?.current_status || result.status;
@@ -145,8 +146,21 @@ async function startImageToVideo(imageUrl, prompt, taskName) {
 }
 
 async function pollImageToVideoStatus(taskId) {
-  const result = await callA2eApi('/userImageToVideoTask/status', 'GET');
-  const task = result.data.find(t => t._id === taskId);
+  const endpoint = `/userImage2Video/status?_id=${encodeURIComponent(taskId)}`;
+  const result = await callA2eApi(endpoint, 'GET');
+  try { console.log('[IMAGE2VIDEO STATUS RAW]', JSON.stringify(result)); } catch (_) {}
+  let task = null;
+  if (result && result.data) {
+    if (Array.isArray(result.data)) {
+      task = result.data.find(t => (t && (t._id || t.id || t.task_id)) === taskId);
+    } else if (typeof result.data === 'object') {
+      const rid = result.data._id || result.data.id || result.data.task_id;
+      task = (!rid || rid === taskId) ? result.data : null;
+    }
+  } else if (result && (result._id || result.id || result.task_id)) {
+    const rid = result._id || result.id || result.task_id;
+    task = (!rid || rid === taskId) ? result : null;
+  }
   if (!task) return { status: 'NOT_FOUND' };
   if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
   if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
@@ -1111,6 +1125,7 @@ function pollMagicResult(requestId, chatId) {
 
 function pollImage2Video(requestId, chatId) {
   let tries = 0;
+  let notFoundCount = 0;
   const job = DB.pending_swaps[requestId];
   const poll = async () => {
     tries++;
@@ -1130,8 +1145,26 @@ function pollImage2Video(requestId, chatId) {
        return;
     }
     try {
+      const endpoint = `/userImage2Video/status?_id=${encodeURIComponent(requestId)}`;
+      const pollUrl = `${a2eBaseUrl}${endpoint}`;
+      try { console.log('[IMAGE2VIDEO POLL] taskId', requestId, 'url', pollUrl); } catch (_) {}
       const pollResult = await pollImageToVideoStatus(requestId);
       try { console.log('[IMAGE2VIDEO] poll', JSON.stringify({ requestId, tries, status: pollResult && pollResult.status })); } catch (_) {}
+      if (pollResult.status === 'NOT_FOUND') {
+        notFoundCount++;
+        if (notFoundCount >= 3) {
+          try { console.error(`[IMAGE2VIDEO] A2E status 404/NOT_FOUND for taskId=${requestId}; check start/poll mismatch.`); } catch (_) {}
+          if (chatId) bot.telegram.sendMessage(chatId, 'Image→Video task not found at provider. Please restart the job.').catch(()=>{});
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: 'Task ID not found' };
+          if (DB.pending_swaps[requestId]) {
+            delete DB.pending_swaps[requestId];
+            saveDB();
+          }
+          return;
+        }
+        return setTimeout(poll, 3000);
+      }
       if (pollResult.status === 'FAILED') {
         if (chatId) {
           bot.telegram.sendMessage(chatId, '❌ Image→Video failed. Try a different prompt or clearer photo.').catch(()=>{});
