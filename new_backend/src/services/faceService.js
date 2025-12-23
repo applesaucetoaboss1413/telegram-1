@@ -1,6 +1,7 @@
 const { Canvas, Image, ImageData, loadImage } = require('canvas');
 const path = require('path');
-const tf = require('@tensorflow/tfjs');
+// Import tfjs-node for server-side performance (avoids the register_all_gradients issue)
+const tf = require('@tensorflow/tfjs-node');
 
 let faceapi;
 let modelsLoaded = false;
@@ -34,9 +35,10 @@ const loadModels = async () => {
 /**
  * Detects faces in an image buffer
  * @param {Buffer} imageBuffer 
+ * @param {string} userId - Optional user ID for logging
  * @returns {Promise<Array>} Array of detections
  */
-const detectFaces = async (imageBuffer) => {
+const detectFaces = async (imageBuffer, userId = 'unknown') => {
     await loadModels();
     
     try {
@@ -46,9 +48,17 @@ const detectFaces = async (imageBuffer) => {
         // minConfidence 0.6 to filter out false positives
         
         const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 }));
+        
+        if (detections.length > 0) {
+            console.log(`DEBUG: face detection OK for user=${userId}`);
+        } else {
+            console.log(`DEBUG: face detection result: 0 faces found for user=${userId}`);
+        }
+        
         return detections;
     } catch (error) {
-        console.error('Face detection error:', error);
+        // Log the internal error but don't expose it to the user
+        console.error(`ERROR: face detection failed for user=${userId}:`, error.message);
         throw new Error('Failed to process image for face detection');
     }
 };

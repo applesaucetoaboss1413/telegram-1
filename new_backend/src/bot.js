@@ -51,7 +51,7 @@ const getFileLink = async (ctx, fileId) => {
     return url;
 };
 
-const validatePhoto = async (ctx, fileId, fileSize) => {
+const validatePhoto = async (ctx, fileId, fileSize, userId = 'unknown') => {
     // 1. Check Size (10MB = 10 * 1024 * 1024 bytes)
     if (fileSize > 10 * 1024 * 1024) {
         throw new Error('Image too large. Maximum size is 10MB.');
@@ -68,7 +68,7 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
 
     // 3. Face Detection
     try {
-        const faces = await detectFaces(buffer);
+        const faces = await detectFaces(buffer, userId);
         if (faces.length === 0) {
             throw new Error('No human face detected. Please ensure the face is clearly visible (90% confidence).');
         }
@@ -136,7 +136,7 @@ bot.on('photo', async (ctx) => {
     if (ctx.session && ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_face') {
         try {
             await ctx.reply('🔍 Verifying photo...');
-            const { url } = await validatePhoto(ctx, fileId, fileSize);
+            const { url } = await validatePhoto(ctx, fileId, fileSize, userId);
             const faceUrl = await uploadFromUrl(url, 'image');
             const baseUrl = ctx.session.base_url;
             const price = ctx.session.price || 0;

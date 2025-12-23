@@ -46,16 +46,20 @@ const getUser = (id) => {
     let user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 
     // Special override for admin/testing user
-    if (id === '1087968824') {
+    if (String(id) === '1087968824' || String(id) === '8063916626') {
         if (!user) {
             // If admin doesn't exist, create with 10000 points
             const now = Date.now();
-            db.prepare('INSERT INTO users (id, points, created_at) VALUES (?, ?, ?)').run(id, 10000, now);
-            return { id, points: 10000, created_at: now, is_premium: 0, referred_by: null, has_purchased: 0 };
+            db.prepare('INSERT INTO users (id, points, created_at) VALUES (?, ?, ?)').run(String(id), 10000, now);
+            console.log(`INFO: test user ${id} created with balance=10000`);
+            return { id: String(id), points: 10000, created_at: now, is_premium: 0, referred_by: null, has_purchased: 0 };
         } else if (user.points < 10000) {
             // If admin exists but has low points, top up to 10000
-            db.prepare('UPDATE users SET points = 10000 WHERE id = ?').run(id);
+            db.prepare('UPDATE users SET points = 10000 WHERE id = ?').run(String(id));
+            console.log(`INFO: test user ${id} balance updated to 10000`);
             user.points = 10000;
+        } else {
+             console.log(`INFO: test user ${id} already has high balance=${user.points}`);
         }
     }
 
