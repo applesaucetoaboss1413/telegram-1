@@ -3,7 +3,7 @@ console.log('🔥 INIT DEMO BOT');
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
-const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus } = require('./database');
+const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, setReferredBy } = require('./database');
 const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
 const { downloadTo, downloadBuffer, cleanupFile } = require('./utils/fileUtils');
@@ -169,8 +169,24 @@ bot.on('photo', async (ctx) => {
 // Bot Logic
 bot.command('start', async (ctx) => {
     console.log('🔥 /start HANDLER (DEMO MENU)');
-    const user = getUser(String(ctx.from.id));
+    const userId = String(ctx.from.id);
+    const user = getUser(userId);
+
+    // Check for referral
+    const args = ctx.message.text.split(' ');
+    if (args.length > 1 && args[1].startsWith('ref_')) {
+        const referrerId = args[1].replace('ref_', '');
+        // We do a simple check: is referrer valid?
+        // In a real app we might verify referrer exists, but setReferredBy handles basics.
+        // Also setReferredBy prevents self-referral and re-referral.
+        setReferredBy(userId, referrerId);
+    }
+
     ctx.session = { step: null };
+    const me = await bot.telegram.getMe();
+    const username = me.username;
+    const inviteLink = `https://t.me/${username}?start=ref_${userId}`;
+
     if (ctx.chat && ctx.chat.type === 'private') {
         const p = demoCfg.packs;
         const msg = `🎭 *Face Swap Demo*
@@ -185,7 +201,11 @@ Turn any clip into a face swap demo in seconds.
 1. Buy points
 2. Create new demo
 3. Pick length & base video
-4. Upload face`;
+4. Upload face
+
+💸 *Refer a friend*
+When someone joins via your link and buys points, you get enough points for a free 5s demo!
+Your invite link: \`${inviteLink}\``;
         await ctx.replyWithMarkdown(msg);
 
         // Automatically send template examples
@@ -224,48 +244,6 @@ bot.command('promo', async (ctx) => {
         if (adminId && caller !== adminId) {
             return ctx.reply('Forbidden');
         }
-        if (!CHANNEL_ID) return ctx.reply('CHANNEL_ID missing');
-        const me = await bot.telegram.getMe();
-        const username = me && me.username ? me.username : '';
-        const cta = `https://t.me/${username}?start=demo`;
-
-        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
-        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
-        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
-        
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
-
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
-
-        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
-        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
-        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
-
-        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
-        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
-        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
-        
-        logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
-        logger.info('posted template video 5s/10s/15s to channel');
-    } catch (e) {
-        logger.error(`ERROR: cannot post startup promo – CHANNEL_ID or demo URLs missing. ${e.message}`);
-    }
-}
-
-// Auto-run promo on startup
-(async () => {
-    if (process.env.NODE_ENV === 'production' || process.env.RUN_PROMO_ON_START === 'true') {
-        // Wait a few seconds for bot to be ready
-        setTimeout(() => postStartupPromo(), 5000);
-    }
-})();
-
-bot.command('promo', async (ctx) => {
-    try {
         await postStartupPromo();
         await ctx.reply('✅ Promo posted to channel successfully.');
     } catch (e) {
@@ -274,39 +252,41 @@ bot.command('promo', async (ctx) => {
 });
 
 async function postStartupPromo() {
-    try {
-        if (!CHANNEL_ID) throw new Error('CHANNEL_ID missing');
-        const me = await bot.telegram.getMe();
-        const username = me && me.username ? me.username : '';
-        const cta = `https://t.me/${username}?start=demo`;
+    if (!CHANNEL_ID) throw new Error('CHANNEL_ID missing');
+    const me = await bot.telegram.getMe();
+    const username = me && me.username ? me.username : '';
+    const cta = `https://t.me/${username}?start=demo`;
 
-        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
-        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
-        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
-        
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
+    const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n🎁 *Referral Bonus*: For every friend who buys points through your link, you get a FREE 5s demo (we credit you the points for one 5s run).\nDM the bot and hit /start to get your personal invite link.\n\n👉 [Start Creating Now](${cta})`;
+    const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
+    try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
+    
+    const t5 = demoCfg.templates['5'];
+    const t10 = demoCfg.templates['10'];
+    const t15 = demoCfg.templates['15'];
 
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
+    const c5 = demoCfg.demoCosts['5'];
+    const c10 = demoCfg.demoCosts['10'];
+    const c15 = demoCfg.demoCosts['15'];
 
-        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
-        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
-        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
+    const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
+    const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
+    const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
 
-        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
-        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
-        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
-        
-        logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
-        logger.info('posted template video 5s/10s/15s to channel');
-    } catch (e) {
-        logger.error(`ERROR: cannot post startup promo – CHANNEL_ID or demo URLs missing. ${e.message}`);
-        throw e;
-    }
+    if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
+    if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
+    if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
+    
+    logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
 }
+
+// Auto-run promo on startup
+(async () => {
+    if (process.env.NODE_ENV === 'production' || process.env.RUN_PROMO_ON_START === 'true') {
+        // Wait a few seconds for bot to be ready
+        setTimeout(() => postStartupPromo().catch(err => logger.error(`Startup promo failed: ${err.message}`)), 5000);
+    }
+})();
 
 bot.action('buy_points', async (ctx) => {
     ctx.answerCbQuery();

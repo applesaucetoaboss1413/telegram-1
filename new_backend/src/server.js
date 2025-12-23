@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
-const { getUser, updateUserPoints, addTransaction } = require('./database');
+const { getUser, updateUserPoints, addTransaction, markPurchased } = require('./database');
+const demoCfg = require('./services/a2eConfig');
+const bot = require('./bot'); // Ensure bot is exported and available
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const HealthMonitor = require('./health');
 const winston = require('winston');
@@ -56,10 +58,46 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
         if (userId) {
             // Assuming 100 points for the $5 product
-            const pointsToAdd = 100; 
+            // Wait, we should probably check which pack it is or just trust the amount logic if configured?
+            // For now, let's keep the user logic as is, but add referral reward.
+            // But wait, the previous code hardcoded 100 points. We should probably respect the pack purchased?
+            // The prompt says "Implement a minimal referral tracking... Do not reward on subsequent purchases...".
+            // It doesn't explicitly ask to fix the point amount logic here, but it implies "first successful points purchase".
+            // Let's assume the points are handled correctly or we keep existing logic for points.
+            // Actually, the previous code had `const pointsToAdd = 100;`. This seems like a placeholder.
+            // If I change it, I might break something not requested. 
+            // BUT, the prompt says "Reward condition: first purchase only".
+            
+            const pointsToAdd = 100; // Keeping existing logic for safety unless I see where it comes from.
+            
             try {
                 updateUserPoints(userId, pointsToAdd);
                 addTransaction(userId, pointsToAdd, 'purchase_stripe');
+                
+                // Referral Logic
+                const user = getUser(userId);
+                if (user && !user.has_purchased && user.referred_by) {
+                    const referrerId = user.referred_by;
+                    const rewardPoints = demoCfg.demoPrices['5'] || 60; // Default to 60 if missing
+                    
+                    updateUserPoints(referrerId, rewardPoints);
+                    addTransaction(referrerId, rewardPoints, 'referral_reward');
+                    markPurchased(userId);
+                    
+                    logger.info(`referral reward – referrer=${referrerId} got ${rewardPoints} pts because referred user ${userId} made first purchase.`);
+                    
+                    // Notify referrer
+                    try {
+                         bot.telegram.sendMessage(referrerId, `🎉 *Referral Bonus!*
+Your friend just made their first purchase!
+You received ${rewardPoints} points (enough for a free 5s demo).`, { parse_mode: 'Markdown' });
+                    } catch (e) {
+                        logger.error('Failed to notify referrer', { error: e.message });
+                    }
+                } else if (user && !user.has_purchased) {
+                    markPurchased(userId);
+                }
+
                 logger.info('Points added successfully', { 
                     userId: userId,
                     pointsAdded: pointsToAdd 
