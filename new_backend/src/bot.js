@@ -10,6 +10,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
+const demoCfg = require('./services/a2eConfig');
 
 const bot = new Telegraf(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
@@ -109,44 +110,101 @@ queueService.on('job_failed', async ({ job, error }) => {
     try {
         if (job.chat_id) {
             await bot.telegram.sendMessage(job.chat_id, `❌ Job Failed: ${error}`);
-            // Refund
-            const cost = job.type === 'video' ? 15 : 9;
-            updateUserPoints(job.user_id, cost);
-            addTransaction(job.user_id, cost, 'refund_failed_job');
-            await bot.telegram.sendMessage(job.chat_id, `💰 ${cost} points have been refunded.`);
+            const meta = JSON.parse(job.meta || '{}');
+            const refund = Number(meta.price_points || (job.type === 'video' ? 15 : 9));
+            updateUserPoints(job.user_id, refund);
+            addTransaction(job.user_id, refund, 'refund_failed_job');
+            await bot.telegram.sendMessage(job.chat_id, `💰 ${refund} points have been refunded.`);
         }
     } catch (e) {
         console.error('Failed to send failure notification:', e);
     }
 });
 
+bot.on('photo', async (ctx) => {
+    if (!ctx.session || !ctx.session.step) return;
+    const userId = String(ctx.from.id);
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const fileId = photo.file_id;
+    const fileSize = photo.file_size;
+    if (ctx.session && ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_face') {
+        try {
+            await ctx.reply('🔍 Verifying photo...');
+            const { url } = await validatePhoto(ctx, fileId, fileSize);
+            const faceUrl = await uploadFromUrl(url, 'image');
+            const baseUrl = ctx.session.base_url;
+            const price = ctx.session.price || 0;
+            const u = getUser(userId);
+            if (u.points < price) {
+                return ctx.reply(`❌ Not enough points. You need ${price}, but have ${u.points}.`);
+            }
+            updateUserPoints(userId, -price);
+            addTransaction(userId, -price, 'demo_start');
+            await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
+            try {
+                const requestId = await startFaceSwap(faceUrl, baseUrl);
+                const code = `DEMO-${String(ctx.session.duration).padStart(2, '0')}-${ctx.session.base_url === demoCfg.templates[String(ctx.session.duration)] ? 'TEMPLATE' : 'USER'}`;
+                createJob(requestId, userId, String(ctx.chat.id), 'demo', { service: 'faceswap', price_points: price, duration_seconds: ctx.session.duration, code });
+            } catch (e) {
+                updateUserPoints(userId, price);
+                addTransaction(userId, price, 'refund_api_error');
+                ctx.reply(`❌ Error starting demo: ${e.message}. Points refunded.`);
+            }
+            ctx.session = null;
+        } catch (e) {
+            ctx.reply(`❌ ${e.message}`);
+        }
+    }
+});
+
 // Bot Logic
 bot.command('start', (ctx) => {
     const user = getUser(String(ctx.from.id));
-    ctx.session = { step: null }; // Reset session
+    ctx.session = { step: null };
     ctx.reply(
-        `👋 Welcome! You have **${user.points}** points.\n\nChoose a mode to start:`,
+        `👋 Welcome! You have ${user.points} points.`,
         Markup.inlineKeyboard([
-            [Markup.button.callback('🎬 Video Face Swap (15 pts)', 'mode_video')],
-            [Markup.button.callback('🖼️ Image Face Swap (9 pts)', 'mode_image')],
-            [Markup.button.callback('⚡ FaceSwap Preview', 'mode_faceswap_preview')],
-            [Markup.button.callback('🎥 Image‑to‑Video', 'mode_image2video')],
-            [Markup.button.callback('💰 Buy 100 Points ($5.00)', 'buy_points')]
+            [Markup.button.callback('Create new demo', 'demo_new')],
+            [Markup.button.callback('My demos', 'demo_list')],
+            [Markup.button.callback('Buy points', 'buy_points_menu')],
+            [Markup.button.callback('Help', 'help')]
         ])
     );
 });
 
 bot.action('buy_points', async (ctx) => {
+    ctx.answerCbQuery();
+    ctx.reply(
+        'Choose a credit pack:',
+        Markup.inlineKeyboard([
+            [Markup.button.callback(`${demoCfg.packs.starter.label} – ${demoCfg.packs.starter.points} pts`, 'buy_pack_starter')],
+            [Markup.button.callback(`${demoCfg.packs.plus.label} – ${demoCfg.packs.plus.points} pts`, 'buy_pack_plus')],
+            [Markup.button.callback(`${demoCfg.packs.pro.label} – ${demoCfg.packs.pro.points} pts`, 'buy_pack_pro')],
+        ])
+    );
+});
+
+bot.action('buy_points_menu', (ctx) => {
+    ctx.answerCbQuery();
+    ctx.reply(
+        'Choose a credit pack:',
+        Markup.inlineKeyboard([
+            [Markup.button.callback(`${demoCfg.packs.starter.label} – ${demoCfg.packs.starter.points} pts`, 'buy_pack_starter')],
+            [Markup.button.callback(`${demoCfg.packs.plus.label} – ${demoCfg.packs.plus.points} pts`, 'buy_pack_plus')],
+            [Markup.button.callback(`${demoCfg.packs.pro.label} – ${demoCfg.packs.pro.points} pts`, 'buy_pack_pro')],
+        ])
+    );
+});
+
+async function startCheckout(ctx, pack) {
     try {
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{
                 price_data: {
                     currency: 'usd',
-                    product_data: {
-                        name: '100 FaceSwap Points',
-                    },
-                    unit_amount: 500, // $5.00
+                    product_data: { name: pack.label },
+                    unit_amount: pack.price_cents,
                 },
                 quantity: 1,
             }],
@@ -155,12 +213,57 @@ bot.action('buy_points', async (ctx) => {
             cancel_url: process.env.STRIPE_CANCEL_URL || 'https://t.me/YOUR_BOT?start=cancel',
             client_reference_id: String(ctx.from.id),
         });
-        
-        ctx.reply(`Click here to pay: ${session.url}`);
+        ctx.reply(`Proceed to payment: ${session.url}`);
     } catch (e) {
-        console.error('Stripe error:', e);
         ctx.reply('❌ Payment system error. Please try again later.');
     }
+}
+
+bot.action('buy_pack_starter', (ctx) => startCheckout(ctx, demoCfg.packs.starter));
+bot.action('buy_pack_plus', (ctx) => startCheckout(ctx, demoCfg.packs.plus));
+bot.action('buy_pack_pro', (ctx) => startCheckout(ctx, demoCfg.packs.pro));
+
+bot.action('help', (ctx) => {
+    ctx.reply('Create short demo videos. Buy points, choose length, select base video, send one clear face photo, and receive your demo. Keep uploads within the chosen time limit.');
+});
+
+bot.action('demo_list', (ctx) => {
+    ctx.reply('No stored demos yet.');
+});
+
+bot.action('demo_new', (ctx) => {
+    const uid = String(ctx.from.id);
+    const u = getUser(uid);
+    ctx.session = { mode: 'demo', step: 'choose_length' };
+    ctx.reply(
+        'Choose demo length:',
+        Markup.inlineKeyboard([
+            [Markup.button.callback(`5 seconds – ${demoCfg.demoPrices['5']} points`, 'demo_len_5')],
+            [Markup.button.callback(`10 seconds – ${demoCfg.demoPrices['10']} points`, 'demo_len_10')],
+            [Markup.button.callback(`15 seconds – ${demoCfg.demoPrices['15']} points`, 'demo_len_15')],
+        ])
+    );
+});
+
+bot.action('demo_len_5', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_10', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_15', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+
+bot.action('demo_base_template', async (ctx) => {
+    ctx.answerCbQuery();
+    const d = ctx.session && ctx.session.duration;
+    const url = demoCfg.templates[String(d)];
+    if (!url) return ctx.reply('Template not configured for this length.');
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    ctx.reply('Now send one clear photo of the face you want to use.');
+});
+
+bot.action('demo_base_user', (ctx) => {
+    ctx.answerCbQuery();
+    const d = ctx.session && ctx.session.duration;
+    ctx.session.step = 'awaiting_base_video';
+    ctx.reply(`Send a video that is ${d} seconds or less.`);
 });
 
 bot.action('mode_video', (ctx) => {
@@ -252,6 +355,18 @@ bot.on('video', async (ctx) => {
         const uploaded = await uploadFromUrl(url, 'video');
         await handlePreviewRequest(ctx, userId, ctx.session.swapUrl, uploaded);
         ctx.session = null;
+    }
+    if (ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_base_video') {
+        const duration = ctx.message.video.duration || 0;
+        const max = ctx.session.duration || 0;
+        if (duration > max) {
+            return ctx.reply(`This demo is limited to ${max} seconds. Please crop your video to ${max} seconds or less and send it again.`);
+        }
+        const url = await getFileLink(ctx, fileId);
+        const uploaded = await uploadFromUrl(url, 'video');
+        ctx.session.base_url = uploaded;
+        ctx.session.step = 'awaiting_face';
+        ctx.reply('Now send one clear photo of the face you want to use.');
     }
 });
 
