@@ -1812,31 +1812,7 @@ async function runFaceswap(ctx, u, swapFileId, targetFileId, isVideo) {
   }
 }
 
-bot.command('start', async ctx => {
-  const id = String(ctx.from.id);
-  let u = DB.users[id];
-  if (!u && process.env.DATABASE_URL) {
-    const row = await pgGetOrCreateUser(id, ctx.from && ctx.from.first_name);
-    if (row && typeof row.points === 'number') {
-      u = { id, first_name: row.first_name || null, points: row.points, created_at: Date.now() };
-      DB.users[id] = u;
-      saveDB();
-    }
-  }
-  if (!u) {
-    u = getOrCreateUser(id, { first_name: ctx.from && ctx.from.first_name });
-  }
-  ctx.reply(`Welcome! (ID: ${u.id}) You have ${u.points} points.\nUse /faceswap or /image2video to start.`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('Image → Video', 'image2video')],
-      [Markup.button.callback('Video Face Swap', 'faceswap'), Markup.button.callback('Image Face Swap', 'imageswap')],
-      [Markup.button.callback('Head Swap', 'headswap')],
-      [Markup.button.callback('Actor Swap (Viggle)', 'actor_swap'), Markup.button.callback('Wan 2.6 Gen', 'wan26')],
-      [Markup.button.callback('Subtitle Remover', 'subtitle_remove')],
-      [Markup.button.callback('Buy Points', 'buy')]
-    ])
-  );
-});
+
 
 bot.command('status', ctx => {
   const pending = Object.keys(DB.pending_swaps || {}).length;
