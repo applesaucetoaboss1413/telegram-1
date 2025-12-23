@@ -169,14 +169,12 @@ bot.command('start', (ctx) => {
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
     if (ctx.chat && ctx.chat.type === 'private') {
-        const p5 = demoCfg.demoPrices['5'];
         const p10 = demoCfg.demoPrices['10'];
-        const p15 = demoCfg.demoPrices['15'];
         const s = demoCfg.packs.starter.points;
         const pl = demoCfg.packs.plus.points;
         const pr = demoCfg.packs.pro.points;
-        const approx = (pts, price) => Math.max(1, Math.floor(pts / price));
-        const line = `Welcome to the Face Swap Demo.\nYou can run 5s, 10s, or 15s sample swaps using your own face.\nStarter ≈ ${approx(s, p10)} demos • Plus ≈ ${approx(pl, p10)} demos • Pro ≈ ${approx(pr, p10)} demos.\nTap “Buy points” to top up, then tap “Create new demo”.`;
+        const approx = (pts) => Math.max(1, Math.floor(pts / p10));
+        const line = `Welcome to the Face Swap Demo.\nRun 5s / 10s / 15s Face Swap samples using your face.\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)\n\n1) Buy points\n2) Create new demo\n3) Pick length & base video\n4) Upload face`;
         ctx.reply(line);
     }
     ctx.reply(
@@ -230,14 +228,17 @@ bot.action('buy_points', async (ctx) => {
 
 bot.action('buy_points_menu', (ctx) => {
     ctx.answerCbQuery();
-    ctx.reply(
-        'Choose a credit pack:',
-        Markup.inlineKeyboard([
-            [Markup.button.callback(`${demoCfg.packs.starter.label} – ${demoCfg.packs.starter.points} pts`, 'buy_pack_starter')],
-            [Markup.button.callback(`${demoCfg.packs.plus.label} – ${demoCfg.packs.plus.points} pts`, 'buy_pack_plus')],
-            [Markup.button.callback(`${demoCfg.packs.pro.label} – ${demoCfg.packs.pro.points} pts`, 'buy_pack_pro')],
-        ])
-    );
+    const p10 = demoCfg.demoPrices['10'];
+    const approx = (pts) => Math.max(1, Math.floor(pts / p10));
+    const s = demoCfg.packs.starter.points;
+    const pl = demoCfg.packs.plus.points;
+    const pr = demoCfg.packs.pro.points;
+    const text = `Choose a credit pack:\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)`;
+    ctx.reply(text, Markup.inlineKeyboard([
+        [Markup.button.callback(`${demoCfg.packs.starter.label} – ${s} pts`, 'buy_pack_starter')],
+        [Markup.button.callback(`${demoCfg.packs.plus.label} – ${pl} pts`, 'buy_pack_plus')],
+        [Markup.button.callback(`${demoCfg.packs.pro.label} – ${pr} pts`, 'buy_pack_pro')],
+    ]));
 });
 
 async function startCheckout(ctx, pack) {
@@ -295,12 +296,18 @@ bot.action('demo_len_15', (ctx) => { ctx.session = { mode: 'demo', step: 'choose
 
 bot.action('demo_base_template', async (ctx) => {
     ctx.answerCbQuery();
-    const d = ctx.session && ctx.session.duration;
-    const url = demoCfg.templates[String(d)];
-    if (!url) return ctx.reply('Template not configured for this length.');
-    ctx.session.base_url = url;
-    ctx.session.step = 'awaiting_face';
-    ctx.reply('Now send one clear photo of the face you want to use.');
+    const t5 = demoCfg.templates['5'];
+    const t10 = demoCfg.templates['10'];
+    const t15 = demoCfg.templates['15'];
+    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: '5s Demo' }); } catch (_) { await ctx.reply(`5s Demo: ${t5}`); } }
+    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: '10s Demo' }); } catch (_) { await ctx.reply(`10s Demo: ${t10}`); } }
+    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: '15s Demo' }); } catch (_) { await ctx.reply(`15s Demo: ${t15}`); } }
+    const kb = Markup.inlineKeyboard([
+        [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
+        [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
+        [Markup.button.callback('Use 15s template demo', 'demo_tmpl_15')],
+    ]);
+    await ctx.reply('Pick a template to use:', kb);
 });
 
 bot.action('demo_base_user', (ctx) => {
@@ -310,6 +317,27 @@ bot.action('demo_base_user', (ctx) => {
     ctx.reply(`Send a video that is ${d} seconds or less.`);
 });
 
+bot.action('demo_tmpl_5', (ctx) => {
+    const url = demoCfg.templates['5'];
+    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    ctx.reply('Now send one clear photo of the face you want to use.');
+});
+bot.action('demo_tmpl_10', (ctx) => {
+    const url = demoCfg.templates['10'];
+    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    ctx.reply('Now send one clear photo of the face you want to use.');
+});
+bot.action('demo_tmpl_15', (ctx) => {
+    const url = demoCfg.templates['15'];
+    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    ctx.reply('Now send one clear photo of the face you want to use.');
+});
 bot.action('mode_video', (ctx) => {
     ctx.session = { mode: 'video', step: 'awaiting_swap_photo' };
     ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
@@ -490,7 +518,13 @@ bot.on('text', async (ctx) => {
 });
 
 // Graceful Stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+let __botStopped = false;
+function safeStop(reason) {
+    if (__botStopped) return;
+    try { bot.stop(reason); } catch (_) {}
+    __botStopped = true;
+}
+process.once('SIGINT', () => safeStop('SIGINT'));
+process.once('SIGTERM', () => safeStop('SIGTERM'));
 
 module.exports = bot;
