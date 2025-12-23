@@ -13,8 +13,9 @@ const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
+const CHANNEL_ID = process.env.CHANNEL_ID;
 
-console.log('LOADED: new_backend/src/bot.js');
+console.log('🔥 INIT DEMO BOT');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 console.log('🔥 BOT CREATED');
@@ -167,6 +168,17 @@ bot.command('start', (ctx) => {
     console.log('🔥 /start HANDLER (DEMO MENU)');
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
+    if (ctx.chat && ctx.chat.type === 'private') {
+        const p5 = demoCfg.demoPrices['5'];
+        const p10 = demoCfg.demoPrices['10'];
+        const p15 = demoCfg.demoPrices['15'];
+        const s = demoCfg.packs.starter.points;
+        const pl = demoCfg.packs.plus.points;
+        const pr = demoCfg.packs.pro.points;
+        const approx = (pts, price) => Math.max(1, Math.floor(pts / price));
+        const line = `Welcome to the Face Swap Demo.\nYou can run 5s, 10s, or 15s sample swaps using your own face.\nStarter ≈ ${approx(s, p10)} demos • Plus ≈ ${approx(pl, p10)} demos • Pro ≈ ${approx(pr, p10)} demos.\nTap “Buy points” to top up, then tap “Create new demo”.`;
+        ctx.reply(line);
+    }
     ctx.reply(
         `👋 Welcome! You have ${user.points} points.`,
         Markup.inlineKeyboard([
@@ -176,6 +188,32 @@ bot.command('start', (ctx) => {
             [Markup.button.callback('Help', 'help')]
         ])
     );
+});
+
+bot.command('promo', async (ctx) => {
+    try {
+        const adminId = process.env.ADMIN_USER_ID ? String(process.env.ADMIN_USER_ID) : null;
+        const caller = String(ctx.from && ctx.from.id);
+        if (adminId && caller !== adminId) {
+            return ctx.reply('Forbidden');
+        }
+        if (!CHANNEL_ID) return ctx.reply('CHANNEL_ID missing');
+        const me = await bot.telegram.getMe();
+        const username = me && me.username ? me.username : '';
+        const cta = username ? `https://t.me/${username}?start=demo` : '';
+        const intro = `Run 5s/10s/15s Face Swap demos.\nTop up points, pick a template, upload your face, get results.\nStart: ${cta}`;
+        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro);
+        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: '5s Demo' });
+        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: '10s Demo' });
+        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: '15s Demo' });
+        await ctx.reply('Promo posted');
+    } catch (e) {
+        await ctx.reply(`Error: ${e.message}`);
+    }
 });
 
 bot.action('buy_points', async (ctx) => {
