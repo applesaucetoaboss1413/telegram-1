@@ -41,6 +41,7 @@ async function start() {
                 try {
                     await bot.telegram.setWebhook(fullUrl);
                     logger.info(`Telegram Webhook set: ${fullUrl}`);
+                    try { global.__BOT_RUNNING = 'webhook'; } catch (_) {}
                 } catch (e) {
                     logger.error(`ERROR: Failed to set Telegram webhook: ${e.message}`);
                     try {
@@ -48,11 +49,13 @@ async function start() {
                     } catch (_) {}
                     await bot.launch();
                     logger.info('Telegram Bot Started (Polling)');
+                    try { global.__BOT_RUNNING = 'polling'; } catch (_) {}
                 }
             } else {
                 logger.error('ERROR: PUBLIC_URL missing; webhook not set');
                 await bot.launch();
                 logger.info('Telegram Bot Started (Polling)');
+                try { global.__BOT_RUNNING = 'polling'; } catch (_) {}
             }
         } else {
             logger.warn('BOT_TOKEN missing, bot not started');

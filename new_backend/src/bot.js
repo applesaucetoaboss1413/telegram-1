@@ -521,7 +521,16 @@ bot.on('text', async (ctx) => {
 let __botStopped = false;
 function safeStop(reason) {
     if (__botStopped) return;
-    try { bot.stop(reason); } catch (_) {}
+    try {
+        const mode = typeof global.__BOT_RUNNING === 'string' ? global.__BOT_RUNNING : null;
+        if (mode === 'polling') {
+            try { bot.stop(reason); } catch (_) {}
+        } else if (mode === 'webhook') {
+            try { bot.telegram.deleteWebhook(); } catch (_) {}
+        } else {
+            // Unknown mode: avoid stop to prevent "Bot is not running!"
+        }
+    } catch (_) {}
     __botStopped = true;
 }
 process.once('SIGINT', () => safeStop('SIGINT'));
