@@ -24,4 +24,19 @@ const cfg = {
     }
 };
 
+// Calculate derived display values
+const pricePerPoint = cfg.packs.starter.price_cents / 100 / cfg.packs.starter.points;
+
+cfg.demoCosts = {
+    '5': { points: cfg.demoPrices['5'], usd: (cfg.demoPrices['5'] * pricePerPoint).toFixed(2) },
+    '10': { points: cfg.demoPrices['10'], usd: (cfg.demoPrices['10'] * pricePerPoint).toFixed(2) },
+    '15': { points: cfg.demoPrices['15'], usd: (cfg.demoPrices['15'] * pricePerPoint).toFixed(2) }
+};
+
+for (const key in cfg.packs) {
+    cfg.packs[key].priceDisplay = `$${(cfg.packs[key].price_cents / 100).toFixed(2)}`;
+    // Approx 10s demos
+    cfg.packs[key].approxDemos = Math.floor(cfg.packs[key].points / cfg.demoPrices['10']);
+}
+
 module.exports = cfg;

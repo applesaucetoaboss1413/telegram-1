@@ -169,16 +169,25 @@ bot.command('start', (ctx) => {
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
     if (ctx.chat && ctx.chat.type === 'private') {
-        const p10 = demoCfg.demoPrices['10'];
-        const s = demoCfg.packs.starter.points;
-        const pl = demoCfg.packs.plus.points;
-        const pr = demoCfg.packs.pro.points;
-        const approx = (pts) => Math.max(1, Math.floor(pts / p10));
-        const line = `Welcome to the Face Swap Demo.\nRun 5s / 10s / 15s Face Swap samples using your face.\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)\n\n1) Buy points\n2) Create new demo\n3) Pick length & base video\n4) Upload face`;
-        ctx.reply(line);
+        const p = demoCfg.packs;
+        const msg = `🎭 *Face Swap Demo*
+Turn any clip into a face swap demo in seconds.
+
+*Packs*
+• ${p.starter.label} – ${p.starter.points} pts (~${p.starter.approxDemos} demos) – ${p.starter.priceDisplay}
+• ${p.plus.label} – ${p.plus.points} pts (~${p.plus.approxDemos} demos) – ${p.plus.priceDisplay}
+• ${p.pro.label} – ${p.pro.points} pts (~${p.pro.approxDemos} demos) – ${p.pro.priceDisplay}
+
+*Steps*
+1. Buy points
+2. Create new demo
+3. Pick length & base video
+4. Upload face`;
+        ctx.replyWithMarkdown(msg);
     }
+    const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
     ctx.reply(
-        `👋 Welcome! You have ${user.points} points.`,
+        `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).`,
         Markup.inlineKeyboard([
             [Markup.button.callback('Create new demo', 'demo_new')],
             [Markup.button.callback('My demos', 'demo_list')],
@@ -299,9 +308,18 @@ bot.action('demo_base_template', async (ctx) => {
     const t5 = demoCfg.templates['5'];
     const t10 = demoCfg.templates['10'];
     const t15 = demoCfg.templates['15'];
-    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: '5s Demo' }); } catch (_) { await ctx.reply(`5s Demo: ${t5}`); } }
-    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: '10s Demo' }); } catch (_) { await ctx.reply(`10s Demo: ${t10}`); } }
-    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: '15s Demo' }); } catch (_) { await ctx.reply(`15s Demo: ${t15}`); } }
+
+    const c5 = demoCfg.demoCosts['5'];
+    const c10 = demoCfg.demoCosts['10'];
+    const c15 = demoCfg.demoCosts['15'];
+
+    const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
+    const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
+    const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+
+    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { await ctx.reply(`5s Demo: ${t5}\n${cap5}`); } }
+    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { await ctx.reply(`10s Demo: ${t10}\n${cap10}`); } }
+    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { await ctx.reply(`15s Demo: ${t15}\n${cap15}`); } }
     const kb = Markup.inlineKeyboard([
         [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
         [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
@@ -518,21 +536,18 @@ bot.on('text', async (ctx) => {
 });
 
 // Graceful Stop
-let __botStopped = false;
-function safeStop(reason) {
-    if (__botStopped) return;
+let stopped = false;
+async function safeStop(signal) {
+    if (stopped) return;
+    stopped = true;
+    console.log('info: safeStop called with', signal);
     try {
-        const mode = typeof global.__BOT_RUNNING === 'string' ? global.__BOT_RUNNING : null;
-        if (mode === 'polling') {
-            try { bot.stop(reason); } catch (_) {}
-        } else if (mode === 'webhook') {
-            try { bot.telegram.deleteWebhook(); } catch (_) {}
-        } else {
-            // Unknown mode: avoid stop to prevent "Bot is not running!"
-        }
-    } catch (_) {}
-    __botStopped = true;
+        await bot.stop(signal);
+    } catch (err) {
+        console.error('ERROR: safeStop failed:', err.message);
+    }
 }
+
 process.once('SIGINT', () => safeStop('SIGINT'));
 process.once('SIGTERM', () => safeStop('SIGTERM'));
 
