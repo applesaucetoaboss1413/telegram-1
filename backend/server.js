@@ -214,9 +214,20 @@ async function pollImageToVideoStatus(taskId) {
     task = result;
   }
   if (!task) return { status: 'NOT_FOUND' };
-  if (task.current_status === 'completed') return { status: 'COMPLETED', result_url: task.result_url };
-  if (task.current_status === 'failed') return { status: 'FAILED', error: task.failed_message };
-  if (task.current_status === 'processing') return { status: 'IN_PROGRESS' };
+  const curr = task.current_status || task.status || '';
+  if (curr === 'completed') {
+    try { console.log('[IMAGE2VIDEO STATUS MAP]', { taskId, current_status: curr, mapped_status: 'COMPLETED' }); } catch (_) {}
+    return { status: 'COMPLETED', result_url: task.result_url };
+  }
+  if (curr === 'failed' || curr === 'error') {
+    try { console.log('[IMAGE2VIDEO STATUS MAP]', { taskId, current_status: curr, mapped_status: 'FAILED' }); } catch (_) {}
+    return { status: 'FAILED', error: task.failed_message || task.error };
+  }
+  if (curr === 'processing' || curr === 'initialized' || curr === 'sent' || curr === 'in_progress' || curr === 'queued' || curr === 'pending') {
+    try { console.log('[IMAGE2VIDEO STATUS MAP]', { taskId, current_status: curr, mapped_status: 'IN_PROGRESS' }); } catch (_) {}
+    return { status: 'IN_PROGRESS' };
+  }
+  try { console.log('[IMAGE2VIDEO STATUS MAP]', { taskId, current_status: curr, mapped_status: 'UNKNOWN' }); } catch (_) {}
   return { status: 'UNKNOWN' };
 }
 

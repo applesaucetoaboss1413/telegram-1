@@ -119,9 +119,15 @@ const checkImage2VideoStatus = async (taskId) => {
         }
         const json = raw || {};
         const data = json && (json.data || json);
-        const status = data && data.current_status;
+        const curr = data && data.current_status;
         const resultUrl = data && data.result_url;
-        return { status, result_url: resultUrl };
+        let mapped = 'processing';
+        if (curr === 'completed') mapped = 'completed';
+        else if (curr === 'failed' || curr === 'error') mapped = 'failed';
+        else if (curr === 'processing' || curr === 'initialized' || curr === 'sent' || curr === 'in_progress' || curr === 'queued' || curr === 'pending') mapped = 'processing';
+        else mapped = 'processing';
+        try { logger.info('status_map', { type: 'image2video', id: taskId, current_status: curr, mapped_status: mapped }); } catch (_) {}
+        return { status: mapped, result_url: resultUrl };
     } catch (e) {
         const msg = e && e.message ? e.message : 'Unknown error';
         logger.error('a2e_poll_error', { type: 'image2video', endpoint, id: taskId, error: msg });

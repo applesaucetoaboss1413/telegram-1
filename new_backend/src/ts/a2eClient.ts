@@ -62,7 +62,15 @@ export async function checkImage2VideoStatus(taskId: string): Promise<PollResult
   try { json = JSON.parse(text); } catch {}
   const data: any = (json && json.data) || json;
   const s: string = (data && data.current_status) || '';
-  if (s === 'completed') return { status: 'completed', result_url: data.result_url || null };
-  if (s === 'failed') return { status: 'failed', error: data.failed_message || '' };
+  if (s === 'completed') {
+    try { console.log('[A2E STATUS MAP]', { taskId, current_status: s, mapped_status: 'completed' }); } catch {}
+    return { status: 'completed', result_url: data.result_url || null };
+  }
+  if (s === 'failed' || s === 'error') {
+    try { console.log('[A2E STATUS MAP]', { taskId, current_status: s, mapped_status: 'failed' }); } catch {}
+    return { status: 'failed', error: data.failed_message || '' };
+  }
+  const inProg = (s === 'processing' || s === 'initialized' || s === 'sent' || s === 'in_progress' || s === 'queued' || s === 'pending');
+  try { console.log('[A2E STATUS MAP]', { taskId, current_status: s, mapped_status: inProg ? 'processing' : 'processing' }); } catch {}
   return { status: 'processing' };
 }
