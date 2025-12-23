@@ -3,7 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "start": "node backend/server.js"
+    "start": "node new_backend/index.js",
+    "build": "npm --prefix new_backend run build",
+    "postinstall": "npm --prefix new_backend install && npm --prefix new_backend run build"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
