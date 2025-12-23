@@ -1,3 +1,5 @@
+console.log('🔥 INIT: new_backend/src/bot.js LOADING');
+
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
@@ -15,6 +17,7 @@ const demoCfg = require('./services/a2eConfig');
 console.log('LOADED: new_backend/src/bot.js');
 
 const bot = new Telegraf(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
+console.log('🔥 BOT: Telegraf instance exists. Ready for handlers.');
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
 const fs = require('fs');
 
@@ -166,7 +169,7 @@ bot.on('photo', async (ctx) => {
 
 // Bot Logic
 bot.command('start', (ctx) => {
-    console.log('DEBUG: /start handler called - DEMO BOT VERSION');
+    console.log('🔥 HANDLER: /start invoked. Rendering DEMO menu now.');
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
     ctx.reply(
