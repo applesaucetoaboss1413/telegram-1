@@ -164,7 +164,7 @@ bot.on('photo', async (ctx) => {
 });
 
 // Bot Logic
-bot.command('start', (ctx) => {
+bot.command('start', async (ctx) => {
     console.log('🔥 /start HANDLER (DEMO MENU)');
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
@@ -183,10 +183,27 @@ Turn any clip into a face swap demo in seconds.
 2. Create new demo
 3. Pick length & base video
 4. Upload face`;
-        ctx.replyWithMarkdown(msg);
+        await ctx.replyWithMarkdown(msg);
+
+        // Automatically send template examples
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
+        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
+        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+
+        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { } }
+        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { } }
+        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
     }
     const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
-    ctx.reply(
+    await ctx.reply(
         `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).`,
         Markup.inlineKeyboard([
             [Markup.button.callback('Create new demo', 'demo_new')],
