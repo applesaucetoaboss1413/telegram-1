@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 
 async function start() {
     try {
-        console.log('🔥 DEMO BOT LIVE: using new_backend/index.js');
+        console.log(`🔥 DEMO BOT LIVE: using PUBLIC_URL=${PUBLIC_URL || '<<missing>>'}`);
         // Start Queue
         queueService.start();
 
@@ -28,8 +28,12 @@ async function start() {
         });
 
         // Start Bot
-        const token = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+        const token = process.env.BOT_TOKEN;
         if (token) {
+            try {
+                const tail = token.slice(-4);
+                logger.info(`Using BOT_TOKEN (ends with ****${tail})`);
+            } catch (_) {}
             if (PUBLIC_URL && typeof PUBLIC_URL === 'string' && PUBLIC_URL.trim().length > 0) {
                 let domain = PUBLIC_URL.trim();
                 if (!/^https?:\/\//i.test(domain)) domain = 'https://' + domain;
@@ -38,7 +42,7 @@ async function start() {
                     await bot.telegram.setWebhook(fullUrl);
                     logger.info(`Telegram Webhook set: ${fullUrl}`);
                 } catch (e) {
-                    logger.warn(`Failed to set webhook, falling back to polling: ${e.message}`);
+                    logger.error(`ERROR: Failed to set Telegram webhook: ${e.message}`);
                     try {
                         await bot.telegram.deleteWebhook();
                     } catch (_) {}
@@ -46,9 +50,7 @@ async function start() {
                     logger.info('Telegram Bot Started (Polling)');
                 }
             } else {
-                try {
-                    await bot.telegram.deleteWebhook();
-                } catch (_) {}
+                logger.error('ERROR: PUBLIC_URL missing; webhook not set');
                 await bot.launch();
                 logger.info('Telegram Bot Started (Polling)');
             }
