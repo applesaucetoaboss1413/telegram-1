@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 
 async function start() {
     try {
+        console.log('🔥 DEMO BOT LIVE: using new_backend/index.js');
         // Start Queue
         queueService.start();
 

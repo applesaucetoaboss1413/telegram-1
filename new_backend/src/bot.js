@@ -1,4 +1,4 @@
-console.log('🔥 INIT: new_backend/src/bot.js LOADING');
+console.log('🔥 INIT DEMO BOT');
 
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
@@ -17,18 +17,13 @@ const demoCfg = require('./services/a2eConfig');
 console.log('LOADED: new_backend/src/bot.js');
 
 const bot = new Telegraf(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
-console.log('🔥 BOT: Telegraf instance exists. Ready for handlers.');
+console.log('🔥 BOT CREATED');
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
 const fs = require('fs');
 
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
 // Middleware
-try {
-    bot._handlers = {};
-    bot._middlewares = [];
-    console.log('DEBUG: Cleared existing bot handlers and middlewares');
-} catch (_) {}
 bot.use(session());
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
@@ -169,7 +164,7 @@ bot.on('photo', async (ctx) => {
 
 // Bot Logic
 bot.command('start', (ctx) => {
-    console.log('🔥 HANDLER: /start invoked. Rendering DEMO menu now.');
+    console.log('🔥 /start HANDLER (DEMO MENU)');
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
     ctx.reply(
