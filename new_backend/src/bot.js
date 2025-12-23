@@ -12,6 +12,8 @@ const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
 
+console.log('LOADED: new_backend/src/bot.js');
+
 const bot = new Telegraf(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
 const fs = require('fs');
@@ -19,6 +21,11 @@ const fs = require('fs');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
 // Middleware
+try {
+    bot._handlers = {};
+    bot._middlewares = [];
+    console.log('DEBUG: Cleared existing bot handlers and middlewares');
+} catch (_) {}
 bot.use(session());
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
@@ -159,6 +166,7 @@ bot.on('photo', async (ctx) => {
 
 // Bot Logic
 bot.command('start', (ctx) => {
+    console.log('DEBUG: /start handler called - DEMO BOT VERSION');
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
     ctx.reply(
