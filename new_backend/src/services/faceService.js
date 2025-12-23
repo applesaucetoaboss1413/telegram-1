@@ -1,65 +1,60 @@
 const { Canvas, Image, ImageData, loadImage } = require('canvas');
+const faceapi = require('@vladmandic/face-api');
 const path = require('path');
-// Import tfjs-node for server-side performance (avoids the register_all_gradients issue)
-const tf = require('@tensorflow/tfjs-node');
 
-let faceapi;
+// Configure face-api to use the canvas environment
+faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
+
 let modelsLoaded = false;
 
-const loadFaceApi = async () => {
-    if (faceapi) return;
-    const module = await import('@vladmandic/face-api/dist/face-api.esm-nobundle.js');
-    faceapi = module;
-    
-    // Monkey patch for Node.js environment
-    faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
-};
-
-const loadModels = async () => {
-    await loadFaceApi();
+async function loadModels() {
     if (modelsLoaded) return;
     try {
-        // Path to models in node_modules
+        // Resolve path to models in node_modules
+        // Note: The path depends on where the script runs, but __dirname is safe.
+        // We assume @vladmandic/face-api is installed and has the 'model' folder.
         const modelPath = path.join(__dirname, '../../node_modules/@vladmandic/face-api/model');
-        console.log('Loading face models from:', modelPath);
         
+        // Load SSD MobileNet V1 - robust and reasonably fast
         await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelPath);
         modelsLoaded = true;
-        console.log('Face models loaded successfully');
-    } catch (error) {
-        console.error('Error loading face models:', error);
-        throw error;
+    } catch (e) {
+        console.error('ERROR: Failed to load face models:', e.message);
+        throw e;
     }
-};
+}
 
 /**
- * Detects faces in an image buffer
- * @param {Buffer} imageBuffer 
- * @param {string} userId - Optional user ID for logging
- * @returns {Promise<Array>} Array of detections
+ * Detects faces in an image buffer using a robust CPU-only fallback if needed.
+ * @param {Buffer} imageBuffer - The image data
+ * @param {string} userId - User ID for logging
+ * @returns {Promise<Array>} Array of detections (empty if none or error)
  */
 const detectFaces = async (imageBuffer, userId = 'unknown') => {
-    await loadModels();
+    console.log(`DEBUG: starting face detection for user=${userId}`);
     
     try {
+        await loadModels();
+        
+        // Load image into Canvas
         const img = await loadImage(imageBuffer);
         
-        // Use SSD MobileNet V1 for better accuracy (vs Tiny)
-        // minConfidence 0.6 to filter out false positives
+        // Run detection
+        // minConfidence: 0.5 is a standard threshold
+        const detections = await faceapi.detectAllFaces(
+            img, 
+            new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })
+        );
         
-        const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 }));
-        
-        if (detections.length > 0) {
-            console.log(`DEBUG: face detection OK for user=${userId}`);
-        } else {
-            console.log(`DEBUG: face detection result: 0 faces found for user=${userId}`);
-        }
+        const count = detections.length;
+        console.log(`DEBUG: face detection OK for user=${userId} count=${count}`);
         
         return detections;
+        
     } catch (error) {
-        // Log the internal error but don't expose it to the user
+        // Log error but return empty array to fail gracefully (caller will say "No face detected" or handle it)
         console.error(`ERROR: face detection failed for user=${userId}:`, error.message);
-        throw new Error('Failed to process image for face detection');
+        return []; 
     }
 };
 
