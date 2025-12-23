@@ -45,7 +45,8 @@ console.log('DEBUG: Cloudinary configured with cloud_name:', process.env.CLOUDIN
 
 const a2eBaseUrl = 'https://video.a2e.ai/api/v1';
 const A2E_IMAGE2VIDEO_URL = 'https://video.a2e.ai/api/v1/userImage2Video/start';
-const A2E_IMAGE2VIDEO_STATUS_BASE = process.env.A2E_VIDEO_BASE || 'https://video.a2e.ai/api/v1';
+const A2E_API_RESOURCE_BASE = process.env.A2E_API_RESOURCE_BASE || 'https://video.a2e.ai/api/v1';
+const A2E_IMAGE2VIDEO_STATUS_BASE = A2E_API_RESOURCE_BASE;
 const QUALITY_NEGATIVE_PROMPT = 'bad anatomy, low quality, worst quality, blurry, text, watermark, logo, extra limbs, mutated hands, deformed, disfigured, poorly drawn, out of frame, ugly, tiling, noisy, sketch, cartoon, 3D render, monochrome, horror, unwanted styles';
 const FACESWAP_MAX_WAIT_SECONDS = Number(process.env.FACESWAP_MAX_WAIT_SECONDS || 900);
 const FACESWAP_POLL_INTERVAL_SECONDS = Number(process.env.FACESWAP_POLL_INTERVAL_SECONDS || 3);
@@ -1271,8 +1272,8 @@ function pollImage2Video(requestId, chatId) {
     if (tries > 100) {
        try {
          const jobInfo = DB.pending_swaps[requestId];
-         const userId = jobInfo && jobInfo.userId;
-         addAudit(userId, 0, 'timeout_img2vid', { requestId });
+          const userId = jobInfo && jobInfo.userId;
+          addAudit(userId, 0, 'timeout_img2vid', { requestId });
        } catch (e) {}
        if (chatId) bot.telegram.sendMessage(chatId, 'Task timed out.').catch(()=>{});
        if (DB.pending_swaps[requestId]) {
@@ -1284,6 +1285,7 @@ function pollImage2Video(requestId, chatId) {
        return;
     }
     try {
+      try { console.log('[ENV] A2E_API_RESOURCE_BASE', (process.env.A2E_API_RESOURCE_BASE || '')); } catch (_) {}
       const pollUrl = `${A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(requestId)}`;
       try { console.log('[IMAGE2VIDEO POLL] taskId', requestId, 'url', pollUrl); } catch (_) {}
       const pollResult = await pollImageToVideoStatus(requestId);

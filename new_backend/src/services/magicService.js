@@ -2,7 +2,7 @@ const axios = require('axios');
 const winston = require('winston');
 
 const A2E_KEY = process.env.A2E_API_KEY;
-const A2E_VIDEO_BASE = process.env.A2E_VIDEO_BASE || 'https://video.a2e.ai/api/v1';
+const A2E_API_RESOURCE_BASE = process.env.A2E_API_RESOURCE_BASE || 'https://video.a2e.ai/api/v1';
 const A2E_API_BASE = process.env.A2E_API_BASE || 'https://api.a2e.ai/api/v1';
 
 const logger = winston.createLogger({
@@ -12,7 +12,7 @@ const logger = winston.createLogger({
 });
 
 const startFaceSwap = async (faceUrl, videoUrl) => {
-    const endpoint = `${A2E_VIDEO_BASE}/userFaceSwapTask/add`;
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userFaceSwapTask/add`;
     const payload = { name: `faceswap_${Date.now()}`, face_url: faceUrl, video_url: videoUrl };
     const response = await axios.post(endpoint, payload, { headers: { Authorization: `Bearer ${A2E_KEY}` } });
     const json = response.data || {};
@@ -25,9 +25,9 @@ const startFaceSwap = async (faceUrl, videoUrl) => {
 const checkFaceSwapTaskStatus = async (taskId) => {
     let response;
     try {
-        response = await axios.get(`${A2E_VIDEO_BASE}/userFaceSwapTask/${encodeURIComponent(taskId)}`, { headers: { Authorization: `Bearer ${A2E_KEY}` } });
+        response = await axios.get(`${A2E_API_RESOURCE_BASE}/userFaceSwapTask/${encodeURIComponent(taskId)}`, { headers: { Authorization: `Bearer ${A2E_KEY}` } });
     } catch (e) {
-        response = await axios.get(`${A2E_VIDEO_BASE}/userFaceSwapTask/status`, { headers: { Authorization: `Bearer ${A2E_KEY}` }, params: { _id: taskId } });
+        response = await axios.get(`${A2E_API_RESOURCE_BASE}/userFaceSwapTask/status`, { headers: { Authorization: `Bearer ${A2E_KEY}` }, params: { _id: taskId } });
     }
     const json = response.data || {};
     let rec = null;
@@ -48,7 +48,7 @@ const checkFaceSwapTaskStatus = async (taskId) => {
 };
 
 const startFaceSwapPreview = async (faceUrl, videoUrl) => {
-    const endpoint = `${A2E_VIDEO_BASE}/userFaceSwapPreview/add`;
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userFaceSwapPreview/add`;
     const payload = { face_url: faceUrl, video_url: videoUrl };
     const response = await axios.post(endpoint, payload, { headers: { Authorization: `Bearer ${A2E_KEY}` } });
     const json = response.data || {};
@@ -59,7 +59,7 @@ const startFaceSwapPreview = async (faceUrl, videoUrl) => {
 };
 
 const checkFaceSwapPreviewStatus = async (previewId) => {
-    const endpoint = `${A2E_VIDEO_BASE}/userFaceSwapPreview/status`;
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userFaceSwapPreview/status`;
     const response = await axios.get(endpoint, { headers: { Authorization: `Bearer ${A2E_KEY}` }, params: { _id: previewId } });
     const json = response.data || {};
     let rec = null;
@@ -80,7 +80,7 @@ const checkFaceSwapPreviewStatus = async (previewId) => {
 };
 
 const startImage2Video = async (imageUrl, prompt) => {
-    const endpoint = `${A2E_VIDEO_BASE}/userImage2Video/start`;
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userImage2Video/start`;
     const payload = { name: `image2video_${Date.now()}`, image_url: imageUrl, prompt };
     const response = await axios.post(endpoint, payload, { headers: { Authorization: `Bearer ${A2E_KEY}` } });
     const json = response.data || {};
@@ -95,7 +95,8 @@ const startImage2Video = async (imageUrl, prompt) => {
 
 const checkImage2VideoStatus = async (taskId) => {
     // Provider has routed status under the video host; api host may return docs HTML
-    const endpoint = `${A2E_VIDEO_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
+    try { logger.info('env', { A2E_API_RESOURCE_BASE: (process.env.A2E_API_RESOURCE_BASE || '') }); } catch (_) {}
     try {
         const response = await axios.get(endpoint, { headers: { Authorization: `Bearer ${A2E_KEY}` }, responseType: 'json', validateStatus: () => true });
         const raw = response.data;

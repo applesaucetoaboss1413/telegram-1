@@ -26,11 +26,11 @@ export type PollResult =
   | { status: 'server_error'; error?: string }
   | { status: 'provider_error_html'; error?: string };
 
-export const A2E_VIDEO_BASE = process.env.A2E_VIDEO_BASE || 'https://video.a2e.ai/api/v1';
+export const A2E_API_RESOURCE_BASE = process.env.A2E_API_RESOURCE_BASE || 'https://video.a2e.ai/api/v1';
 export const A2E_API_KEY = process.env.A2E_API_KEY || '';
 
 export async function startImage2Video(payload: Image2VideoStartPayload): Promise<{ taskId: string }> {
-  const res = await fetch(`${A2E_VIDEO_BASE}/userImage2Video/start`, {
+  const res = await fetch(`${A2E_API_RESOURCE_BASE}/userImage2Video/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${A2E_API_KEY}` },
     body: JSON.stringify(payload),
@@ -45,7 +45,8 @@ export async function startImage2Video(payload: Image2VideoStartPayload): Promis
 }
 
 export async function checkImage2VideoStatus(taskId: string): Promise<PollResult> {
-  const endpoint = `${A2E_VIDEO_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
+  const endpoint = `${A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
+  try { console.log('[ENV] A2E_API_RESOURCE_BASE', (process.env.A2E_API_RESOURCE_BASE || '')); } catch {}
   const res = await fetch(endpoint, {
     method: 'GET',
     headers: { Authorization: `Bearer ${A2E_API_KEY}`, Accept: 'application/json' },
