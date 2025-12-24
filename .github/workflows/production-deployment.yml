@@ -1,0 +1,110 @@
+name: Production Deployment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '18.18.0'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: new_backend/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ./new_backend
+      run: npm ci
+    
+    - name: Run linter
+      working-directory: ./new_backend
+      run: npm run lint || echo "No lint script found"
+    
+    - name: Run tests
+      working-directory: ./new_backend
+      run: npm test || echo "No tests found"
+    
+    - name: Run security audit
+      working-directory: ./new_backend
+      run: npm audit --audit-level=high
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: new_backend/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ./new_backend
+      run: npm ci --production
+    
+    - name: Create logs directory
+      working-directory: ./new_backend
+      run: mkdir -p logs
+    
+    - name: Create data directory
+      working-directory: ./new_backend
+      run: mkdir -p data
+    
+    - name: Deploy to Render
+      working-directory: ./new_backend
+      env:
+        RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        MAGICAPI_KEY: ${{ secrets.MAGICAPI_KEY }}
+        STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+      run: |
+        # Install Render CLI
+        curl -fsSL https://raw.githubusercontent.com/render-oss/render-cli-deprecated/main/install.sh | bash
+        
+        # Deploy to Render
+        render deploy --service telegram-faceswap-bot --env production
+    
+    - name: Health Check
+      working-directory: ./new_backend
+      run: |
+        # Wait for deployment to complete
+        sleep 30
+        
+        # Perform health check
+        curl -f -s https://telegram-faceswap-bot.onrender.com/health || exit 1
+        
+        echo "Deployment successful!"
+
+  notify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}

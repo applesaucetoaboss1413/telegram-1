@@ -1,58 +1,28 @@
-# Telegram Bot + Channel Architecture
+# Telegram A2E Integration
 
-## Overview
+## Image → Video Flow
+- User sends a photo to the bot using `/image2video` or the button.
+- Bot uploads the image to Cloudinary and asks for a motion prompt.
+- Backend calls A2E Image-to-Video with `image_url` and `prompt`.
+- Polls the status until `completed` and sends the final video URL to the chat.
 
-This project implements a Telegram bot as the primary interface, integrated with a channel and a linked discussion group. The previous Mini App has been removed.
+## Endpoints
+- Start: `POST /userImageToVideoTask/add`
+- Status: `GET /userImageToVideoTask/status`
 
-## Features
+## Credits
+- Fixed price per job: `A2E_IMAGE2VIDEO_COST` (default 10 points).
+- Deduct on start; refund if A2E reports `failed` or timeout.
+- Logs include user id, image_url, prompt, task id, and cost.
 
-- Points system with daily check-in, referrals, promotions, and leaderboards
-- Faceswap and short video creation
-- Stripe checkout for buying points with tier bonuses and first-recharge bonus
-- Promo rewards with 20% cash credit for promoters
+## Environment
+- `A2E_API_KEY`
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+- `A2E_IMAGE2VIDEO_COST` (optional)
 
-## Setup
+## Next Services (Scaffold)
+- Avatar/talking photo: image + script via `Generate Avatar Videos` family.
+- Face swap video: enforce `face_url` as image and `video_url` as real video.
+- Link-to-video: accept URL; call `/api/link_to_videos/` to generate narrated video.
 
-1. Create a bot with BotFather and get `BOT_TOKEN` and bot username
-2. Create a Telegram channel and add the bot as admin
-3. Link a discussion group to the channel and add the bot, disable privacy mode
-4. Set environment variables in `backend/.env`:
-
-```
-STRIPE_SECRET_KEY=sk_test_replace
-MAGICAPI_KEY=replace
-BOT_TOKEN=replace
-BOT_USERNAME=replace
-PUBLIC_ORIGIN=http://localhost:3000
-```
-
-## Run
-
-```
-npm start
-```
-
-## Bot Commands
-
-- `/start` shows points, invite and promo links, and menu
-- `/checkin` awards +1 point per day
-- `/faceswap` starts faceswap; send a face photo then a target video
-- `/leaderboard` shows top inviters and promoters
-- `/confirm <session_id>` credits points after Stripe payment
-
-## Buying Points
-
-Use the bot menu to select a package and get a Stripe checkout link. After payment, use `/confirm <session_id>` to credit points.
-
-## Channel Guidelines
-
-- Add the bot as admin
-- Enable comments via a linked discussion group
-- Use the bot to post leaderboards and announcements
-
-## Testing
-
-- Verify command responses in private chat and in the linked group
-- Test faceswap photo+video flow
-- Test Stripe checkout and `/confirm`
-
+Enable each by creating dedicated start/status helpers, wiring commands, and using the shared polling helper pattern. Configure costs per service via env and integrate with the existing credits system.

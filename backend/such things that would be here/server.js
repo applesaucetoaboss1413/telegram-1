@@ -267,29 +267,35 @@ async function downloadTo(url, dest) {
 
 // --- MagicAPI Integration ---
 
+async function callMcpTool(name, args) {
+  return await new Promise((resolve, reject) => {
+    const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
+    const payload = JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name, arguments: args } });
+    const reqOpts = { hostname: 'prod.api.market', path: '/api/mcp/magicapi/faceswap-v2', method: 'POST', headers: { 'x-api-market-key': key, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }, timeout: 30000 };
+    const r = https.request(reqOpts, res => {
+      let buf = '';
+      res.on('data', c => buf += c);
+      res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(e); } });
+    });
+    r.on('error', reject);
+    r.on('timeout', () => { r.destroy(); reject(new Error('MCP Request Timed Out')); });
+    r.write(payload);
+    r.end();
+  });
+}
+
+function getAny(obj, keys) {
+  for (const k of keys) {
+    if (obj && typeof obj === 'object' && k in obj) return obj[k];
+  }
+  return undefined;
+}
+
 async function getFileUrl(ctx, fileId, localPath) {
   try {
-    // ALWAYS use the direct Telegram link. 
-    // MagicAPI needs a public URL. Telegram file links are public (with token) and valid for 1h.
-    const link = await ctx.telegram.getFileLink(fileId);
-    let url = link.href;
-
-    // MagicAPI workaround: Append extension if missing (Telegram URLs often lack it)
-    try {
-        const urlObj = new URL(url);
-        const ext = path.extname(urlObj.pathname);
-        if (!ext || ext.length < 2) {
-            const localExt = path.extname(localPath);
-            if (localExt) {
-                console.log(`Appending extension ${localExt} to URL as fragment`);
-                // Use Fragment to avoid breaking download while hinting extension to API
-                url += `#image${localExt}`; 
-            }
-        }
-    } catch (e) { console.error('URL parse error', e); }
-
-    console.log('Using Telegram Link:', url);
-    return url;
+    const filename = path.basename(localPath);
+    const publicUrl = `${PUBLIC_BASE}/uploads/${filename}`;
+    return publicUrl;
   } catch (e) {
     console.error('Failed to get telegram file link', e);
     return null;
@@ -332,48 +338,13 @@ async function runFaceswap(ctx, u, swapPath, targetPath, swapFileId, targetFileI
       return { error: 'Server config error', points: user.points };
   }
 
-  const endpoint = isVideo 
-    ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
-    : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
-  
-  const payload = JSON.stringify({
-    input: {
-      swap_image: swapUrl,
-      [isVideo ? 'target_video' : 'target_image']: targetUrl
-    }
-  });
-
-  const reqOpts = {
-    hostname: 'api.magicapi.dev',
-    path: endpoint,
-    method: 'POST',
-    timeout: 30000, // 30s timeout
-    headers: {
-      'x-magicapi-key': key,
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(payload)
-    }
-  };
+  const toolName = isVideo ? 'runfaceswapvideo' : 'runfaceswapimage';
+  const args = { body: { input: { swap_image: swapUrl, [isVideo ? 'target_video' : 'target_image']: targetUrl } } };
 
   try {
-    const result = await new Promise((resolve, reject) => {
-      const r = https.request(reqOpts, res => {
-        let buf = '';
-        res.on('data', c => buf+=c);
-        res.on('end', () => {
-          try { resolve(JSON.parse(buf)); } catch(e) { reject(e); }
-        });
-      });
-      r.on('error', reject);
-      r.on('timeout', () => {
-        r.destroy();
-        reject(new Error('API Request Timed Out'));
-      });
-      r.write(payload);
-      r.end();
-    });
+    const result = await callMcpTool(toolName, args);
 
-    const requestId = result && (result.request_id || result.requestId || result.id);
+    const requestId = getAny(result, ['request_id', 'requestId', 'id']) || getAny(result && result.result, ['request_id', 'requestId', 'id']);
     if (!requestId) {
       user.points += cost;
       saveDB();
@@ -413,7 +384,6 @@ function pollMagicResult(requestId, chatId) {
   let tries = 0;
   const job = DB.pending_swaps[requestId];
   const isVideo = job ? job.isVideo : true; 
-  const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
   
   const poll = () => {
     tries++;
@@ -435,94 +405,52 @@ function pollMagicResult(requestId, chatId) {
         bot.telegram.sendMessage(chatId, `Still processing... (${tries * 3}s elapsed)`).catch(()=>{});
     }
 
-    const typePath = isVideo ? 'video' : 'image';
-    const req = https.request({
-      hostname: 'api.magicapi.dev',
-      path: `/api/v1/magicapi/faceswap-v2/faceswap/${typePath}/status/${requestId}`,
-      method: 'GET',
-      timeout: 10000, // 10s timeout
-      headers: { 'x-magicapi-key': key, 'Content-Type': 'application/json' }
-    }, res => {
-      let buf=''; res.on('data', c=>buf+=c); res.on('end', async () => {
-        try {
-          const j = JSON.parse(buf);
-          const status = (j.status || j.state || '').toLowerCase();
-          
-          if (status.includes('success') || status.includes('done') || status.includes('completed')) {
-            // Extract output URL or Base64 (handle object output for video V2)
-            let outData = j.output || j.result || j.url || j.image_url || j.video_url;
-            if (outData && typeof outData === 'object') {
-               outData = outData.video_url || outData.image_url || outData.url || Object.values(outData)[0];
-            }
-            const finalUrl = Array.isArray(outData) ? outData[outData.length-1] : outData;
-            
-            if (finalUrl) {
-              const isBase64 = String(finalUrl).startsWith('data:');
-              const ext = isBase64 ? 'jpg' : (String(finalUrl).split('.').pop() || 'dat').split('?')[0];
-              const dest = path.join(outputsDir, `result_${Date.now()}.${ext}`);
-              
-              if (isBase64) {
-                const base64Data = finalUrl.split(',')[1];
-                fs.writeFileSync(dest, base64Data, 'base64');
-              } else {
-                await downloadTo(finalUrl, dest);
-              }
-              
-              const filename = path.basename(dest);
-              if (!DB.api_results) DB.api_results = {};
-              DB.api_results[requestId] = { status: 'success', output: filename, url: `${PUBLIC_BASE}/outputs/${filename}` };
-
-              if (chatId) {
-                if (dest.endsWith('mp4')) await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) });
-                else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
-              }
-              
-              // Cleanup output file after sending (delay slightly to ensure send completes)
-              setTimeout(() => cleanupFiles([dest]), 10000); // 10s delay
-            } else {
-               if (chatId) bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
-            }
-            
-            // Cleanup on success
-            if (DB.pending_swaps[requestId]) {
-              delete DB.pending_swaps[requestId];
-              saveDB();
-            }
-            
-          } else if (status.includes('fail') || status.includes('error')) {
-            const rawError = JSON.stringify(j);
-            const errorMsg = j.error || j.message || j.reason || (j.details ? JSON.stringify(j.details) : `Status: ${status}`);
-            if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).\nDebug: ${rawError.substring(0, 200)}`).catch(()=>{});
-            console.error('Swap Failed Details:', rawError);
-            
+    (async () => {
+      try {
+        const statusTool = isVideo ? 'getfaceswapvideostatus' : 'getfaceswapimagestatus';
+        const resp = await callMcpTool(statusTool, { id: requestId });
+        const j = resp && resp.result ? resp.result : resp;
+        const status = String(getAny(j, ['status', 'state']) || '').toLowerCase();
+        if (status.includes('success') || status.includes('done') || status.includes('completed')) {
+          let outData = getAny(j, ['output', 'result', 'url', 'image_url', 'video_url']);
+          if (outData && typeof outData === 'object') outData = outData.video_url || outData.image_url || outData.url || Object.values(outData)[0];
+          const finalUrl = Array.isArray(outData) ? outData[outData.length - 1] : outData;
+          if (finalUrl) {
+            const isBase64 = String(finalUrl).startsWith('data:');
+            const ext = isBase64 ? 'jpg' : (String(finalUrl).split('.').pop() || 'dat').split('?')[0];
+            const dest = path.join(outputsDir, `result_${Date.now()}.${ext}`);
+            if (isBase64) fs.writeFileSync(dest, finalUrl.split(',')[1], 'base64'); else await downloadTo(finalUrl, dest);
+            const filename = path.basename(dest);
             if (!DB.api_results) DB.api_results = {};
-            DB.api_results[requestId] = { status: 'failed', error: errorMsg };
-            
-            // Refund points on failure
-            if (job && job.userId) {
-              const u = getOrCreateUser(job.userId);
-              const cost = job.isVideo ? 15 : 9; 
-              u.points += cost;
-              saveDB();
-              addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
-              if (chatId) bot.telegram.sendMessage(chatId, `Refunded ${cost} points due to failure.`).catch(()=>{});
+            DB.api_results[requestId] = { status: 'success', output: filename, url: `${PUBLIC_BASE}/outputs/${filename}` };
+            if (chatId) {
+              if (dest.endsWith('mp4')) await bot.telegram.sendVideo(chatId, { source: fs.createReadStream(dest) });
+              else await bot.telegram.sendPhoto(chatId, { source: fs.createReadStream(dest) });
             }
-            // Cleanup on fail
-            if (DB.pending_swaps[requestId]) {
-              delete DB.pending_swaps[requestId];
-              saveDB();
-            }
-
+            setTimeout(() => cleanupFiles([dest]), 10000);
           } else {
-            // Still processing
-            setTimeout(poll, 3000);
+            if (chatId) bot.telegram.sendMessage(chatId, 'Success, but no output URL found.').catch(()=>{});
           }
-        } catch (e) { setTimeout(poll, 3000); }
-      });
-    });
-    req.on('error', () => setTimeout(poll, 3000));
-    req.on('timeout', () => { req.destroy(); setTimeout(poll, 3000); });
-    req.end();
+          if (DB.pending_swaps[requestId]) { delete DB.pending_swaps[requestId]; saveDB(); }
+        } else if (status.includes('fail') || status.includes('error')) {
+          const errorMsg = getAny(j, ['error', 'message', 'reason']) || `Status: ${status}`;
+          if (chatId) bot.telegram.sendMessage(chatId, `Task failed: ${errorMsg}. (Refunded).`).catch(()=>{});
+          if (!DB.api_results) DB.api_results = {};
+          DB.api_results[requestId] = { status: 'failed', error: errorMsg };
+          if (job && job.userId) {
+            const u = getOrCreateUser(job.userId);
+            const cost = job.isVideo ? 15 : 9; 
+            u.points += cost;
+            saveDB();
+            addAudit(job.userId, cost, 'refund_failed_job', { requestId, error: errorMsg });
+            if (chatId) bot.telegram.sendMessage(chatId, `Refunded ${cost} points due to failure.`).catch(()=>{});
+          }
+          if (DB.pending_swaps[requestId]) { delete DB.pending_swaps[requestId]; saveDB(); }
+        } else {
+          setTimeout(poll, 3000);
+        }
+      } catch (_) { setTimeout(poll, 3000); }
+    })();
   };
   
   // Start polling
@@ -962,41 +890,10 @@ app.post('/faceswap', upload.fields([{ name: 'swap', maxCount: 1 }, { name: 'tar
     const swapUrl = `${PUBLIC_BASE}/uploads/${path.basename(swapPath)}`;
     const targetUrl = `${PUBLIC_BASE}/uploads/${path.basename(targetPath)}`;
     
-    // Call MagicAPI
-    const key = process.env.MAGICAPI_KEY || process.env.API_MARKET_KEY;
-    const endpoint = isVideo 
-      ? '/api/v1/magicapi/faceswap-v2/faceswap/video/run'
-      : '/api/v1/magicapi/faceswap-v2/faceswap/image/run';
-      
-    const payload = JSON.stringify({
-      input: {
-        swap_image: swapUrl,
-        [isVideo ? 'target_video' : 'target_image']: targetUrl
-      }
-    });
+    const toolName = isVideo ? 'runfaceswapvideo' : 'runfaceswapimage';
+    const result = await callMcpTool(toolName, { body: { input: { swap_image: swapUrl, [isVideo ? 'target_video' : 'target_image']: targetUrl } } });
     
-    const reqOpts = {
-      hostname: 'api.magicapi.dev',
-      path: endpoint,
-      method: 'POST',
-      headers: {
-        'x-magicapi-key': key,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    };
-    
-    const result = await new Promise((resolve, reject) => {
-      const r = https.request(reqOpts, res => {
-        let buf = ''; res.on('data', c => buf+=c);
-        res.on('end', () => { try { resolve(JSON.parse(buf)); } catch(e) { reject(e); } });
-      });
-      r.on('error', reject);
-      r.write(payload);
-      r.end();
-    });
-    
-    const requestId = result && (result.request_id || result.requestId || result.id);
+    const requestId = getAny(result, ['request_id', 'requestId', 'id']) || getAny(result && result.result, ['request_id', 'requestId', 'id']);
     if (!requestId) {
         // Refund
         u.points += cost;
@@ -1135,6 +1032,13 @@ app.listen(PORT, async () => {
         console.log('Webhook successfully set with Telegram.');
       } catch (e) {
         console.error('FAILED to set Webhook:', e.message);
+        try { await bot.telegram.deleteWebhook(); } catch(_) {}
+        try {
+          await bot.launch();
+          console.log('Bot launched via Polling (Webhook fallback)');
+        } catch (pollErr) {
+          console.error('Bot polling launch failed after webhook error', pollErr);
+        }
       }
     } else {
       console.log('Starting in POLLING mode (Webhook disabled)...');
