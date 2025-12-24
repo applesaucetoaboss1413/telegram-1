@@ -15,6 +15,7 @@ const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2
 const demoCfg = require('./services/a2eConfig');
 const PROMO_CHANNEL_ID = -1002302324707;
 const OWNER_DM_ID = 8063916626;
+const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
 
 console.log('🔥 INIT DEMO BOT');
 
@@ -40,6 +41,10 @@ bot.use(async (ctx, next) => {
     } catch (_) {}
     return next();
 });
+
+try {
+    logger.info('boot', { buildId: BUILD_ID, promoChannelId: PROMO_CHANNEL_ID, ownerDmId: OWNER_DM_ID });
+} catch (_) {}
 
 const normalizeNumericTargetId = (targetId) => {
     if (targetId === undefined || targetId === null) return null;
