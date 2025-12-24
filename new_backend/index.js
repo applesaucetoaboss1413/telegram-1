@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { bot, postStartupPromo } = require('./src/bot');
+const { bot, runPromo } = require('./src/bot');
 const app = require('./src/server');
 const queueService = require('./src/services/queueService');
 const winston = require('winston');
@@ -69,7 +69,7 @@ async function start() {
     
     // Trigger startup promo after a short delay
     setTimeout(() => {
-        postStartupPromo().catch(err => logger.error('Startup promo failed:', err));
+        runPromo().catch(err => logger.error('Startup promo failed:', err));
     }, 5000);
 }
 
