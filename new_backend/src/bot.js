@@ -219,6 +219,41 @@ Turn any clip into a face swap demo in seconds.
 
 
 
+async function postStartupPromo() {
+    try {
+        if (!CHANNEL_ID) throw new Error('CHANNEL_ID missing');
+        const me = await bot.telegram.getMe();
+        const username = me && me.username ? me.username : '';
+        const cta = `https://t.me/${username}?start=demo`;
+
+        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
+        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
+        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
+        
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
+        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
+        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
+
+        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
+        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
+        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
+        
+        logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
+        logger.info('posted template video 5s/10s/15s to channel');
+    } catch (e) {
+        logger.error(`ERROR: cannot post startup promo – CHANNEL_ID or demo URLs missing. ${e.message}`);
+        throw e;
+    }
+}
+
 // Auto-run promo on startup
 (async () => {
     if (process.env.NODE_ENV === 'production' || process.env.RUN_PROMO_ON_START === 'true') {
