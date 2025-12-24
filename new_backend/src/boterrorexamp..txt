@@ -13,7 +13,7 @@ const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
-const CHANNEL_ID = process.env.CHANNEL_ID || '-1002302324707';
+const CHANNEL_ID = process.env.CHANNEL_ID;
 
 console.log('🔥 INIT DEMO BOT');
 
@@ -217,7 +217,61 @@ Turn any clip into a face swap demo in seconds.
     );
 });
 
+bot.command('promo', async (ctx) => {
+    try {
+        const adminId = process.env.ADMIN_USER_ID ? String(process.env.ADMIN_USER_ID) : null;
+        const caller = String(ctx.from && ctx.from.id);
+        if (adminId && caller !== adminId) {
+            return ctx.reply('Forbidden');
+        }
+        if (!CHANNEL_ID) return ctx.reply('CHANNEL_ID missing');
+        const me = await bot.telegram.getMe();
+        const username = me && me.username ? me.username : '';
+        const cta = `https://t.me/${username}?start=demo`;
 
+        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
+        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
+        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
+        
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
+        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
+        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
+
+        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
+        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
+        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
+        
+        logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
+        logger.info('posted template video 5s/10s/15s to channel');
+    } catch (e) {
+        logger.error(`ERROR: cannot post startup promo – CHANNEL_ID or demo URLs missing. ${e.message}`);
+    }
+}
+
+// Auto-run promo on startup
+(async () => {
+    if (process.env.NODE_ENV === 'production' || process.env.RUN_PROMO_ON_START === 'true') {
+        // Wait a few seconds for bot to be ready
+        setTimeout(() => postStartupPromo(), 5000);
+    }
+})();
+
+bot.command('promo', async (ctx) => {
+    try {
+        await postStartupPromo();
+        await ctx.reply('✅ Promo posted to channel successfully.');
+    } catch (e) {
+        await ctx.reply(`Error: ${e.message}`);
+    }
+});
 
 async function postStartupPromo() {
     try {
@@ -254,26 +308,6 @@ async function postStartupPromo() {
     }
 }
 
-// Startup promo triggered via index.js
-async function runPromo() {
-    try {
-        await postStartupPromo();
-    } catch (e) {
-        logger.error('Manual promo failed', { error: e.message });
-    }
-}
-
-bot.command('promo', async (ctx) => {
-    try {
-        await postStartupPromo();
-        await ctx.reply('✅ Promo posted to channel successfully.');
-    } catch (e) {
-        await ctx.reply(`Error: ${e.message}`);
-    }
-});
-
-
-
 bot.action('buy_points', async (ctx) => {
     ctx.answerCbQuery();
     ctx.reply(
@@ -286,23 +320,19 @@ bot.action('buy_points', async (ctx) => {
     );
 });
 
-bot.action('buy_points_menu', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const p10 = demoCfg.demoPrices['10'];
-        const approx = (pts) => Math.max(1, Math.floor(pts / p10));
-        const s = demoCfg.packs.starter.points;
-        const pl = demoCfg.packs.plus.points;
-        const pr = demoCfg.packs.pro.points;
-        const text = `Choose a credit pack:\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)`;
-        await ctx.reply(text, Markup.inlineKeyboard([
-            [Markup.button.callback(`${demoCfg.packs.starter.label} – ${s} pts`, 'buy_pack_starter')],
-            [Markup.button.callback(`${demoCfg.packs.plus.label} – ${pl} pts`, 'buy_pack_plus')],
-            [Markup.button.callback(`${demoCfg.packs.pro.label} – ${pr} pts`, 'buy_pack_pro')],
-        ]));
-    } catch (e) {
-        logger.error('buy_points_menu action failed', { error: e.message });
-    }
+bot.action('buy_points_menu', (ctx) => {
+    ctx.answerCbQuery();
+    const p10 = demoCfg.demoPrices['10'];
+    const approx = (pts) => Math.max(1, Math.floor(pts / p10));
+    const s = demoCfg.packs.starter.points;
+    const pl = demoCfg.packs.plus.points;
+    const pr = demoCfg.packs.pro.points;
+    const text = `Choose a credit pack:\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)`;
+    ctx.reply(text, Markup.inlineKeyboard([
+        [Markup.button.callback(`${demoCfg.packs.starter.label} – ${s} pts`, 'buy_pack_starter')],
+        [Markup.button.callback(`${demoCfg.packs.plus.label} – ${pl} pts`, 'buy_pack_plus')],
+        [Markup.button.callback(`${demoCfg.packs.pro.label} – ${pr} pts`, 'buy_pack_pro')],
+    ]));
 });
 
 async function startCheckout(ctx, pack) {
@@ -322,231 +352,131 @@ async function startCheckout(ctx, pack) {
             cancel_url: process.env.STRIPE_CANCEL_URL || 'https://t.me/YOUR_BOT?start=cancel',
             client_reference_id: String(ctx.from.id),
         });
-        await ctx.reply(
-            `You selected *${pack.label}*.\n\nTap the button below to complete your payment.`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '💳 Proceed to payment', url: session.url }]],
-                },
-            }
-        );
+        ctx.reply(`Proceed to payment: ${session.url}`);
     } catch (e) {
-        logger.error('startCheckout failed', { error: e.message, pack: pack.label, userId: ctx.from.id });
         ctx.reply('❌ Payment system error. Please try again later.');
     }
 }
 
-bot.action('buy_pack_starter', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.starter);
-});
-bot.action('buy_pack_plus', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.plus);
-});
-bot.action('buy_pack_pro', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.pro);
+bot.action('buy_pack_starter', (ctx) => startCheckout(ctx, demoCfg.packs.starter));
+bot.action('buy_pack_plus', (ctx) => startCheckout(ctx, demoCfg.packs.plus));
+bot.action('buy_pack_pro', (ctx) => startCheckout(ctx, demoCfg.packs.pro));
+
+bot.action('help', (ctx) => {
+    ctx.reply('Create short demo videos. Buy points, choose length, select base video, send one clear face photo, and receive your demo. Keep uploads within the chosen time limit.');
 });
 
-bot.action('help', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        await ctx.reply('Create short demo videos. Buy points, choose length, select base video, send one clear face photo, and receive your demo. Keep uploads within the chosen time limit.');
-    } catch (e) {
-        logger.error('help action failed', { error: e.message });
-    }
+bot.action('demo_list', (ctx) => {
+    ctx.reply('No stored demos yet.');
 });
 
-bot.action('demo_list', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        await ctx.reply('No stored demos yet.');
-    } catch (e) {
-        logger.error('demo_list action failed', { error: e.message });
-    }
+bot.action('demo_new', (ctx) => {
+    const uid = String(ctx.from.id);
+    const u = getUser(uid);
+    ctx.session = { mode: 'demo', step: 'choose_length' };
+    ctx.reply(
+        'Choose demo length:',
+        Markup.inlineKeyboard([
+            [Markup.button.callback(`5 seconds – ${demoCfg.demoPrices['5']} points`, 'demo_len_5')],
+            [Markup.button.callback(`10 seconds – ${demoCfg.demoPrices['10']} points`, 'demo_len_10')],
+            [Markup.button.callback(`15 seconds – ${demoCfg.demoPrices['15']} points`, 'demo_len_15')],
+        ])
+    );
 });
 
-bot.action('demo_new', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const uid = String(ctx.from.id);
-        const u = getUser(uid);
-        ctx.session = { mode: 'demo', step: 'choose_length' };
-        await ctx.reply(
-            'Choose demo length:',
-            Markup.inlineKeyboard([
-                [Markup.button.callback(`5 seconds – ${demoCfg.demoPrices['5']} points`, 'demo_len_5')],
-                [Markup.button.callback(`10 seconds – ${demoCfg.demoPrices['10']} points`, 'demo_len_10')],
-                [Markup.button.callback(`15 seconds – ${demoCfg.demoPrices['15']} points`, 'demo_len_15')],
-            ])
-        );
-    } catch (e) {
-        logger.error('demo_new action failed', { error: e.message, userId: ctx.from.id });
-    }
-});
-
-bot.action('demo_len_5', async (ctx) => { 
-    try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
-    } catch (e) {
-        logger.error('demo_len_5 action failed', { error: e.message });
-    }
-});
-bot.action('demo_len_10', async (ctx) => { 
-    try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
-    } catch (e) {
-        logger.error('demo_len_10 action failed', { error: e.message });
-    }
-});
-bot.action('demo_len_15', async (ctx) => { 
-    try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
-    } catch (e) {
-        logger.error('demo_len_15 action failed', { error: e.message });
-    }
-});
+bot.action('demo_len_5', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_10', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_15', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
 
 bot.action('demo_base_template', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
+    ctx.answerCbQuery();
+    const t5 = demoCfg.templates['5'];
+    const t10 = demoCfg.templates['10'];
+    const t15 = demoCfg.templates['15'];
 
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
+    const c5 = demoCfg.demoCosts['5'];
+    const c10 = demoCfg.demoCosts['10'];
+    const c15 = demoCfg.demoCosts['15'];
 
-        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
-        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
-        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+    const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
+    const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
+    const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
 
-        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { await ctx.reply(`5s Demo: ${t5}\n${cap5}`); } }
-        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { await ctx.reply(`10s Demo: ${t10}\n${cap10}`); } }
-        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { await ctx.reply(`15s Demo: ${t15}\n${cap15}`); } }
-        const kb = Markup.inlineKeyboard([
-            [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
-            [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
-            [Markup.button.callback('Use 15s template demo', 'demo_tmpl_15')],
-        ]);
-        await ctx.reply('Pick a template to use:', kb);
-    } catch (e) {
-        logger.error('demo_base_template action failed', { error: e.message });
-    }
+    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { await ctx.reply(`5s Demo: ${t5}\n${cap5}`); } }
+    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { await ctx.reply(`10s Demo: ${t10}\n${cap10}`); } }
+    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { await ctx.reply(`15s Demo: ${t15}\n${cap15}`); } }
+    const kb = Markup.inlineKeyboard([
+        [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
+        [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
+        [Markup.button.callback('Use 15s template demo', 'demo_tmpl_15')],
+    ]);
+    await ctx.reply('Pick a template to use:', kb);
 });
 
-bot.action('demo_base_user', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const d = ctx.session && ctx.session.duration;
-        ctx.session.step = 'awaiting_base_video';
-        await ctx.reply(`Send a video that is ${d} seconds or less.`);
-    } catch (e) {
-        logger.error('demo_base_user action failed', { error: e.message });
-    }
+bot.action('demo_base_user', (ctx) => {
+    ctx.answerCbQuery();
+    const d = ctx.session && ctx.session.duration;
+    ctx.session.step = 'awaiting_base_video';
+    ctx.reply(`Send a video that is ${d} seconds or less.`);
 });
 
-bot.action('demo_tmpl_5', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const url = demoCfg.templates['5'];
-        if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
-        
-        ctx.session.mode = 'demo';
-        ctx.session.duration = 5;
-        ctx.session.price = demoCfg.demoPrices['5'];
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-        
-        console.log(`DEBUG: demo_tmpl_5 handler, base_url=${url}`);
-        await ctx.reply('Now send one clear photo of the face you want to use.');
-    } catch (e) {
-        logger.error('demo_tmpl_5 action failed', { error: e.message });
-    }
+bot.action('demo_tmpl_5', (ctx) => {
+    const url = demoCfg.templates['5'];
+    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
+    
+    ctx.session.mode = 'demo';
+    ctx.session.duration = 5;
+    ctx.session.price = demoCfg.demoPrices['5'];
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    
+    console.log(`DEBUG: demo_tmpl_5 handler, base_url=${url}`);
+    ctx.reply('Now send one clear photo of the face you want to use.');
 });
-bot.action('demo_tmpl_10', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const url = demoCfg.templates['10'];
-        if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
-        
-        ctx.session.mode = 'demo';
-        ctx.session.duration = 10;
-        ctx.session.price = demoCfg.demoPrices['10'];
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-        
-        console.log(`DEBUG: demo_tmpl_10 handler, base_url=${url}`);
-        await ctx.reply('Now send one clear photo of the face you want to use.');
-    } catch (e) {
-        logger.error('demo_tmpl_10 action failed', { error: e.message });
-    }
+bot.action('demo_tmpl_10', (ctx) => {
+    const url = demoCfg.templates['10'];
+    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
+    
+    ctx.session.mode = 'demo';
+    ctx.session.duration = 10;
+    ctx.session.price = demoCfg.demoPrices['10'];
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    
+    console.log(`DEBUG: demo_tmpl_10 handler, base_url=${url}`);
+    ctx.reply('Now send one clear photo of the face you want to use.');
 });
-bot.action('demo_tmpl_15', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const url = demoCfg.templates['15'];
-        if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
-        
-        ctx.session.mode = 'demo';
-        ctx.session.duration = 15;
-        ctx.session.price = demoCfg.demoPrices['15'];
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-        
-        console.log(`DEBUG: demo_tmpl_15 handler, base_url=${url}`);
-        await ctx.reply('Now send one clear photo of the face you want to use.');
-    } catch (e) {
-        logger.error('demo_tmpl_15 action failed', { error: e.message });
-    }
+bot.action('demo_tmpl_15', (ctx) => {
+    const url = demoCfg.templates['15'];
+    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
+    
+    ctx.session.mode = 'demo';
+    ctx.session.duration = 15;
+    ctx.session.price = demoCfg.demoPrices['15'];
+    ctx.session.base_url = url;
+    ctx.session.step = 'awaiting_face';
+    
+    console.log(`DEBUG: demo_tmpl_15 handler, base_url=${url}`);
+    ctx.reply('Now send one clear photo of the face you want to use.');
 });
-bot.action('mode_video', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'video', step: 'awaiting_swap_photo' };
-        await ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
-    } catch (e) {
-        logger.error('mode_video action failed', { error: e.message });
-    }
+bot.action('mode_video', (ctx) => {
+    ctx.session = { mode: 'video', step: 'awaiting_swap_photo' };
+    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
 });
 
-bot.action('mode_image', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'image', step: 'awaiting_swap_photo' };
-        await ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
-    } catch (e) {
-        logger.error('mode_image action failed', { error: e.message });
-    }
+bot.action('mode_image', (ctx) => {
+    ctx.session = { mode: 'image', step: 'awaiting_swap_photo' };
+    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
 });
 
-bot.action('mode_faceswap_preview', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'faceswap_preview', step: 'awaiting_swap_photo' };
-        await ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
-    } catch (e) {
-        logger.error('mode_faceswap_preview action failed', { error: e.message });
-    }
+bot.action('mode_faceswap_preview', (ctx) => {
+    ctx.session = { mode: 'faceswap_preview', step: 'awaiting_swap_photo' };
+    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
 });
 
-bot.action('mode_image2video', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'image2video', step: 'awaiting_photo' };
-        await ctx.reply('Step 1: Send the image to animate.');
-    } catch (e) {
-        logger.error('mode_image2video action failed', { error: e.message });
-    }
+bot.action('mode_image2video', (ctx) => {
+    ctx.session = { mode: 'image2video', step: 'awaiting_photo' };
+    ctx.reply('Step 1: Send the image to animate.');
 });
 
 bot.on('photo', async (ctx) => {
@@ -724,4 +654,4 @@ async function safeStop(signal) {
 process.once('SIGINT', () => safeStop('SIGINT'));
 process.once('SIGTERM', () => safeStop('SIGTERM'));
 
-module.exports = { bot, postStartupPromo };
+module.exports = bot;
