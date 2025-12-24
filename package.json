@@ -2,6 +2,9 @@
   "name": "telegram-bot",
   "private": true,
   "version": "1.0.0",
+  "engines": {
+    "node": ">=18.18.0"
+  },
   "scripts": {
     "start": "node new_backend/index.js",
     "build": "echo 'no build step'"
