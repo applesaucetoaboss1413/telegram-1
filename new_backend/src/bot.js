@@ -6,8 +6,6 @@ const os = require('os');
 const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, setReferredBy } = require('./database');
 const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
-const { downloadTo, downloadBuffer, cleanupFile } = require('./utils/fileUtils');
-const { detectFaces } = require('./services/faceService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
@@ -57,43 +55,16 @@ const validatePhoto = async (ctx, fileId, fileSize, userId = 'unknown') => {
         throw new Error('Image too large. Maximum size is 10MB.');
     }
 
-    // 2. Download buffer for validation
+    // 2. Get URL
     const url = await getFileLink(ctx, fileId);
-    let buffer;
-    try {
-        buffer = await downloadBuffer(url);
-    } catch (e) {
-        throw new Error('Failed to download image for validation.');
-    }
 
-    // 3. Face Detection
-    try {
-        const faces = await detectFaces(buffer, userId);
-        if (faces.length === 0) {
-            throw new Error('No human face detected. Please ensure the face is clearly visible (90% confidence).');
-        }
-    } catch (e) {
-        if (e.message.includes('No human face detected')) throw e;
-        console.error('Face detection internal error:', e);
-        // If detection fails technically, maybe allow it but warn? Or fail safe?
-        // User requested "Implement proper photo reception...".
-        // Let's fail if we can't detect faces, as that's the point of the bot.
-        throw new Error('Could not verify face in image. Please try another photo.');
-    }
-
-    // 4. Ensure URL has extension for MagicAPI
-    // If url doesn't end with .jpg/.png/.jpeg, we might need to rely on the fact that Telegram sends Content-Type.
-    // But MagicAPI validates the URL string itself.
-    // If it's missing, we can append a dummy one if the URL allows it, or just pass it.
-    // Telegram file links usually have extensions. If not, we might be in trouble.
-    // Let's check:
+    // 3. Ensure URL has extension for MagicAPI
     const ext = path.extname(new URL(url).pathname).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-       // Warn or try to fix? Telegram usually provides extensions.
        logger.warn('Telegram URL missing standard image extension', { url });
     }
 
-    return { url, buffer };
+    return { url };
 };
 
 // Listeners for Queue
@@ -364,33 +335,28 @@ bot.action('demo_new', (ctx) => {
     );
 });
 
-bot.action('demo_len_5', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
-bot.action('demo_len_10', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
-bot.action('demo_len_15', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_5', (ctx) => {
+    ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] };
+    ctx.reply('Choose base video:', Markup.inlineKeyboard([
+        [Markup.button.callback('Use my own video', 'demo_base_user')]
+    ]));
+});
+bot.action('demo_len_10', (ctx) => {
+    ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] };
+    ctx.reply('Choose base video:', Markup.inlineKeyboard([
+        [Markup.button.callback('Use my own video', 'demo_base_user')]
+    ]));
+});
+bot.action('demo_len_15', (ctx) => {
+    ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] };
+    ctx.reply('Choose base video:', Markup.inlineKeyboard([
+        [Markup.button.callback('Use my own video', 'demo_base_user')]
+    ]));
+});
 
 bot.action('demo_base_template', async (ctx) => {
     ctx.answerCbQuery();
-    const t5 = demoCfg.templates['5'];
-    const t10 = demoCfg.templates['10'];
-    const t15 = demoCfg.templates['15'];
-
-    const c5 = demoCfg.demoCosts['5'];
-    const c10 = demoCfg.demoCosts['10'];
-    const c15 = demoCfg.demoCosts['15'];
-
-    const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
-    const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
-    const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
-
-    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { await ctx.reply(`5s Demo: ${t5}\n${cap5}`); } }
-    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { await ctx.reply(`10s Demo: ${t10}\n${cap10}`); } }
-    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { await ctx.reply(`15s Demo: ${t15}\n${cap15}`); } }
-    const kb = Markup.inlineKeyboard([
-        [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
-        [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
-        [Markup.button.callback('Use 15s template demo', 'demo_tmpl_15')],
-    ]);
-    await ctx.reply('Pick a template to use:', kb);
+    await ctx.reply("Templates are examples only to show what’s possible. To create your own demo, please choose ‘Use my own video’ and upload your clip.");
 });
 
 bot.action('demo_base_user', (ctx) => {
@@ -398,60 +364,34 @@ bot.action('demo_base_user', (ctx) => {
     const d = ctx.session && ctx.session.duration;
     ctx.session.step = 'awaiting_base_video';
     ctx.reply(`Send a video that is ${d} seconds or less.`);
+    ctx.reply('Tip: For best results, use a clear video with one main face, good lighting, and at least 720p quality.');
 });
 
 bot.action('demo_tmpl_5', (ctx) => {
-    const url = demoCfg.templates['5'];
-    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
-    
-    ctx.session.mode = 'demo';
-    ctx.session.duration = 5;
-    ctx.session.price = demoCfg.demoPrices['5'];
-    ctx.session.base_url = url;
-    ctx.session.step = 'awaiting_face';
-    
-    console.log(`DEBUG: demo_tmpl_5 handler, base_url=${url}`);
-    ctx.reply('Now send one clear photo of the face you want to use.');
+    ctx.answerCbQuery();
+    ctx.reply("Templates are examples only to show what’s possible. To create your own demo, please choose ‘Use my own video’ and upload your clip.");
 });
 bot.action('demo_tmpl_10', (ctx) => {
-    const url = demoCfg.templates['10'];
-    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
-    
-    ctx.session.mode = 'demo';
-    ctx.session.duration = 10;
-    ctx.session.price = demoCfg.demoPrices['10'];
-    ctx.session.base_url = url;
-    ctx.session.step = 'awaiting_face';
-    
-    console.log(`DEBUG: demo_tmpl_10 handler, base_url=${url}`);
-    ctx.reply('Now send one clear photo of the face you want to use.');
+    ctx.answerCbQuery();
+    ctx.reply("Templates are examples only to show what’s possible. To create your own demo, please choose ‘Use my own video’ and upload your clip.");
 });
 bot.action('demo_tmpl_15', (ctx) => {
-    const url = demoCfg.templates['15'];
-    if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
-    
-    ctx.session.mode = 'demo';
-    ctx.session.duration = 15;
-    ctx.session.price = demoCfg.demoPrices['15'];
-    ctx.session.base_url = url;
-    ctx.session.step = 'awaiting_face';
-    
-    console.log(`DEBUG: demo_tmpl_15 handler, base_url=${url}`);
-    ctx.reply('Now send one clear photo of the face you want to use.');
+    ctx.answerCbQuery();
+    ctx.reply("Templates are examples only to show what’s possible. To create your own demo, please choose ‘Use my own video’ and upload your clip.");
 });
 bot.action('mode_video', (ctx) => {
     ctx.session = { mode: 'video', step: 'awaiting_swap_photo' };
-    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
+    ctx.reply('Now send one clear photo of the face you want to use.\n\nTip: Use a front-facing, well-lit photo with no sunglasses or heavy filters for the best swap quality.');
 });
 
 bot.action('mode_image', (ctx) => {
     ctx.session = { mode: 'image', step: 'awaiting_swap_photo' };
-    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
+    ctx.reply('Now send one clear photo of the face you want to use.\n\nTip: Use a front-facing, well-lit photo with no sunglasses or heavy filters for the best swap quality.');
 });
 
 bot.action('mode_faceswap_preview', (ctx) => {
     ctx.session = { mode: 'faceswap_preview', step: 'awaiting_swap_photo' };
-    ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
+    ctx.reply('Now send one clear photo of the face you want to use.\n\nTip: Use a front-facing, well-lit photo with no sunglasses or heavy filters for the best swap quality.');
 });
 
 bot.action('mode_image2video', (ctx) => {
@@ -460,7 +400,7 @@ bot.action('mode_image2video', (ctx) => {
 });
 
 bot.on('photo', async (ctx) => {
-    if (!ctx.session || ctx.session.step) return;
+    if (!ctx.session || !ctx.session.step) return;
 
     const userId = String(ctx.from.id);
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
@@ -539,7 +479,7 @@ bot.on('video', async (ctx) => {
         const uploaded = await uploadFromUrl(url, 'video');
         ctx.session.base_url = uploaded;
         ctx.session.step = 'awaiting_face';
-        ctx.reply('Now send one clear photo of the face you want to use.');
+        ctx.reply('Now send one clear photo of the face you want to use.\n\nTip: Use a front-facing, well-lit photo with no sunglasses or heavy filters for the best swap quality.');
     }
 });
 
