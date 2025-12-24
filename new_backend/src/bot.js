@@ -290,22 +290,45 @@ async function startCheckout(ctx, pack) {
     try {
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
-            line_items: [{
-                price_data: {
-                    currency: 'usd',
-                    product_data: { name: pack.label },
-                    unit_amount: pack.price_cents,
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        product_data: { name: pack.label },
+                        unit_amount: pack.price_cents,
+                    },
+                    quantity: 1,
                 },
-                quantity: 1,
-            }],
+            ],
             mode: 'payment',
-            success_url: process.env.STRIPE_SUCCESS_URL || 'https://t.me/YOUR_BOT?start=success',
-            cancel_url: process.env.STRIPE_CANCEL_URL || 'https://t.me/YOUR_BOT?start=cancel',
+            success_url:
+                process.env.STRIPE_SUCCESS_URL ||
+                'https://t.me/YOURBOT?start=success',
+            cancel_url:
+                process.env.STRIPE_CANCEL_URL ||
+                'https://t.me/YOURBOT?start=cancel',
             client_reference_id: String(ctx.from.id),
         });
-        ctx.reply(`Proceed to payment: ${session.url}`);
+
+        await ctx.reply(
+            `You selected *${pack.label}*.\n\nTap the button below to complete your payment.`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: '💳 Proceed to payment',
+                                url: session.url,
+                            },
+                        ],
+                    ],
+                },
+            }
+        );
     } catch (e) {
-        ctx.reply('❌ Payment system error. Please try again later.');
+        console.error('Stripe checkout error:', e.message);
+        await ctx.reply('Payment system error. Please try again later.');
     }
 }
 
