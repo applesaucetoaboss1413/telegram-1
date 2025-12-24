@@ -36,7 +36,7 @@ bot.use(async (ctx, next) => {
         const t = ctx.updateType;
         const uid = ctx.from && ctx.from.id;
         logger.info('update', { type: t, user: uid });
-    } catch (_) { }
+    } catch (_) {}
     return next();
 });
 
@@ -89,8 +89,8 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
     // Let's check:
     const ext = path.extname(new URL(url).pathname).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-        // Warn or try to fix? Telegram usually provides extensions.
-        logger.warn('Telegram URL missing standard image extension', { url });
+       // Warn or try to fix? Telegram usually provides extensions.
+       logger.warn('Telegram URL missing standard image extension', { url });
     }
 
     return { url, buffer };
@@ -146,6 +146,9 @@ bot.on('photo', async (ctx) => {
             }
             updateUserPoints(userId, -price);
             addTransaction(userId, -price, 'demo_start');
+            
+            console.log(`DEBUG: starting A2E job for demo_tmpl_${ctx.session.duration}, duration=${ctx.session.duration}`);
+            
             await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
             try {
                 const requestId = await startFaceSwap(faceUrl, baseUrl);
@@ -164,24 +167,49 @@ bot.on('photo', async (ctx) => {
 });
 
 // Bot Logic
-bot.command('start', (ctx) => {
+bot.command('start', async (ctx) => {
     console.log('🔥 /start HANDLER (DEMO MENU)');
     const user = getUser(String(ctx.from.id));
     ctx.session = { step: null };
     if (ctx.chat && ctx.chat.type === 'private') {
-        const p10 = demoCfg.demoPrices['10'];
-        const s = demoCfg.packs.starter.points;
-        const pl = demoCfg.packs.plus.points;
-        const pr = demoCfg.packs.pro.points;
-        const approx = (pts) => Math.max(1, Math.floor(pts / p10));
-        const line = `Welcome to the Face Swap Demo.\nRun 5s / 10s / 15s Face Swap samples using your face.\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)\n\n1) Buy points\n2) Create new demo\n3) Pick length & base video\n4) Upload face`;
-        ctx.reply(line);
+        const p = demoCfg.packs;
+        const msg = `🎭 *Face Swap Demo*
+Turn any clip into a face swap demo in seconds.
+
+*Packs*
+• ${p.starter.label} – ${p.starter.points} pts (~${p.starter.approxDemos} demos) – ${p.starter.priceDisplay}
+• ${p.plus.label} – ${p.plus.points} pts (~${p.plus.approxDemos} demos) – ${p.plus.priceDisplay}
+• ${p.pro.label} – ${p.pro.points} pts (~${p.pro.approxDemos} demos) – ${p.pro.priceDisplay}
+
+*Steps*
+1. Buy points
+2. Create new demo
+3. Pick length & base video
+4. Upload face`;
+        await ctx.replyWithMarkdown(msg);
+
+        // Automatically send template examples
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
+        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
+        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+
+        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { } }
+        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { } }
+        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
     }
-    ctx.reply(
-        `👋 Welcome! You have ${user.points} points.`,
+    const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
+    await ctx.reply(
+        `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).`,
         Markup.inlineKeyboard([
             [Markup.button.callback('Create new demo', 'demo_new')],
-            [Markup.button.callback('Head Swap', 'mode_image')],
             [Markup.button.callback('My demos', 'demo_list')],
             [Markup.button.callback('Buy points', 'buy_points_menu')],
             [Markup.button.callback('Help', 'help')]
@@ -199,21 +227,86 @@ bot.command('promo', async (ctx) => {
         if (!CHANNEL_ID) return ctx.reply('CHANNEL_ID missing');
         const me = await bot.telegram.getMe();
         const username = me && me.username ? me.username : '';
-        const cta = username ? `https://t.me/${username}?start=demo` : '';
-        const intro = `Run 5s/10s/15s Face Swap demos.\nTop up points, pick a template, upload your face, get results.\nStart: ${cta}`;
-        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro);
-        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) { }
+        const cta = `https://t.me/${username}?start=demo`;
+
+        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
+        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
+        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
+        
         const t5 = demoCfg.templates['5'];
         const t10 = demoCfg.templates['10'];
         const t15 = demoCfg.templates['15'];
-        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: '5s Demo' });
-        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: '10s Demo' });
-        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: '15s Demo' });
-        await ctx.reply('Promo posted');
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
+        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
+        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
+
+        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
+        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
+        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
+        
+        logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
+        logger.info('posted template video 5s/10s/15s to channel');
+    } catch (e) {
+        logger.error(`ERROR: cannot post startup promo – CHANNEL_ID or demo URLs missing. ${e.message}`);
+    }
+}
+
+// Auto-run promo on startup
+(async () => {
+    if (process.env.NODE_ENV === 'production' || process.env.RUN_PROMO_ON_START === 'true') {
+        // Wait a few seconds for bot to be ready
+        setTimeout(() => postStartupPromo(), 5000);
+    }
+})();
+
+bot.command('promo', async (ctx) => {
+    try {
+        await postStartupPromo();
+        await ctx.reply('✅ Promo posted to channel successfully.');
     } catch (e) {
         await ctx.reply(`Error: ${e.message}`);
     }
 });
+
+async function postStartupPromo() {
+    try {
+        if (!CHANNEL_ID) throw new Error('CHANNEL_ID missing');
+        const me = await bot.telegram.getMe();
+        const username = me && me.username ? me.username : '';
+        const cta = `https://t.me/${username}?start=demo`;
+
+        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
+        const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
+        try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
+        
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
+        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
+        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
+
+        if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
+        if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
+        if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
+        
+        logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
+        logger.info('posted template video 5s/10s/15s to channel');
+    } catch (e) {
+        logger.error(`ERROR: cannot post startup promo – CHANNEL_ID or demo URLs missing. ${e.message}`);
+        throw e;
+    }
+}
 
 bot.action('buy_points', async (ctx) => {
     ctx.answerCbQuery();
@@ -291,18 +384,27 @@ bot.action('demo_new', (ctx) => {
     );
 });
 
-bot.action('demo_len_5', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]])); });
-bot.action('demo_len_10', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]])); });
-bot.action('demo_len_15', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_5', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_10', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
+bot.action('demo_len_15', (ctx) => { ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); });
 
 bot.action('demo_base_template', async (ctx) => {
     ctx.answerCbQuery();
     const t5 = demoCfg.templates['5'];
     const t10 = demoCfg.templates['10'];
     const t15 = demoCfg.templates['15'];
-    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: '5s Demo' }); } catch (_) { await ctx.reply(`5s Demo: ${t5}`); } }
-    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: '10s Demo' }); } catch (_) { await ctx.reply(`10s Demo: ${t10}`); } }
-    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: '15s Demo' }); } catch (_) { await ctx.reply(`15s Demo: ${t15}`); } }
+
+    const c5 = demoCfg.demoCosts['5'];
+    const c10 = demoCfg.demoCosts['10'];
+    const c15 = demoCfg.demoCosts['15'];
+
+    const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
+    const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
+    const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+
+    if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { await ctx.reply(`5s Demo: ${t5}\n${cap5}`); } }
+    if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { await ctx.reply(`10s Demo: ${t10}\n${cap10}`); } }
+    if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { await ctx.reply(`15s Demo: ${t15}\n${cap15}`); } }
     const kb = Markup.inlineKeyboard([
         [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
         [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
@@ -321,22 +423,40 @@ bot.action('demo_base_user', (ctx) => {
 bot.action('demo_tmpl_5', (ctx) => {
     const url = demoCfg.templates['5'];
     if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
+    
+    ctx.session.mode = 'demo';
+    ctx.session.duration = 5;
+    ctx.session.price = demoCfg.demoPrices['5'];
     ctx.session.base_url = url;
     ctx.session.step = 'awaiting_face';
+    
+    console.log(`DEBUG: demo_tmpl_5 handler, base_url=${url}`);
     ctx.reply('Now send one clear photo of the face you want to use.');
 });
 bot.action('demo_tmpl_10', (ctx) => {
     const url = demoCfg.templates['10'];
     if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
+    
+    ctx.session.mode = 'demo';
+    ctx.session.duration = 10;
+    ctx.session.price = demoCfg.demoPrices['10'];
     ctx.session.base_url = url;
     ctx.session.step = 'awaiting_face';
+    
+    console.log(`DEBUG: demo_tmpl_10 handler, base_url=${url}`);
     ctx.reply('Now send one clear photo of the face you want to use.');
 });
 bot.action('demo_tmpl_15', (ctx) => {
     const url = demoCfg.templates['15'];
     if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
+    
+    ctx.session.mode = 'demo';
+    ctx.session.duration = 15;
+    ctx.session.price = demoCfg.demoPrices['15'];
     ctx.session.base_url = url;
     ctx.session.step = 'awaiting_face';
+    
+    console.log(`DEBUG: demo_tmpl_15 handler, base_url=${url}`);
     ctx.reply('Now send one clear photo of the face you want to use.');
 });
 bot.action('mode_video', (ctx) => {
@@ -366,7 +486,7 @@ bot.on('photo', async (ctx) => {
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = photo.file_id;
     const fileSize = photo.file_size;
-    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) { }
+    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) {}
 
     if (ctx.session.step === 'awaiting_swap_photo') {
         try {
@@ -375,7 +495,7 @@ bot.on('photo', async (ctx) => {
             const uploaded = await uploadFromUrl(url, 'image');
             ctx.session.swapUrl = uploaded;
             ctx.session.step = 'awaiting_target';
-
+            
             const type = ctx.session.mode === 'video' ? 'VIDEO' : 'PHOTO';
             ctx.reply(`✅ Source received. Now send the **Target ${type}** (the one to replace).`);
         } catch (e) {
@@ -502,7 +622,7 @@ bot.on('text', async (ctx) => {
     await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
     try {
         const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
-            try { if (m) ctx.reply(m); } catch (_) { }
+            try { if (m) ctx.reply(m); } catch (_) {}
         }, 120000);
         await ctx.reply('✅ Video Ready!');
         await ctx.reply(url);
@@ -519,12 +639,18 @@ bot.on('text', async (ctx) => {
 });
 
 // Graceful Stop
-let __botStopped = false;
-function safeStop(reason) {
-    if (__botStopped) return;
-    try { bot.stop(reason); } catch (_) { }
-    __botStopped = true;
+let stopped = false;
+async function safeStop(signal) {
+    if (stopped) return;
+    stopped = true;
+    console.log('info: safeStop called with', signal);
+    try {
+        await bot.stop(signal);
+    } catch (err) {
+        console.error('ERROR: safeStop failed:', err.message);
+    }
 }
+
 process.once('SIGINT', () => safeStop('SIGINT'));
 process.once('SIGTERM', () => safeStop('SIGTERM'));
 
