@@ -37,68 +37,23 @@ class QueueService extends EventEmitter {
         const jobs = getPendingJobs();
         if (jobs.length === 0) return;
 
-<<<<<<< HEAD
-        for (const job of jobs) {
-            try {
-                const meta = JSON.parse(job.meta || '{}');
-                const isVideo = job.type === 'video';
-
-                // Check API status
-                const result = await checkStatus(job.request_id, isVideo);
-                const status = (result.status || result.state || '').toLowerCase();
-=======
         // Process jobs concurrently with a limit (e.g., 5)
         const CONCURRENCY_LIMIT = 5;
         const chunks = [];
         for (let i = 0; i < jobs.length; i += CONCURRENCY_LIMIT) {
             chunks.push(jobs.slice(i, i + CONCURRENCY_LIMIT));
         }
->>>>>>> 54956f0adcd9dc55e53517b8c737d596041bffff
 
         for (const chunk of chunks) {
             await Promise.all(chunk.map(job => this.processJob(job)));
         }
     }
 
-<<<<<<< HEAD
-                    const changes = markJobComplete(job.request_id, 'completed', output, null);
-                    if (changes > 0) {
-                        this.emit('job_complete', { job, output });
-                        logger.info(`Job ${job.request_id} completed`);
-                    } else {
-                        logger.warn(`Job ${job.request_id} already completed by another worker`);
-                    }
-
-                } else if (status === 'failed' || status === 'error') {
-                    // Failure
-                    const errorMsg = result.error || result.message || 'Unknown API Error';
-                    const changes = markJobComplete(job.request_id, 'failed', null, errorMsg);
-                    if (changes > 0) {
-                        this.emit('job_failed', { job, error: errorMsg });
-                        logger.error(`Job ${job.request_id} failed: ${errorMsg}`);
-                    }
-
-                } else {
-                    // Still processing
-                    // Check timeout (e.g., 10 minutes)
-                    if (Date.now() - job.created_at > 10 * 60 * 1000) {
-                        const changes = markJobComplete(job.request_id, 'failed', null, 'Timeout');
-                        if (changes > 0) {
-                            this.emit('job_failed', { job, error: 'Timeout' });
-                        }
-                    }
-                }
-
-            } catch (error) {
-                logger.error(`Error processing job ${job.request_id}`, error);
-                // Don't fail immediately on network error, just retry next tick
-=======
     async processJob(job) {
         try {
             const meta = JSON.parse(job.meta || '{}');
             if (meta.next_poll_at && Date.now() < meta.next_poll_at) {
                 return;
->>>>>>> 54956f0adcd9dc55e53517b8c737d596041bffff
             }
             let result;
             try {

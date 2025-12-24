@@ -6,7 +6,13 @@ const os = require('os');
 const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, setReferredBy } = require('./database');
 const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = process.env.STRIPE_SECRET_KEY
+    ? require('stripe')(process.env.STRIPE_SECRET_KEY)
+    : { checkout: { sessions: { create: async () => { throw new Error('Stripe not configured'); } } } };
+
+if (!process.env.STRIPE_SECRET_KEY) {
+    logger.warn('STRIPE_SECRET_KEY missing; payments disabled');
+}
 const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
@@ -34,7 +40,7 @@ bot.use(async (ctx, next) => {
         const t = ctx.updateType;
         const uid = ctx.from && ctx.from.id;
         logger.info('update', { type: t, user: uid });
-    } catch (_) {}
+    } catch (_) { }
     return next();
 });
 
@@ -61,7 +67,7 @@ const validatePhoto = async (ctx, fileId, fileSize, userId = 'unknown') => {
     // 3. Ensure URL has extension for MagicAPI
     const ext = path.extname(new URL(url).pathname).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-       logger.warn('Telegram URL missing standard image extension', { url });
+        logger.warn('Telegram URL missing standard image extension', { url });
     }
 
     return { url };
@@ -117,9 +123,9 @@ bot.on('photo', async (ctx) => {
             }
             updateUserPoints(userId, -price);
             addTransaction(userId, -price, 'demo_start');
-            
+
             console.log(`DEBUG: starting A2E job for demo_tmpl_${ctx.session.duration}, duration=${ctx.session.duration}`);
-            
+
             await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
             try {
                 const requestId = await startFaceSwap(faceUrl, baseUrl);
@@ -230,8 +236,8 @@ async function postStartupPromo() {
 
     const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n🎁 *Referral Bonus*: For every friend who buys points through your link, you get a FREE 5s demo (we credit you the points for one 5s run).\nDM the bot and hit /start to get your personal invite link.\n\n👉 [Start Creating Now](${cta})`;
     const introMsg = await bot.telegram.sendMessage(CHANNEL_ID, intro, { parse_mode: 'Markdown' });
-    try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) {}
-    
+    try { await bot.telegram.pinChatMessage(CHANNEL_ID, introMsg.message_id); } catch (_) { }
+
     const t5 = demoCfg.templates['5'];
     const t10 = demoCfg.templates['10'];
     const t15 = demoCfg.templates['15'];
@@ -247,7 +253,7 @@ async function postStartupPromo() {
     if (t5) await bot.telegram.sendVideo(CHANNEL_ID, t5, { caption: cap5, parse_mode: 'Markdown' });
     if (t10) await bot.telegram.sendVideo(CHANNEL_ID, t10, { caption: cap10, parse_mode: 'Markdown' });
     if (t15) await bot.telegram.sendVideo(CHANNEL_ID, t15, { caption: cap15, parse_mode: 'Markdown' });
-    
+
     logger.info(`posting startup promo to CHANNEL_ID=${CHANNEL_ID}`);
 }
 
@@ -429,7 +435,7 @@ bot.on('photo', async (ctx) => {
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = photo.file_id;
     const fileSize = photo.file_size;
-    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) {}
+    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) { }
 
     if (ctx.session.step === 'awaiting_swap_photo') {
         try {
@@ -438,7 +444,7 @@ bot.on('photo', async (ctx) => {
             const uploaded = await uploadFromUrl(url, 'image');
             ctx.session.swapUrl = uploaded;
             ctx.session.step = 'awaiting_target';
-            
+
             const type = ctx.session.mode === 'video' ? 'VIDEO' : 'PHOTO';
             ctx.reply(`✅ Source received. Now send the **Target ${type}** (the one to replace).`);
         } catch (e) {
@@ -565,7 +571,7 @@ bot.on('text', async (ctx) => {
     await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
     try {
         const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
-            try { if (m) ctx.reply(m); } catch (_) {}
+            try { if (m) ctx.reply(m); } catch (_) { }
         }, 120000);
         await ctx.reply('✅ Video Ready!');
         await ctx.reply(url);
