@@ -28,5 +28,7 @@ module.exports = {
         uploads: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'uploads') : require('path').join(__dirname, '../../uploads'),
         outputs: process.env.VERCEL ? require('path').join(require('os').tmpdir(), 'outputs') : require('path').join(__dirname, '../../outputs'),
         data: require('path').join(require('os').tmpdir(), 'data.json')
-    }
+    },
+    HEAD_SWAP_COST: 9,
+    A2E_API_KEY: process.env.A2E_API_KEY
 };

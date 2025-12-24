@@ -4,6 +4,7 @@ const fs = require('fs');
 const { BOT_TOKEN, PRICING, DIRS, PUBLIC_ORIGIN } = require('../config');
 const { loadData, saveData, getOrCreateUser } = require('../services/dataService');
 const { downloadTo, runFaceswap, runFaceswapImage, createVideo } = require('./faceswap');
+const { initHeadSwap, handleHeadImage, handleTargetMedia } = require('./headSwapFlow');
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -68,22 +69,25 @@ bot.on('message', async ctx => {
                 await ctx.reply(`Prices:\n${lines.join('\n')}`);
             } else if (text === '/help' || text.startsWith('/help@')) {
                 await ctx.reply('To use Face Swap: \n1. Choose Image or Video mode.\n2. Send the source photo (the face you want).\n3. Send the target photo or video.');
+            } else if (text === '/headswap' || text.startsWith('/headswap@')) {
+                await initHeadSwap(ctx, pending);
             }
             return;
         }
+
         if (message.photo) {
             console.log('[Bot] Photo received in chat', ctx.chat.id, 'from', ctx.from.id);
             const uid = String(ctx.from.id);
             const p = pending[uid];
             if (!p) return; // Ignore random photos if not in a flow
 
-            const photos = message.photo;
-            const fileId = photos[photos.length - 1].file_id;
-            const link = await ctx.telegram.getFileLink(fileId);
-            const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
-            await downloadTo(String(link), dest);
-
             if (p.mode === 'faceswap' || p.mode === 'imageswap') {
+                const photos = message.photo;
+                const fileId = photos[photos.length - 1].file_id;
+                const link = await ctx.telegram.getFileLink(fileId);
+                const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
+                await downloadTo(String(link), dest);
+
                 if (!p.swap) {
                     p.swap = dest;
                     await ctx.reply(p.mode === 'faceswap' ? 'Great! Now send the TARGET VIDEO.' : 'Great! Now send the TARGET PHOTO.');
@@ -104,6 +108,12 @@ bot.on('message', async ctx => {
                         // User sent a photo but we expected a video for video swap
                         await ctx.reply('Please send a VIDEO for the target, or start over.');
                     }
+                }
+            } else if (p.mode === 'headswap') {
+                if (p.step === 'awaiting_head') {
+                    await handleHeadImage(ctx, pending);
+                } else if (p.step === 'awaiting_target') {
+                    await handleTargetMedia(ctx, pending, bot);
                 }
             }
         } else if (message.video) {
@@ -132,6 +142,12 @@ bot.on('message', async ctx => {
                     await ctx.reply(`Failed: ${r.error}`);
                 } else {
                     await ctx.reply(`Started! Points remaining: ${r.points}`);
+                }
+            } else if (p.mode === 'headswap') {
+                if (p.step === 'awaiting_target') {
+                    await handleTargetMedia(ctx, pending, bot);
+                } else {
+                    await ctx.reply('Please send a PHOTO of the head first.');
                 }
             }
         }
@@ -184,8 +200,6 @@ bot.action(/buy:(.+)/, async ctx => {
     if (!tier) return ctx.answerCbQuery('Invalid tier');
 
     // We need to generate a stripe session here, but for simplicity we'll point them to a web link
-    // In a real refactor, we might want to move Stripe logic to a service.
-    // For now, let's construct the link if the user has an ID.
     const userId = ctx.from.id;
     if (PUBLIC_ORIGIN) {
         const url = `${PUBLIC_ORIGIN}/create-checkout-session?userId=${userId}&tierId=${tierId}`;
@@ -196,8 +210,6 @@ bot.action(/buy:(.+)/, async ctx => {
         await ctx.reply('Payment system not configured (Public Origin missing).');
     }
 });
-
-// Private photo/video handling disabled - only channel interactions
 
 // Channel post handlers for channel interactions
 bot.on('channel_post', async ctx => {
@@ -232,22 +244,25 @@ bot.on('channel_post', async ctx => {
                 await ctx.reply(`Prices:\n${lines.join('\n')}`);
             } else if (text === '/help' || text.startsWith('/help@')) {
                 await ctx.reply('To use Face Swap: \n1. Choose Image or Video mode.\n2. Send the source photo (the face you want).\n3. Send the target photo or video.');
+            } else if (text === '/headswap' || text.startsWith('/headswap@')) {
+                await initHeadSwap(ctx, pending);
             }
             return;
         }
+
         if (message.photo) {
             // Handle photo in channel
             const uid = String(ctx.from.id); // User who posted
             const p = pending[uid];
             if (!p) return; // Ignore if not in flow
 
-            const photos = message.photo;
-            const fileId = photos[photos.length - 1].file_id;
-            const link = await ctx.telegram.getFileLink(fileId);
-            const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
-            await downloadTo(String(link), dest);
-
             if (p.mode === 'faceswap' || p.mode === 'imageswap') {
+                const photos = message.photo;
+                const fileId = photos[photos.length - 1].file_id;
+                const link = await ctx.telegram.getFileLink(fileId);
+                const dest = path.join(DIRS.uploads, `photo_${uid}_${Date.now()}.jpg`);
+                await downloadTo(String(link), dest);
+
                 if (!p.swap) {
                     p.swap = dest;
                     // Reply in channel
@@ -267,6 +282,12 @@ bot.on('channel_post', async ctx => {
                     } else {
                         await ctx.reply('Please send a VIDEO for the target, or start over.');
                     }
+                }
+            } else if (p.mode === 'headswap') {
+                if (p.step === 'awaiting_head') {
+                    await handleHeadImage(ctx, pending);
+                } else if (p.step === 'awaiting_target') {
+                    await handleTargetMedia(ctx, pending, bot);
                 }
             }
         } else if (message.video) {
@@ -296,11 +317,16 @@ bot.on('channel_post', async ctx => {
                 } else {
                     await ctx.reply(`Started! Points remaining: ${r.points}`);
                 }
+            } else if (p.mode === 'headswap') {
+                if (p.step === 'awaiting_target') {
+                    await handleTargetMedia(ctx, pending, bot);
+                } else {
+                    await ctx.reply('Please send a PHOTO of the head first.');
+                }
             }
         }
     } catch (e) {
         console.error('Channel post handler error:', e);
-        // Can't reply in channel without permission, perhaps send private message
         try {
             await ctx.telegram.sendMessage(ctx.from.id, 'Sorry, I had trouble processing that.');
         } catch (_) { }
