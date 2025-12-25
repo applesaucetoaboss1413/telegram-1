@@ -47,7 +47,30 @@ db.exec(`
         reason TEXT,
         created_at INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS kv_store (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at INTEGER
+    );
 `);
+
+// KV Store Methods
+const setKV = (key, value) => {
+    const now = Date.now();
+    const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+    db.prepare('INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)').run(key, valStr, now);
+};
+
+const getKV = (key) => {
+    const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
+    if (!row) return null;
+    try {
+        return JSON.parse(row.value);
+    } catch (_) {
+        return row.value;
+    }
+};
 
 // User Methods
 const getUser = (id) => {
@@ -145,5 +168,7 @@ module.exports = {
     updateJobMeta,
     getPendingJobs,
     getJob,
-    addTransaction
+    addTransaction,
+    setKV,
+    getKV
 };
