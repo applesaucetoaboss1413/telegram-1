@@ -243,7 +243,8 @@ Turn any clip into a face swap demo in seconds.
         creditMsg = `\n\n💰 *Credits:* You have ${credits} credits. A 5-second video costs 60 credits. New users get 69 welcome credits, so your first video is covered and you’ll have some left over.`;
     } else {
         creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
-        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', process.env.PUBLIC_URL || 'https://t.me/FaceSwapVideoAiBot')]);
+        // Use standardized deep link for internal offer button to avoid Render domain
+        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/FaceSwapVideoAi?start=get_69_credits')]);
     }
 
     await ctx.replyWithMarkdown(
@@ -279,15 +280,34 @@ bot.command('start', async (ctx) => {
             await ctx.replyWithMarkdown(
                 `🎁 *Claim Your 69 Free Credits*\n\nConnect Stripe to claim your 69 free credits (enough for your first 5-second video).`,
                 Markup.inlineKeyboard([
-                    [Markup.button.url('🎁 Connect Stripe (69 free credits)', process.env.PUBLIC_URL || 'https://t.me/FaceSwapVideoAiBot')]
+                    // Use standardized deep link for Stripe onboarding/checkout to avoid Render domain
+                    [Markup.button.url('🎁 Connect Stripe (69 free credits)', 'https://t.me/FaceSwapVideoAi?start=buy_points')]
                 ])
             );
             return; // Don't show regular menu yet to keep focus on the offer
         }
     }
+
+    if (payload === 'buy_points') {
+        return sendBuyPointsMenu(ctx);
+    }
     
     await sendDemoMenu(ctx);
 });
+
+async function sendBuyPointsMenu(ctx) {
+    const p10 = demoCfg.demoPrices['10'];
+    const approx = (pts) => Math.max(1, Math.floor(pts / p10));
+    const s = demoCfg.packs.starter.points;
+    const pl = demoCfg.packs.plus.points;
+    const pr = demoCfg.packs.pro.points;
+    const text = `Choose a credit pack:\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)`;
+    return ctx.reply(text, Markup.inlineKeyboard([
+        [Markup.button.callback(`${demoCfg.packs.starter.label} – ${s} pts`, 'buy_pack_starter')],
+        [Markup.button.callback(`${demoCfg.packs.plus.label} – ${pl} pts`, 'buy_pack_plus')],
+        [Markup.button.callback(`${demoCfg.packs.pro.label} – ${pr} pts`, 'buy_pack_pro')],
+    ]));
+}
 
 
 
@@ -735,7 +755,7 @@ Each 5-second video costs ${creditCost} credits. Your current balance is ${credi
 
 Please buy a credit pack to continue!`, 
             Markup.inlineKeyboard([
-                [Markup.button.url('Buy Credits', process.env.PUBLIC_URL || 'https://t.me/FaceSwapVideoAiBot')]
+                [Markup.button.url('Buy Credits', 'https://t.me/FaceSwapVideoAi?start=buy_points')]
             ]));
         }
 
