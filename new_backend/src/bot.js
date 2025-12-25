@@ -411,7 +411,9 @@ async function startCheckout(ctx, pack) {
 
 async function startWelcomeCreditsCheckout(ctx) {
     try {
+        logger.info('startWelcomeCreditsCheckout called', { userId: ctx.from.id });
         const username = await getBotUsername();
+        logger.info('getBotUsername result', { username, hasStripeKey: !!process.env.STRIPE_SECRET_KEY });
         const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
 
         const session = await stripe.checkout.sessions.create({
@@ -432,6 +434,7 @@ async function startWelcomeCreditsCheckout(ctx) {
                 credits: '69'
             }
         });
+        logger.info('Stripe session created successfully', { sessionId: session.id, url: session.url });
         await ctx.reply(
             'To get your 69 free credits, complete this quick registration (no charge).',
             {
@@ -442,7 +445,7 @@ async function startWelcomeCreditsCheckout(ctx) {
             }
         );
     } catch (e) {
-        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, userId: ctx.from.id });
+        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, stack: e.stack, userId: ctx.from.id, hasStripeKey: !!process.env.STRIPE_SECRET_KEY });
         ctx.reply('❌ Registration system error. Please try again later.');
     }
 }
