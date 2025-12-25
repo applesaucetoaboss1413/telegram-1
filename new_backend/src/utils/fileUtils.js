@@ -42,7 +42,7 @@ const cleanupFile = (filePath) => {
     try {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch (e) {
-        console.error('Cleanup failed:', e.message);
+        // Silent fail for cleanup
     }
 };
 

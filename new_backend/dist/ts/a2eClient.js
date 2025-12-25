@@ -26,19 +26,11 @@ async function startImage2Video(payload) {
 }
 async function checkImage2VideoStatus(taskId) {
     const endpoint = `${exports.A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
-    try {
-        console.log('[ENV] A2E_API_RESOURCE_BASE', (process.env.A2E_API_RESOURCE_BASE || ''));
-    }
-    catch { }
     const res = await fetch(endpoint, {
         method: 'GET',
         headers: { Authorization: `Bearer ${exports.A2E_API_KEY}`, Accept: 'application/json' },
     });
     const text = await res.text();
-    try {
-        console.log('[A2E STATUS REQUEST]', { type: 'image2video', taskId, url: endpoint, httpStatus: res.status, body: text.slice(0, 300) });
-    }
-    catch { }
     const isHtml = /<\/?html/i.test(text);
     if (isHtml)
         return { status: 'provider_error_html', error: 'HTML 404' };
@@ -56,23 +48,10 @@ async function checkImage2VideoStatus(taskId) {
     const data = (json && json.data) || json;
     const s = (data && data.current_status) || '';
     if (s === 'completed') {
-        try {
-            console.log('[A2E STATUS MAP]', { taskId, current_status: s, mapped_status: 'completed' });
-        }
-        catch { }
         return { status: 'completed', result_url: data.result_url || null };
     }
     if (s === 'failed' || s === 'error') {
-        try {
-            console.log('[A2E STATUS MAP]', { taskId, current_status: s, mapped_status: 'failed' });
-        }
-        catch { }
         return { status: 'failed', error: data.failed_message || '' };
     }
-    const inProg = (s === 'processing' || s === 'initialized' || s === 'sent' || s === 'in_progress' || s === 'queued' || s === 'pending');
-    try {
-        console.log('[A2E STATUS MAP]', { taskId, current_status: s, mapped_status: inProg ? 'processing' : 'processing' });
-    }
-    catch { }
     return { status: 'processing' };
 }

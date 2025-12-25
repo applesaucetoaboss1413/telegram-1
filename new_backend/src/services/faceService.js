@@ -1,5 +1,13 @@
+const winston = require('winston');
+
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: winston.format.json(),
+    transports: [new winston.transports.Console()]
+});
+
 const detectFaces = async (imageBuffer, userId = 'unknown') => {
-    console.log(`DEBUG: stub face detection invoked for user=${userId}`);
+    logger.info('face_detection_stub_invoked', { userId });
     
     return [{ 
         confidence: 0.99, 

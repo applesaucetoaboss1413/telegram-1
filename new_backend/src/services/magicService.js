@@ -86,25 +86,22 @@ const startImage2Video = async (imageUrl, prompt) => {
     const json = response.data || {};
     const id = json?.data?._id || json?.id || json?.task_id;
     if (!id) throw new Error('No task id');
-    const bodyPreview = (() => {
-        try { return JSON.stringify(json).slice(0, 300); } catch (_) { return '[unserializable]'; }
-    })();
-    logger.info('a2e_start', { type: 'image2video', endpoint, status: response.status, id, body: bodyPreview, payload: { image_url: imageUrl, prompt } });
+    logger.info('a2e_start', { type: 'image2video', endpoint, status: response.status, id, payload: { image_url: imageUrl, prompt } });
     return id;
 };
 
 const checkImage2VideoStatus = async (taskId) => {
     // Provider has routed status under the video host; api host may return docs HTML
     const endpoint = `${A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
-    try { logger.info('env', { A2E_API_RESOURCE_BASE: (process.env.A2E_API_RESOURCE_BASE || '') }); } catch (_) {}
     try {
-        const response = await axios.get(endpoint, { headers: { Authorization: `Bearer ${A2E_KEY}` }, responseType: 'json', validateStatus: () => true });
+        const response = await axios.get(endpoint, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}` }, 
+            responseType: 'json', 
+            validateStatus: () => true 
+        });
         const raw = response.data;
         const isHtml = typeof raw === 'string' && /<\/?html/i.test(raw);
-        const bodyPreview = (() => {
-            try { return (typeof raw === 'string' ? raw : JSON.stringify(raw)).slice(0, 300); } catch (_) { return '[unserializable]'; }
-        })();
-        logger.info('a2e_poll', { type: 'image2video', endpoint, id: taskId, http: response.status, body: bodyPreview });
+        
         if (isHtml) {
             return { status: 'provider_error_html', result_url: null, error: 'Unexpected HTML 404 from provider' };
         }
@@ -117,20 +114,21 @@ const checkImage2VideoStatus = async (taskId) => {
         if (response.status >= 400) {
             return { status: 'bad_request', result_url: null, error: `HTTP ${response.status}` };
         }
+
         const json = raw || {};
         const data = json && (json.data || json);
         const curr = data && data.current_status;
         const resultUrl = data && data.result_url;
+
         let mapped = 'processing';
         if (curr === 'completed') mapped = 'completed';
         else if (curr === 'failed' || curr === 'error') mapped = 'failed';
         else if (curr === 'processing' || curr === 'initialized' || curr === 'sent' || curr === 'in_progress' || curr === 'queued' || curr === 'pending') mapped = 'processing';
-        else mapped = 'processing';
-        try { logger.info('status_map', { type: 'image2video', id: taskId, current_status: curr, mapped_status: mapped }); } catch (_) {}
+        
+        logger.info('status_map', { type: 'image2video', id: taskId, current_status: curr, mapped_status: mapped });
         return { status: mapped, result_url: resultUrl };
     } catch (e) {
-        const msg = e && e.message ? e.message : 'Unknown error';
-        logger.error('a2e_poll_error', { type: 'image2video', endpoint, id: taskId, error: msg });
+        logger.error('a2e_poll_error', { type: 'image2video', endpoint, id: taskId, error: e.message });
         throw e;
     }
 };
