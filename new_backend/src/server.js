@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
 const { getUser, updateUserPoints, addTransaction, markPurchased } = require('./database');
+const { grantWelcomeCredits } = require('./services/creditsService');
 const demoCfg = require('./services/a2eConfig');
 const bot = require('./bot'); // Ensure bot is exported and available
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
@@ -75,6 +76,19 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
                 updateUserPoints(userId, pointsToAdd);
                 addTransaction(userId, pointsToAdd, 'purchase_stripe');
                 
+                // Grant 69 welcome credits if applicable
+                const stripeCustomerId = session.customer;
+                if (stripeCustomerId) {
+                    const granted = grantWelcomeCredits({ telegramUserId: userId, stripeCustomerId });
+                    if (granted) {
+                        try {
+                            bot.telegram.sendMessage(userId, `Welcome! 69 credits added to your account. Your first 5-second video costs 60 credits; you’ll have 9 credits left.`);
+                        } catch (err) {
+                            logger.error('Failed to send welcome credits message', { userId, error: err.message });
+                        }
+                    }
+                }
+
                 // Referral Logic
                 const user = getUser(userId);
                 if (user && !user.has_purchased && user.referred_by) {

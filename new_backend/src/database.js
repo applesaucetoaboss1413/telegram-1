@@ -47,6 +47,17 @@ db.exec(`
         reason TEXT,
         created_at INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS user_credits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_user_id TEXT,
+        stripe_customer_id TEXT,
+        credits INTEGER DEFAULT 0,
+        welcome_granted INTEGER DEFAULT 0,
+        created_at INTEGER,
+        updated_at INTEGER,
+        UNIQUE(telegram_user_id, stripe_customer_id)
+    );
 `);
 
 // User Methods

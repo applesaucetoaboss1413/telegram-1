@@ -1,7 +1,8 @@
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
-const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus } = require('./database');
+const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, db } = require('./database');
+const { spendCredits, getCredits } = require('./services/creditsService');
 const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
 const { downloadTo, downloadBuffer, cleanupFile } = require('./utils/fileUtils');
@@ -186,9 +187,9 @@ bot.on('photo', async (ctx) => {
  * Note: Bot must be channel admin with 'Can post messages' permission to reply in channels.
  */
 async function sendDemoMenu(ctx) {
-    // Get user from database (based on from.id for DMs, or chat.id for channels if applicable)
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
+    const credits = getCredits({ telegramUserId: userId });
     
     if (ctx.session) ctx.session.step = null;
 
@@ -228,14 +229,26 @@ Turn any clip into a face swap demo in seconds.
     }
     
     const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
-    await ctx.reply(
-        `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).`,
-        Markup.inlineKeyboard([
-            [Markup.button.callback('Create new demo', 'demo_new')],
-            [Markup.button.callback('My demos', 'demo_list')],
-            [Markup.button.callback('Buy points', 'buy_points_menu')],
-            [Markup.button.callback('Help', 'help')]
-        ])
+    
+    // Credit messaging
+    let creditMsg = '';
+    let buttons = [
+        [Markup.button.callback('Create new demo', 'demo_new')],
+        [Markup.button.callback('My demos', 'demo_list')],
+        [Markup.button.callback('Buy points', 'buy_points_menu')],
+        [Markup.button.callback('Help', 'help')]
+    ];
+
+    if (credits > 0) {
+        creditMsg = `\n\n💰 *Credits:* You have ${credits} credits. A 5-second video costs 60 credits. New users get 69 welcome credits, so your first video is covered and you’ll have some left over.`;
+    } else {
+        creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
+        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', process.env.PUBLIC_URL || 'https://t.me/FaceSwapVideoAiBot')]);
+    }
+
+    await ctx.replyWithMarkdown(
+        `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).${creditMsg}`,
+        Markup.inlineKeyboard(buttons)
     );
 }
 
@@ -676,6 +689,30 @@ bot.on('video', async (ctx) => {
 
 async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
     const user = getUser(userId);
+    
+    // Check credits for video jobs
+    if (type === 'video') {
+        const credits = getCredits({ telegramUserId: userId });
+        const creditCost = 60;
+
+        if (credits < creditCost) {
+            return ctx.reply(`❌ You are out of credits for video face-swaps. 
+
+Each 5-second video costs ${creditCost} credits. Your current balance is ${credits} credits.
+
+Please buy a credit pack to continue!`, 
+            Markup.inlineKeyboard([
+                [Markup.button.url('Buy Credits', process.env.PUBLIC_URL || 'https://t.me/FaceSwapVideoAiBot')]
+            ]));
+        }
+
+        // Spend credits atomically
+        const success = spendCredits({ telegramUserId: userId, amount: creditCost });
+        if (!success) {
+            return ctx.reply('❌ Transaction failed. Please try again or contact support.');
+        }
+    }
+
     const cost = type === 'video' ? 15 : 9;
 
     if (user.points < cost) {
@@ -694,6 +731,13 @@ async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
         // Queue service will pick it up automatically next poll
     } catch (e) {
         // Refund on immediate error
+        if (type === 'video') {
+            // Refund credits for video jobs
+            const tId = String(userId);
+            const now = Date.now();
+            db.prepare('UPDATE user_credits SET credits = credits + 60, updated_at = ? WHERE telegram_user_id = ?').run(now, tId);
+            logger.info('Credits refunded due to error', { telegramUserId: userId, amount: 60 });
+        }
         updateUserPoints(userId, cost);
         addTransaction(userId, cost, 'refund_api_error');
         ctx.reply(`❌ Error starting job: ${e.message}. Points refunded.`);
@@ -754,11 +798,21 @@ let stopped = false;
 async function safeStop(signal) {
     if (stopped) return;
     stopped = true;
-    logger.info('safeStop called', { signal });
+    console.log(`[Shutdown] safeStop called (${signal})`);
     try {
-        await bot.stop(signal);
+        if (bot && typeof bot.stop === 'function') {
+            await bot.stop(signal);
+            console.log('[Shutdown] Bot stopped successfully.');
+        } else {
+            console.log('[Shutdown] Bot instance not active or already stopped.');
+        }
     } catch (err) {
-        logger.error('safeStop failed', { error: err.message });
+        // Log as warning if it's already stopped, otherwise error
+        if (err.message && err.message.includes('Bot is not running')) {
+            console.warn('[Shutdown] Bot was already not running.');
+        } else {
+            console.error('[Shutdown] safeStop encountered an error:', err.message);
+        }
     }
 }
 

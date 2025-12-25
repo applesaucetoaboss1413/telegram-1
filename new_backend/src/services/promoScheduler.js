@@ -15,10 +15,12 @@ async function postPromoBatch(bot) {
 
         try {
             await bot.telegram.sendMediaGroup(channelId, mediaGroup);
+            console.log('Promo batch successfully sent as media group.');
         } catch (error) {
             console.error('Media group send failed, falling back to individual photos:', error.message);
 
             // Fallback path: send photos individually
+            let successCount = 0;
             for (const promo of mediaGroup.map(item => ({
                 path: item.media,
                 caption: item.caption
@@ -29,9 +31,13 @@ async function postPromoBatch(bot) {
                         promo.path,
                         promo.caption ? { caption: promo.caption } : undefined
                     );
+                    successCount++;
                 } catch (fallbackError) {
                     console.error('Failed to send individual promo:', fallbackError.message);
                 }
+            }
+            if (successCount > 0) {
+                console.log(`Promo batch successfully sent via fallback loop (${successCount} photos).`);
             }
         }
     } catch (error) {
