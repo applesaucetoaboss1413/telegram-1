@@ -49,26 +49,27 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
         const userId = session.client_reference_id;
+        const pointsFromMetadata = session.metadata && session.metadata.points ? parseInt(session.metadata.points) : 0;
+        const amount = session.amount_total;
 
         logger.info('Processing checkout session completed', { 
             userId: userId,
             sessionId: session.id,
-            amount: session.amount_total 
+            amount: amount,
+            pointsFromMetadata: pointsFromMetadata
         });
 
         if (userId) {
-            // Assuming 100 points for the $5 product
-            // Wait, we should probably check which pack it is or just trust the amount logic if configured?
-            // For now, let's keep the user logic as is, but add referral reward.
-            // But wait, the previous code hardcoded 100 points. We should probably respect the pack purchased?
-            // The prompt says "Implement a minimal referral tracking... Do not reward on subsequent purchases...".
-            // It doesn't explicitly ask to fix the point amount logic here, but it implies "first successful points purchase".
-            // Let's assume the points are handled correctly or we keep existing logic for points.
-            // Actually, the previous code had `const pointsToAdd = 100;`. This seems like a placeholder.
-            // If I change it, I might break something not requested. 
-            // BUT, the prompt says "Reward condition: first purchase only".
+            // Determine points to add: prefer metadata, fallback to amount-based logic, or default to 100
+            let pointsToAdd = pointsFromMetadata;
             
-            const pointsToAdd = 100; // Keeping existing logic for safety unless I see where it comes from.
+            if (!pointsToAdd) {
+                // Fallback logic if metadata is missing (e.g. legacy sessions)
+                if (amount >= 1499) pointsToAdd = demoCfg.packs.pro.points;
+                else if (amount >= 899) pointsToAdd = demoCfg.packs.plus.points;
+                else if (amount >= 499) pointsToAdd = demoCfg.packs.starter.points;
+                else pointsToAdd = 100; // Final fallback
+            }
             
             try {
                 updateUserPoints(userId, pointsToAdd);

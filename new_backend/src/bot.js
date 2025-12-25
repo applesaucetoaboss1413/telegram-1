@@ -1,5 +1,3 @@
-console.log('🔥 INIT DEMO BOT');
-
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
@@ -14,13 +12,10 @@ const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
 const PROMO_CHANNEL_ID = process.env.PROMO_CHANNEL_ID || process.env.CHANNEL_ID || '@FaceSwapVideoAi';
-const OWNER_DM_ID = 8063916626;
+const OWNER_DM_ID = process.env.OWNER_DM_ID || 8063916626;
 const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
 
-console.log('🔥 INIT DEMO BOT');
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
-console.log('🔥 BOT CREATED');
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
 const fs = require('fs');
 
@@ -41,10 +36,6 @@ bot.use(async (ctx, next) => {
     } catch (_) {}
     return next();
 });
-
-try {
-    logger.info('boot', { buildId: BUILD_ID, promoChannelId: PROMO_CHANNEL_ID, ownerDmId: OWNER_DM_ID, envPromoChannelId: process.env.PROMO_CHANNEL_ID, envChannelId: process.env.CHANNEL_ID });
-} catch (_) {}
 
 const normalizeTargetId = (targetId) => {
     if (targetId === undefined || targetId === null) return null;
@@ -100,8 +91,7 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
             throw new Error('No human face detected. Please ensure the face is clearly visible (90% confidence).');
         }
     } catch (e) {
-        if (e.message.includes('No human face detected')) throw e;
-        console.error('Face detection internal error:', e);
+        logger.error('Face detection internal error:', e);
         // If detection fails technically, maybe allow it but warn? Or fail safe?
         // User requested "Implement proper photo reception...".
         // Let's fail if we can't detect faces, as that's the point of the bot.
@@ -135,7 +125,7 @@ queueService.on('job_complete', async ({ job, output }) => {
             }
         }
     } catch (e) {
-        console.error('Failed to send result:', e);
+        logger.error('Failed to send result:', e);
     }
 });
 
@@ -150,7 +140,7 @@ queueService.on('job_failed', async ({ job, error }) => {
             await bot.telegram.sendMessage(job.chat_id, `💰 ${refund} points have been refunded.`);
         }
     } catch (e) {
-        console.error('Failed to send failure notification:', e);
+        logger.error('Failed to send failure notification:', e);
     }
 });
 
@@ -174,8 +164,6 @@ bot.on('photo', async (ctx) => {
             updateUserPoints(userId, -price);
             addTransaction(userId, -price, 'demo_start');
             
-            console.log(`DEBUG: starting A2E job for demo_tmpl_${ctx.session.duration}, duration=${ctx.session.duration}`);
-            
             await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
             try {
                 const requestId = await startFaceSwap(faceUrl, baseUrl);
@@ -194,11 +182,19 @@ bot.on('photo', async (ctx) => {
 });
 
 // Bot Logic
-bot.command('start', async (ctx) => {
-    console.log('🔥 /start HANDLER (DEMO MENU)');
-    const user = getUser(String(ctx.from.id));
-    ctx.session = { step: null };
-    if (ctx.chat && ctx.chat.type === 'private') {
+/**
+ * Sends the main demo menu and introduction to the user.
+ * Works for both private chats and channel posts.
+ * Note: Bot must be channel admin with 'Can post messages' permission to reply in channels.
+ */
+async function sendDemoMenu(ctx) {
+    // Get user from database (based on from.id for DMs, or chat.id for channels if applicable)
+    const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
+    const user = getUser(userId);
+    
+    if (ctx.session) ctx.session.step = null;
+
+    if (ctx.chat && (ctx.chat.type === 'private' || ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
         const p = demoCfg.packs;
         const msg = `🎭 *Face Swap Demo*
 Turn any clip into a face swap demo in seconds.
@@ -232,6 +228,7 @@ Turn any clip into a face swap demo in seconds.
         if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { } }
         if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
     }
+    
     const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
     await ctx.reply(
         `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).`,
@@ -242,6 +239,10 @@ Turn any clip into a face swap demo in seconds.
             [Markup.button.callback('Help', 'help')]
         ])
     );
+}
+
+bot.command('start', async (ctx) => {
+    await sendDemoMenu(ctx);
 });
 
 
@@ -254,10 +255,15 @@ async function postStartupPromo(targetId) {
         }
         const me = await bot.telegram.getMe();
         const username = me && me.username ? me.username : '';
-        const cta = `https://t.me/${username}?start=demo`;
+        const cta = `https://t.me/${username}?start=promo`;
 
-        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 [Start Creating Now](${cta})`;
-        const introMsg = await bot.telegram.sendMessage(normalizedTargetId, intro, { parse_mode: 'Markdown' });
+        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 Tap the button below to start using the bot in private messages where all features are available.`;
+        const introMsg = await bot.telegram.sendMessage(normalizedTargetId, intro, { 
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[{ text: 'Open Bot', url: cta }]]
+            }
+        });
         try { await bot.telegram.pinChatMessage(normalizedTargetId, introMsg.message_id); } catch (_) {}
         
         const t5 = demoCfg.templates['5'];
@@ -272,9 +278,15 @@ async function postStartupPromo(targetId) {
         const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
         const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
 
-        if (t5) await bot.telegram.sendVideo(normalizedTargetId, t5, { caption: cap5, parse_mode: 'Markdown' });
-        if (t10) await bot.telegram.sendVideo(normalizedTargetId, t10, { caption: cap10, parse_mode: 'Markdown' });
-        if (t15) await bot.telegram.sendVideo(normalizedTargetId, t15, { caption: cap15, parse_mode: 'Markdown' });
+        const openBotKb = {
+            reply_markup: {
+                inline_keyboard: [[{ text: 'Open Bot', url: cta }]]
+            }
+        };
+
+        if (t5) await bot.telegram.sendVideo(normalizedTargetId, t5, { caption: cap5, parse_mode: 'Markdown', ...openBotKb });
+        if (t10) await bot.telegram.sendVideo(normalizedTargetId, t10, { caption: cap10, parse_mode: 'Markdown', ...openBotKb });
+        if (t15) await bot.telegram.sendVideo(normalizedTargetId, t15, { caption: cap15, parse_mode: 'Markdown', ...openBotKb });
         
         logger.info('promo: posted startup promo', { targetId: normalizedTargetId });
     } catch (e) {
@@ -332,14 +344,47 @@ bot.command('chatid', async (ctx) => {
     }
 });
 
+let cachedBotUsername = null;
+async function getBotUsername() {
+    if (cachedBotUsername) return cachedBotUsername;
+    const me = await bot.telegram.getMe();
+    cachedBotUsername = me && me.username ? me.username : null;
+    return cachedBotUsername;
+}
+
+/**
+ * Dual handling approach for /start command:
+ * 1. DM handler (bot.command('start')): Standard entry point for private chats.
+ * 2. Channel handler (bot.on('channel_post')): Allows the bot to respond to /start in the promo channel.
+ * 
+ * Bot Permissions Required for Channel Handling:
+ * - Must be an Administrator in @FaceSwapVideoAi.
+ * - Must have 'Can post messages' permission.
+ * - 'Can edit messages' is recommended for pinning.
+ * 
+ * Deep Link Format: https://t.me/<YourBotUsername>?start=promo
+ */
 bot.on('channel_post', async (ctx) => {
-    try {
-        logger.info('promo: channel_post detected', {
-            chatId: ctx.chat && ctx.chat.id,
-            title: ctx.chat && ctx.chat.title,
-            username: ctx.chat && ctx.chat.username
-        });
-    } catch (_) {}
+    const text = ctx.channelPost?.text;
+    if (text && text.trim() === '/start') {
+        try {
+            logger.info('channel_post: /start detected', { chatId: ctx.chat.id });
+            const username = await getBotUsername();
+            if (!username) return;
+            const url = `https://t.me/${username}?start=promo`;
+            
+            await ctx.reply(
+                '👋 Please use this bot in private messages to access all features.',
+                {
+                    reply_markup: {
+                        inline_keyboard: [[{ text: 'Open Bot', url }]]
+                    }
+                }
+            );
+        } catch (error) {
+            logger.error('channel_post handler failed', { error: error.message });
+        }
+    }
 });
 
 
@@ -377,6 +422,9 @@ bot.action('buy_points_menu', async (ctx) => {
 
 async function startCheckout(ctx, pack) {
     try {
+        const username = await getBotUsername();
+        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
+        
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{
@@ -388,9 +436,12 @@ async function startCheckout(ctx, pack) {
                 quantity: 1,
             }],
             mode: 'payment',
-            success_url: process.env.STRIPE_SUCCESS_URL || 'https://t.me/YOUR_BOT?start=success',
-            cancel_url: process.env.STRIPE_CANCEL_URL || 'https://t.me/YOUR_BOT?start=cancel',
+            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
+            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
             client_reference_id: String(ctx.from.id),
+            metadata: {
+                points: String(pack.points)
+            }
         });
         await ctx.reply(
             `You selected *${pack.label}*.\n\nTap the button below to complete your payment.`,
@@ -537,7 +588,7 @@ bot.action('demo_tmpl_5', async (ctx) => {
         ctx.session.base_url = url;
         ctx.session.step = 'awaiting_face';
         
-        console.log(`DEBUG: demo_tmpl_5 handler, base_url=${url}`);
+        logger.info('demo_tmpl_5_selected', { url });
         await ctx.reply('Now send one clear photo of the face you want to use.');
     } catch (e) {
         logger.error('demo_tmpl_5 action failed', { error: e.message });
@@ -555,7 +606,7 @@ bot.action('demo_tmpl_10', async (ctx) => {
         ctx.session.base_url = url;
         ctx.session.step = 'awaiting_face';
         
-        console.log(`DEBUG: demo_tmpl_10 handler, base_url=${url}`);
+        logger.info('demo_tmpl_10_selected', { url });
         await ctx.reply('Now send one clear photo of the face you want to use.');
     } catch (e) {
         logger.error('demo_tmpl_10 action failed', { error: e.message });
@@ -573,7 +624,7 @@ bot.action('demo_tmpl_15', async (ctx) => {
         ctx.session.base_url = url;
         ctx.session.step = 'awaiting_face';
         
-        console.log(`DEBUG: demo_tmpl_15 handler, base_url=${url}`);
+        logger.info('demo_tmpl_15_selected', { url });
         await ctx.reply('Now send one clear photo of the face you want to use.');
     } catch (e) {
         logger.error('demo_tmpl_15 action failed', { error: e.message });
@@ -783,11 +834,11 @@ let stopped = false;
 async function safeStop(signal) {
     if (stopped) return;
     stopped = true;
-    console.log('info: safeStop called with', signal);
+    logger.info('safeStop called', { signal });
     try {
         await bot.stop(signal);
     } catch (err) {
-        console.error('ERROR: safeStop failed:', err.message);
+        logger.error('safeStop failed', { error: err.message });
     }
 }
 
