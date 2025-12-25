@@ -329,18 +329,7 @@ bot.on('channel_post', async (ctx) => {
     if (text && text.trim() === '/start') {
         try {
             logger.info('channel_post: /start detected', { chatId: ctx.chat.id });
-            const username = await getBotUsername();
-            if (!username) return;
-            const url = `https://t.me/${username}?start=promo`;
-
-            await ctx.reply(
-                '👋 Please use this bot in private messages to access all features.',
-                {
-                    reply_markup: {
-                        inline_keyboard: [[{ text: 'Open Bot', url }]]
-                    }
-                }
-            );
+            await sendDemoMenu(ctx);
         } catch (error) {
             logger.error('channel_post handler failed', { error: error.message });
         }
@@ -433,7 +422,7 @@ async function startWelcomeCreditsCheckout(ctx) {
                 },
                 quantity: 1,
             }],
-            mode: 'payment',
+            mode: 'setup',
             success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
             cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
             client_reference_id: String(ctx.from.id),
