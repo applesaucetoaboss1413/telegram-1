@@ -16,7 +16,7 @@ async function postPromoBatch(bot) {
         try {
             await bot.telegram.sendMediaGroup(channelId, mediaGroup);
         } catch (err) {
-            console.error('sendMediaGroup failed, falling back to individual photos:', err.message);
+            console.error('sendMediaGroup failed, falling back to sendPhoto:', err.message);
             for (const p of validPromos) {
                 await bot.telegram.sendPhoto(channelId, p.path, {
                     caption: p.caption.replace(/@YourBotName/g, `@${me.username}`)

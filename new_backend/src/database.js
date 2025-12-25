@@ -145,7 +145,5 @@ module.exports = {
     updateJobMeta,
     getPendingJobs,
     getJob,
-    addTransaction,
-    setKV,
-    getKV
+    addTransaction
 };
