@@ -243,9 +243,8 @@ Turn any clip into a face swap demo in seconds.
         creditMsg = `\n\n💰 *Credits:* You have ${credits} credits. A 5-second video costs 60 credits. New users get 69 welcome credits, so your first video is covered and you’ll have some left over.`;
     } else {
         creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
-        // Direct Stripe Payment Link for 69 credits offer (created 2025-12-25)
-        // Purpose: Direct onboarding for new users with $0 free credit grant
-        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://buy.stripe.com/test_1234567890abcdef')]);
+        // Telegram deep link for 69 credits offer
+        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]);
     }
 
     await ctx.replyWithMarkdown(
@@ -281,9 +280,8 @@ bot.command('start', async (ctx) => {
             await ctx.replyWithMarkdown(
                 `🎁 *Claim Your 69 Free Credits*\n\nConnect Stripe to claim your 69 free credits (enough for your first 5-second video).`,
                 Markup.inlineKeyboard([
-                    // Direct Stripe Payment Link for 69 credits offer (created 2025-12-25)
-                    // Purpose: Direct onboarding for new users with $0 free credit grant
-                    [Markup.button.url('🎁 Connect Stripe (69 free credits)', 'https://buy.stripe.com/test_1234567890abcdef')]
+                    // Telegram deep link for 69 credits offer
+                    [Markup.button.url('🎁 Connect Stripe (69 free credits)', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
                 ])
             );
             return; // Don't show regular menu yet to keep focus on the offer
@@ -757,8 +755,8 @@ Each 5-second video costs ${creditCost} credits. Your current balance is ${credi
 
 Please buy a credit pack to continue!`, 
             Markup.inlineKeyboard([
-                // Direct Stripe Payment Link for credit pack/onboarding
-                [Markup.button.url('Buy Credits', 'https://buy.stripe.com/test_1234567890abcdef')]
+                // Telegram deep link for 69 credits offer
+                [Markup.button.url('Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
             ]));
         }
 
