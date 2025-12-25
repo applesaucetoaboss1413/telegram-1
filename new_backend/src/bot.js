@@ -257,7 +257,7 @@ bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
 
-    if (payload === '69credits') {
+    if (payload === 'get_credits') {
         await startWelcomeCreditsCheckout(ctx);
         return;
     }
