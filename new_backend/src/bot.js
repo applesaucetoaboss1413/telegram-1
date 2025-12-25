@@ -244,7 +244,9 @@ Turn any clip into a face swap demo in seconds.
     } else {
         creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
         // Telegram deep link for 69 credits offer
-        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]);
+        const botUsername = await getBotUsername();
+        const botUrl = botUsername ? `https://t.me/${botUsername}?start=get_credits` : 'https://t.me/FaceSwapVideoAiBot?start=get_credits';
+        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', botUrl)]);
     }
 
     await ctx.replyWithMarkdown(
@@ -750,6 +752,8 @@ async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
         const creditCost = 60;
 
         if (credits < creditCost) {
+            const botUsername = await getBotUsername();
+            const botUrl = botUsername ? `https://t.me/${botUsername}?start=get_credits` : 'https://t.me/FaceSwapVideoAiBot?start=get_credits';
             return ctx.reply(`❌ You are out of credits for video face-swaps. 
 
 Each 5-second video costs ${creditCost} credits. Your current balance is ${credits} credits.
@@ -757,7 +761,7 @@ Each 5-second video costs ${creditCost} credits. Your current balance is ${credi
 Please buy a credit pack to continue!`,
                 Markup.inlineKeyboard([
                     // Telegram deep link for 69 credits offer
-                    [Markup.button.url('Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
+                    [Markup.button.url('Buy Credits', botUrl)]
                 ]));
         }
 
