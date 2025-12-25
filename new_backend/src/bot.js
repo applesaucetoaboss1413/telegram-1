@@ -11,8 +11,6 @@ const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
-const PROMO_CHANNEL_ID = process.env.PROMO_CHANNEL_ID || process.env.CHANNEL_ID || '@FaceSwapVideoAi';
-const OWNER_DM_ID = process.env.OWNER_DM_ID || 8063916626;
 const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -247,90 +245,11 @@ bot.command('start', async (ctx) => {
 
 
 
-async function postStartupPromo(targetId) {
-    try {
-        const normalizedTargetId = normalizeTargetId(targetId);
-        if (normalizedTargetId === null) {
-            throw new Error(`invalid targetId: ${String(targetId)}`);
-        }
-        const me = await bot.telegram.getMe();
-        const username = me && me.username ? me.username : '';
-        const cta = `https://t.me/${username}?start=promo`;
-
-        const intro = `🎬 *Face Swap Demos Available Now!*\n\nCreate professional AI face swap videos in seconds directly in this bot.\n\n👇 Check out the examples below.\n\n👉 Tap the button below to start using the bot in private messages where all features are available.`;
-        const introMsg = await bot.telegram.sendMessage(normalizedTargetId, intro, { 
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [[{ text: 'Open Bot', url: cta }]]
-            }
-        });
-        try { await bot.telegram.pinChatMessage(normalizedTargetId, introMsg.message_id); } catch (_) {}
-        
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
-
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
-
-        const cap5 = `⚡ *5s Demo*\nFastest preview. Costs ${c5.points} pts (~$${c5.usd}).\nGood for quick tests.\n\n👉 [Try it now](${cta})`;
-        const cap10 = `🎥 *10s Demo*\nStandard length. Costs ${c10.points} pts (~$${c10.usd}).\nBest balance of quality and cost.\n\n👉 [Try it now](${cta})`;
-        const cap15 = `🌟 *15s Demo*\nMaximum detail. Costs ${c15.points} pts (~$${c15.usd}).\nFor professional results.\n\n👉 [Try it now](${cta})`;
-
-        const openBotKb = {
-            reply_markup: {
-                inline_keyboard: [[{ text: 'Open Bot', url: cta }]]
-            }
-        };
-
-        if (t5) await bot.telegram.sendVideo(normalizedTargetId, t5, { caption: cap5, parse_mode: 'Markdown', ...openBotKb });
-        if (t10) await bot.telegram.sendVideo(normalizedTargetId, t10, { caption: cap10, parse_mode: 'Markdown', ...openBotKb });
-        if (t15) await bot.telegram.sendVideo(normalizedTargetId, t15, { caption: cap15, parse_mode: 'Markdown', ...openBotKb });
-        
-        logger.info('promo: posted startup promo', { targetId: normalizedTargetId });
-    } catch (e) {
-        logger.error('promo: postStartupPromo failed', { targetId: String(targetId), error: e.message });
-        throw e;
-    }
-}
-
-// Startup promo triggered via index.js
-async function runPromo() {
-    const channelId = PROMO_CHANNEL_ID;
-    const ownerId = OWNER_DM_ID;
-
-    logger.info('promo: targets', {
-        promoChannelId: channelId,
-        ownerDmId: ownerId,
-        envChannelId: process.env.CHANNEL_ID
-    });
-
-    if (isValidChannelTarget(channelId)) {
-        try {
-            await postStartupPromo(channelId);
-            logger.info('promo: posted startup promo for channel', { promoChannelId: channelId });
-        } catch (e) {
-            logger.error('promo: channel send failed', { promoChannelId: channelId, error: e.message });
-        }
-    } else {
-        logger.error('promo: invalid PROMO_CHANNEL_ID format', { promoChannelId: channelId });
-    }
-
-    if (ownerId) {
-        try {
-            await postStartupPromo(ownerId);
-            logger.info('promo: posted startup promo for dm', { ownerDmId: ownerId });
-        } catch (e) {
-            logger.error('promo: dm send failed', { ownerDmId: ownerId, error: e.message });
-        }
-    }
-}
-
 bot.command('promo', async (ctx) => {
     try {
-        await runPromo();
-        await ctx.reply('✅ Promo sequence (Channel + DM) triggered successfully.');
+        const { startPromoScheduler } = require('./services/promoScheduler');
+        await startPromoScheduler(bot);
+        await ctx.reply('✅ Batch promo scheduler manually triggered.');
     } catch (e) {
         await ctx.reply(`Error: ${e.message}`);
     }
@@ -845,4 +764,4 @@ async function safeStop(signal) {
 process.once('SIGINT', () => safeStop('SIGINT'));
 process.once('SIGTERM', () => safeStop('SIGTERM'));
 
-module.exports = { bot, postStartupPromo, runPromo };
+module.exports = { bot };

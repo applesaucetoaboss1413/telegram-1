@@ -1,5 +1,6 @@
 require('dotenv').config();
-const { bot, runPromo } = require('./src/bot');
+const { bot } = require('./src/bot');
+const { startPromoScheduler } = require('./src/services/promoScheduler');
 const app = require('./src/server');
 const express = require('express');
 const queueService = require('./src/services/queueService');
@@ -95,16 +96,14 @@ async function start() {
             logger.warn('BOT_TOKEN missing, bot not started');
         }
 
+        // Start Automated Promo Scheduler
+        startPromoScheduler(bot);
+
     } catch (e) {
         logger.error('Startup Failed', { error: e.message, stack: e.stack });
         process.exit(1);
     }
     logger.info("Bot started successfully");
-    
-    // Trigger startup promo after a short delay
-    setTimeout(() => {
-        runPromo().catch(err => logger.error('Startup promo failed:', err));
-    }, 5000);
 }
 
 start();
