@@ -10,17 +10,28 @@ async function postPromoBatch(bot) {
         const mediaGroup = validPromos.map((p, i) => ({
             type: 'photo',
             media: p.path,
-            caption: i === 0 ? p.caption.replace(/@YourBotName/g, `@${me.username}`) : undefined
+            ...(i === 0 && p.caption ? { caption: p.caption.replace(/@YourBotName/g, `@${me.username}`) } : {})
         }));
 
         try {
             await bot.telegram.sendMediaGroup(channelId, mediaGroup);
-        } catch (err) {
-            console.error('sendMediaGroup failed, falling back to sendPhoto:', err.message);
-            for (const p of validPromos) {
-                await bot.telegram.sendPhoto(channelId, p.path, {
-                    caption: p.caption.replace(/@YourBotName/g, `@${me.username}`)
-                });
+        } catch (error) {
+            console.error('Media group send failed, falling back to individual photos:', error.message);
+
+            // Fallback path: send photos individually
+            for (const promo of mediaGroup.map(item => ({
+                path: item.media,
+                caption: item.caption
+            }))) {
+                try {
+                    await bot.telegram.sendPhoto(
+                        channelId,
+                        promo.path,
+                        promo.caption ? { caption: promo.caption } : undefined
+                    );
+                } catch (fallbackError) {
+                    console.error('Failed to send individual promo:', fallbackError.message);
+                }
             }
         }
     } catch (error) {
