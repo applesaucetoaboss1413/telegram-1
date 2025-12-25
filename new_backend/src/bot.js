@@ -251,7 +251,8 @@ bot.command('promo', async (ctx) => {
         await postPromoBatch(bot);
         await ctx.reply('✅ Batch promo post manually triggered.');
     } catch (e) {
-        await ctx.reply(`Error: ${e.message}`);
+        logger.error('Manual promo trigger failed', { error: e.message });
+        await ctx.reply(`❌ Error: ${e.message}`);
     }
 });
 
