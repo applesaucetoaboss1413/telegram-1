@@ -253,6 +253,39 @@ Turn any clip into a face swap demo in seconds.
 }
 
 bot.command('start', async (ctx) => {
+    const payload = ctx.startPayload;
+    const userId = String(ctx.from.id);
+    
+    if (payload === 'get_69_credits') {
+        const credits = getCredits({ telegramUserId: userId });
+        const userCreditsRecord = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(userId);
+        
+        if (userCreditsRecord && userCreditsRecord.stripe_customer_id) {
+            // Already Stripe-linked, try to grant welcome credits if not already done
+            const granted = grantWelcomeCredits({ 
+                telegramUserId: userId, 
+                stripeCustomerId: userCreditsRecord.stripe_customer_id 
+            });
+            
+            if (granted) {
+                await ctx.replyWithMarkdown(`🎉 *Success!* You've been granted 69 welcome credits (enough for your first 5-second video).`);
+            } else if (credits > 0) {
+                await ctx.replyWithMarkdown(`💰 You already have ${credits} credits. Start creating your first demo!`);
+            } else {
+                await ctx.replyWithMarkdown(`👋 Welcome back! You've already used your welcome credits.`);
+            }
+        } else {
+            // Not Stripe-linked
+            await ctx.replyWithMarkdown(
+                `🎁 *Claim Your 69 Free Credits*\n\nConnect Stripe to claim your 69 free credits (enough for your first 5-second video).`,
+                Markup.inlineKeyboard([
+                    [Markup.button.url('🎁 Connect Stripe (69 free credits)', process.env.PUBLIC_URL || 'https://t.me/FaceSwapVideoAiBot')]
+                ])
+            );
+            return; // Don't show regular menu yet to keep focus on the offer
+        }
+    }
+    
     await sendDemoMenu(ctx);
 });
 

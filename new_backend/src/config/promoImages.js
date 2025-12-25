@@ -2,7 +2,7 @@ const PROMO_IMAGES = [
    { 
      id: 'promo-1', 
      path: 'https://res.cloudinary.com/drtnsapz2/image/upload/v1766638693/How-to-face-swap-Photoshop_tok5vd.webp', 
-     caption: 'Swap your face into any video in seconds. New users get 69 free credits (first 5-second video costs 60, 9 left over). Open @FaceSwapVideoAi and tap ‘Get 69 Free Credits’ to start.', 
+     caption: 'Swap your face into any video in seconds. New users get 69 free credits (first 5-second video costs 60, 9 left over). Open @FaceSwapVideoAi or tap https://t.me/FaceSwapVideoAi?start=get_69_credits to start.', 
    }, 
    { 
      id: 'promo-2', 
