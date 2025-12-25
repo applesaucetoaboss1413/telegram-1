@@ -32,7 +32,7 @@ bot.use(async (ctx, next) => {
         const t = ctx.updateType;
         const uid = ctx.from && ctx.from.id;
         logger.info('update', { type: t, user: uid });
-    } catch (_) {}
+    } catch (_) { }
     return next();
 });
 
@@ -105,8 +105,8 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
     // Let's check:
     const ext = path.extname(new URL(url).pathname).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-       // Warn or try to fix? Telegram usually provides extensions.
-       logger.warn('Telegram URL missing standard image extension', { url });
+        // Warn or try to fix? Telegram usually provides extensions.
+        logger.warn('Telegram URL missing standard image extension', { url });
     }
 
     return { url, buffer };
@@ -162,7 +162,7 @@ bot.on('photo', async (ctx) => {
             }
             updateUserPoints(userId, -price);
             addTransaction(userId, -price, 'demo_start');
-            
+
             await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
             try {
                 const requestId = await startFaceSwap(faceUrl, baseUrl);
@@ -190,7 +190,7 @@ async function sendDemoMenu(ctx) {
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
     const credits = getCredits({ telegramUserId: userId });
-    
+
     if (ctx.session) ctx.session.step = null;
 
     if (ctx.chat && (ctx.chat.type === 'private' || ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
@@ -227,9 +227,9 @@ Turn any clip into a face swap demo in seconds.
         if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { } }
         if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
     }
-    
+
     const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
-    
+
     // Credit messaging
     let creditMsg = '';
     let buttons = [
@@ -256,18 +256,18 @@ Turn any clip into a face swap demo in seconds.
 bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
-    
+
     if (payload === 'get_69_credits') {
         const credits = getCredits({ telegramUserId: userId });
         const userCreditsRecord = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(userId);
-        
+
         if (userCreditsRecord && userCreditsRecord.stripe_customer_id) {
             // Already Stripe-linked, try to grant welcome credits if not already done
-            const granted = grantWelcomeCredits({ 
-                telegramUserId: userId, 
-                stripeCustomerId: userCreditsRecord.stripe_customer_id 
+            const granted = grantWelcomeCredits({
+                telegramUserId: userId,
+                stripeCustomerId: userCreditsRecord.stripe_customer_id
             });
-            
+
             if (granted) {
                 await ctx.replyWithMarkdown(`🎉 *Success!* You've been granted 69 welcome credits (enough for your first 5-second video).`);
             } else if (credits > 0) {
@@ -291,7 +291,7 @@ bot.command('start', async (ctx) => {
     if (payload === 'buy_points') {
         return sendBuyPointsMenu(ctx);
     }
-    
+
     await sendDemoMenu(ctx);
 });
 
@@ -358,7 +358,7 @@ bot.on('channel_post', async (ctx) => {
             const username = await getBotUsername();
             if (!username) return;
             const url = `https://t.me/${username}?start=promo`;
-            
+
             await ctx.reply(
                 '👋 Please use this bot in private messages to access all features.',
                 {
@@ -410,7 +410,7 @@ async function startCheckout(ctx, pack) {
     try {
         const username = await getBotUsername();
         const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
-        
+
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{
@@ -441,6 +441,44 @@ async function startCheckout(ctx, pack) {
     } catch (e) {
         logger.error('startCheckout failed', { error: e.message, pack: pack.label, userId: ctx.from.id });
         ctx.reply('❌ Payment system error. Please try again later.');
+    }
+}
+
+async function startWelcomeCreditsCheckout(ctx) {
+    try {
+        const username = await getBotUsername();
+        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
+
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [{
+                price_data: {
+                    currency: 'usd',
+                    product_data: { name: '69 Welcome Credits' },
+                    unit_amount: 0,
+                },
+                quantity: 1,
+            }],
+            mode: 'payment',
+            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
+            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
+            client_reference_id: String(ctx.from.id),
+            metadata: {
+                credits: '69'
+            }
+        });
+        await ctx.reply(
+            'To get your 69 free credits, complete this quick registration (no charge).',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: 'Register & Get 69 Credits', url: session.url }]],
+                },
+            }
+        );
+    } catch (e) {
+        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, userId: ctx.from.id });
+        ctx.reply('❌ Registration system error. Please try again later.');
     }
 }
 
@@ -494,29 +532,29 @@ bot.action('demo_new', async (ctx) => {
     }
 });
 
-bot.action('demo_len_5', async (ctx) => { 
+bot.action('demo_len_5', async (ctx) => {
     try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
+        await ctx.answerCbQuery();
+        ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] };
+        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]]));
     } catch (e) {
         logger.error('demo_len_5 action failed', { error: e.message });
     }
 });
-bot.action('demo_len_10', async (ctx) => { 
+bot.action('demo_len_10', async (ctx) => {
     try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
+        await ctx.answerCbQuery();
+        ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] };
+        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]]));
     } catch (e) {
         logger.error('demo_len_10 action failed', { error: e.message });
     }
 });
-bot.action('demo_len_15', async (ctx) => { 
+bot.action('demo_len_15', async (ctx) => {
     try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
+        await ctx.answerCbQuery();
+        ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] };
+        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]]));
     } catch (e) {
         logger.error('demo_len_15 action failed', { error: e.message });
     }
@@ -567,13 +605,13 @@ bot.action('demo_tmpl_5', async (ctx) => {
         await ctx.answerCbQuery();
         const url = demoCfg.templates['5'];
         if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
-        
+
         ctx.session.mode = 'demo';
         ctx.session.duration = 5;
         ctx.session.price = demoCfg.demoPrices['5'];
         ctx.session.base_url = url;
         ctx.session.step = 'awaiting_face';
-        
+
         logger.info('demo_tmpl_5_selected', { url });
         await ctx.reply('Now send one clear photo of the face you want to use.');
     } catch (e) {
@@ -585,13 +623,13 @@ bot.action('demo_tmpl_10', async (ctx) => {
         await ctx.answerCbQuery();
         const url = demoCfg.templates['10'];
         if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
-        
+
         ctx.session.mode = 'demo';
         ctx.session.duration = 10;
         ctx.session.price = demoCfg.demoPrices['10'];
         ctx.session.base_url = url;
         ctx.session.step = 'awaiting_face';
-        
+
         logger.info('demo_tmpl_10_selected', { url });
         await ctx.reply('Now send one clear photo of the face you want to use.');
     } catch (e) {
@@ -603,13 +641,13 @@ bot.action('demo_tmpl_15', async (ctx) => {
         await ctx.answerCbQuery();
         const url = demoCfg.templates['15'];
         if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
-        
+
         ctx.session.mode = 'demo';
         ctx.session.duration = 15;
         ctx.session.price = demoCfg.demoPrices['15'];
         ctx.session.base_url = url;
         ctx.session.step = 'awaiting_face';
-        
+
         logger.info('demo_tmpl_15_selected', { url });
         await ctx.reply('Now send one clear photo of the face you want to use.');
     } catch (e) {
@@ -663,7 +701,7 @@ bot.on('photo', async (ctx) => {
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = photo.file_id;
     const fileSize = photo.file_size;
-    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) {}
+    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) { }
 
     if (ctx.session.step === 'awaiting_swap_photo') {
         try {
@@ -672,7 +710,7 @@ bot.on('photo', async (ctx) => {
             const uploaded = await uploadFromUrl(url, 'image');
             ctx.session.swapUrl = uploaded;
             ctx.session.step = 'awaiting_target';
-            
+
             const type = ctx.session.mode === 'video' ? 'VIDEO' : 'PHOTO';
             ctx.reply(`✅ Source received. Now send the **Target ${type}** (the one to replace).`);
         } catch (e) {
@@ -742,7 +780,7 @@ bot.on('video', async (ctx) => {
 
 async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
     const user = getUser(userId);
-    
+
     // Check credits for video jobs
     if (type === 'video') {
         const credits = getCredits({ telegramUserId: userId });
@@ -753,11 +791,11 @@ async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
 
 Each 5-second video costs ${creditCost} credits. Your current balance is ${credits} credits.
 
-Please buy a credit pack to continue!`, 
-            Markup.inlineKeyboard([
-                // Telegram deep link for 69 credits offer
-                [Markup.button.url('Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
-            ]));
+Please buy a credit pack to continue!`,
+                Markup.inlineKeyboard([
+                    // Telegram deep link for 69 credits offer
+                    [Markup.button.url('Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
+                ]));
         }
 
         // Spend credits atomically
@@ -831,7 +869,7 @@ bot.on('text', async (ctx) => {
     await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
     try {
         const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
-            try { if (m) ctx.reply(m); } catch (_) {}
+            try { if (m) ctx.reply(m); } catch (_) { }
         }, 120000);
         await ctx.reply('✅ Video Ready!');
         await ctx.reply(url);

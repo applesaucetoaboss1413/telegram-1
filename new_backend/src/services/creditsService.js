@@ -100,8 +100,82 @@ const spendCredits = ({ telegramUserId, amount }) => {
     }
 };
 
+/**
+ * Grants credits to a user (general function).
+ */
+const grantCredits = ({ telegramUserId, amount }) => {
+    try {
+        const tId = String(telegramUserId);
+        const now = Date.now();
+
+        // Get existing record
+        let record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ? ORDER BY updated_at DESC').get(tId);
+        if (!record) {
+            // Create new
+            db.prepare(`
+                INSERT INTO user_credits (telegram_user_id, credits, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+            `).run(tId, amount, now, now);
+        } else {
+            // Update
+            db.prepare(`
+                UPDATE user_credits
+                SET credits = credits + ?, updated_at = ?
+                WHERE id = ?
+            `).run(amount, now, record.id);
+        }
+        logger.info('Credits granted', { telegramUserId: tId, amount });
+        return true;
+    } catch (error) {
+        logger.error('Error granting credits', { error: error.message, telegramUserId, amount });
+        return false;
+    }
+};
+
+/**
+ * Deducts credits from a user.
+ */
+const deductCredits = ({ telegramUserId, amount }) => {
+    return spendCredits({ telegramUserId, amount });
+};
+
+/**
+ * Initializes user credits record with 0 credits if not exists.
+ */
+const initializeUserCredits = (telegramUserId) => {
+    try {
+        const tId = String(telegramUserId);
+        const now = Date.now();
+        let record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(tId);
+        if (!record) {
+            db.prepare(`
+                INSERT INTO user_credits (telegram_user_id, credits, created_at, updated_at)
+                VALUES (?, 0, ?, ?)
+            `).run(tId, now, now);
+        }
+    } catch (error) {
+        logger.error('Error initializing user credits', { error: error.message, telegramUserId });
+    }
+};
+
+/**
+ * Gets all users' credit balances.
+ */
+const getAllUserCredits = () => {
+    try {
+        return db.prepare('SELECT telegram_user_id, SUM(credits) as credits_balance FROM user_credits GROUP BY telegram_user_id').all();
+    } catch (error) {
+        logger.error('Error getting all user credits', { error: error.message });
+        return [];
+    }
+};
+
 module.exports = {
     grantWelcomeCredits,
     getCredits,
-    spendCredits
+    spendCredits,
+    grantCredits,
+    deductCredits,
+    initializeUserCredits,
+    getAllUserCredits
 };
