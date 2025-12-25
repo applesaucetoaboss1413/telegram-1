@@ -1,134 +1,83 @@
-const { PROMO_IMAGES, PROMO_CONFIG } = require('../config/promoImages');
-const { getKV, setKV } = require('../database');
-const winston = require('winston');
+const { PROMO_IMAGES } = require('../config/promoImages');
 
-const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-    ),
-    transports: [new winston.transports.Console()]
-});
+/**
+ * Posts the promotional image batch to the configured Telegram channel.
+ * Uses sendMediaGroup as primary method with a fallback to individual sendPhoto calls.
+ */
+async function postPromoBatch(bot) {
+  try {
+    // 1. Filter and validate promo images (Single filter operation)
+    const validPromos = PROMO_IMAGES.filter(p => Boolean(p && p.path));
 
-const OWNER_DM_ID = process.env.OWNER_DM_ID || 8063916626;
+    if (validPromos.length === 0) {
+      console.warn('No valid promo images configured for promo batch');
+      return;
+    }
 
-async function sendAdminAlert(bot, message) {
+    // Get bot username for dynamic replacement
+    const me = await bot.telegram.getMe();
+    const botUsername = me.username;
+
+    // 2. Format media group (Single map operation)
+    const mediaGroup = validPromos.map((promo, index) => {
+      const caption = promo.caption ? promo.caption.replace(/@YourBotName/g, `@${botUsername}`) : '';
+      return {
+        type: 'photo',
+        media: promo.path,
+        // Caption only on the first item as per spec
+        ...(index === 0 && caption ? { caption } : {})
+      };
+    });
+
     try {
-        await bot.telegram.sendMessage(OWNER_DM_ID, `🚨 *PROMO ALERT* 🚨\n\n${message}`, { parse_mode: 'Markdown' });
-    } catch (err) {
-        logger.error('Failed to send admin alert', { error: err.message });
+      // Primary path: send as media group (album)
+      await bot.telegram.sendMediaGroup(
+        process.env.PROMO_CHANNEL_ID,
+        mediaGroup
+      );
+      console.log('Posted promo batch (media group)', {
+        channel: process.env.PROMO_CHANNEL_ID,
+        count: validPromos.length,
+      });
+    } catch (mediaGroupError) {
+      console.error(
+        'sendMediaGroup failed for promo batch, falling back to sendPhoto loop:',
+        mediaGroupError.message
+      );
+
+      // Fallback: send each promo individually
+      for (const promo of validPromos) {
+        const caption = promo.caption ? promo.caption.replace(/@YourBotName/g, `@${botUsername}`) : '';
+        await bot.telegram.sendPhoto(
+          process.env.PROMO_CHANNEL_ID,
+          promo.path,
+          caption ? { caption } : {}
+        );
+      }
+
+      console.log('Posted promo batch via sendPhoto loop', {
+        channel: process.env.PROMO_CHANNEL_ID,
+        count: validPromos.length,
+      });
     }
+  } catch (error) {
+    console.error('Failed to post promo batch:', error.message);
+    console.info('Retrying in 5 minutes...');
+    // Automatic retry after 5 minutes on failure
+    setTimeout(() => postPromoBatch(bot), 5 * 60 * 1000);
+  }
 }
 
-function validateContent(promo) {
-    if (!promo.id || !promo.path || !promo.caption) {
-        throw new Error(`Invalid promo metadata for ID: ${promo.id}`);
-    }
-    if (promo.caption.length < 10) {
-        throw new Error(`Caption too short for ID: ${promo.id}`);
-    }
-    // Simple URL validation
-    if (!promo.path.startsWith('http')) {
-        throw new Error(`Invalid URL for ID: ${promo.id}`);
-    }
-    return true;
+/**
+ * Initializes the promo scheduler.
+ * Runs once on startup and then every 6 hours.
+ */
+function startPromoScheduler(bot) {
+  // Initial run on startup
+  postPromoBatch(bot).catch(err => console.error('Startup promo post failed:', err.message));
+
+  // Repeat every 6 hours
+  setInterval(() => postPromoBatch(bot), 6 * 60 * 60 * 1000);
 }
 
-async function postPromoBatch(bot, retryCount = 0) {
-    const startTime = Date.now();
-    try {
-        logger.info('Starting promo batch execution', { count: PROMO_IMAGES.length, channel: PROMO_CONFIG.channelId, retryCount });
-
-        // 1. Pre-posting Validation
-        PROMO_IMAGES.forEach(validateContent);
-
-        const me = await bot.telegram.getMe();
-        const botUsername = me.username;
-
-        // 2. Construct media group
-        const mediaGroup = PROMO_IMAGES.map(promo => ({
-            type: 'photo',
-            media: promo.path,
-            caption: promo.caption.replace(/@YourBotName/g, `@${botUsername}`)
-        }));
-
-        // 3. Post to Telegram
-        const results = await bot.telegram.sendMediaGroup(PROMO_CONFIG.channelId, mediaGroup);
-        
-        // 4. Verification
-        if (!results || results.length !== PROMO_IMAGES.length) {
-            throw new Error(`Post verification failed: expected ${PROMO_IMAGES.length} messages, got ${results?.length || 0}`);
-        }
-
-        // 5. Success State Update
-        const state = getKV('promo_state') || { error_history: [] };
-        state.last_successful_post = Date.now();
-        state.retry_count = 0;
-        state.last_error = null;
-        setKV('promo_state', state);
-
-        logger.info('Promo batch posted successfully', { duration: Date.now() - startTime });
-        
-    } catch (error) {
-        const errorMsg = error.message;
-        logger.error('Failed to post promo batch', { error: errorMsg, retryCount, stack: error.stack });
-
-        // Update State with Error
-        const state = getKV('promo_state') || { error_history: [] };
-        state.last_error = { timestamp: Date.now(), message: errorMsg };
-        state.error_history.push(state.last_error);
-        if (state.error_history.length > 50) state.error_history.shift(); // Limit history
-        state.retry_count = retryCount + 1;
-        setKV('promo_state', state);
-
-        // Admin Alerts
-        if (state.retry_count >= 3) {
-            await sendAdminAlert(bot, `Persistent failure in promo scheduler (Attempt ${state.retry_count}):\n\n${errorMsg}`);
-        }
-
-        // Exponential Backoff Retry
-        // Initial delay 5 mins, double each time, max 1 hour
-        const delay = Math.min(PROMO_CONFIG.retryDelayMs * Math.pow(2, retryCount), 60 * 60 * 1000);
-        logger.info(`Scheduling retry in ${delay / 60000} minutes...`);
-        setTimeout(() => postPromoBatch(bot, state.retry_count), delay);
-    }
-}
-
-async function startPromoScheduler(bot) {
-    logger.info('Initializing enhanced promo scheduler');
-
-    const state = getKV('promo_state') || {};
-    const now = Date.now();
-    const lastPost = state.last_successful_post || 0;
-    const timeSinceLastPost = now - lastPost;
-
-    // Heartbeat for downtime monitoring
-    setInterval(() => {
-        const s = getKV('promo_state') || {};
-        s.last_heartbeat = Date.now();
-        setKV('promo_state', s);
-    }, 60000); // Every minute
-
-    // Check for downtime on startup
-    if (state.last_heartbeat && (now - state.last_heartbeat) > 15 * 60 * 1000) {
-        await sendAdminAlert(bot, `System recovery detected. Downtime was approximately ${Math.round((now - state.last_heartbeat) / 60000)} minutes.`);
-    }
-
-    // Adherence check: If last post was more than 6 hours ago, post immediately
-    if (timeSinceLastPost >= PROMO_CONFIG.intervalMs) {
-        logger.info('Last post exceeded interval or never occurred. Posting immediately.');
-        postPromoBatch(bot).catch(err => {
-            logger.error('Initial startup post failed', { error: err.message });
-        });
-    } else {
-        const remainingTime = PROMO_CONFIG.intervalMs - timeSinceLastPost;
-        logger.info(`Next scheduled post in ${Math.round(remainingTime / 60000)} minutes`);
-        setTimeout(() => postPromoBatch(bot), remainingTime);
-    }
-
-    // Set recurring interval
-    setInterval(() => postPromoBatch(bot), PROMO_CONFIG.intervalMs);
-}
-
-module.exports = { startPromoScheduler };
+module.exports = { startPromoScheduler, postPromoBatch };

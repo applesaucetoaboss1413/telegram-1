@@ -247,9 +247,9 @@ bot.command('start', async (ctx) => {
 
 bot.command('promo', async (ctx) => {
     try {
-        const { startPromoScheduler } = require('./services/promoScheduler');
-        await startPromoScheduler(bot);
-        await ctx.reply('✅ Batch promo scheduler manually triggered.');
+        const { postPromoBatch } = require('./services/promoScheduler');
+        await postPromoBatch(bot);
+        await ctx.reply('✅ Batch promo post manually triggered.');
     } catch (e) {
         await ctx.reply(`Error: ${e.message}`);
     }
