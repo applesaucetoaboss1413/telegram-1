@@ -13,7 +13,7 @@ const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
-const PROMO_CHANNEL_ID = process.env.PROMO_CHANNEL_ID || '-1002302324707';
+const PROMO_CHANNEL_ID = process.env.PROMO_CHANNEL_ID || process.env.CHANNEL_ID || '@FaceSwapVideoAi';
 const OWNER_DM_ID = 8063916626;
 const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
 
@@ -46,18 +46,25 @@ try {
     logger.info('boot', { buildId: BUILD_ID, promoChannelId: PROMO_CHANNEL_ID, ownerDmId: OWNER_DM_ID, envPromoChannelId: process.env.PROMO_CHANNEL_ID, envChannelId: process.env.CHANNEL_ID });
 } catch (_) {}
 
-const normalizeNumericTargetId = (targetId) => {
+const normalizeTargetId = (targetId) => {
     if (targetId === undefined || targetId === null) return null;
     const s = String(targetId).trim();
-    if (!/^-?\d+$/.test(s)) return null;
-    const n = Number(s);
-    if (!Number.isFinite(n)) return null;
-    return n;
+    if (/^-?\d+$/.test(s)) {
+        const n = Number(s);
+        if (!Number.isFinite(n)) return null;
+        return n;
+    }
+    if (/^@[\w\d_]{5,}$/.test(s)) return s;
+    if (/^https?:\/\/t\.me\/[\w\d_]{5,}$/i.test(s)) {
+        const slug = s.replace(/^https?:\/\/t\.me\//i, '');
+        return `@${slug}`;
+    }
+    return null;
 };
 
-const isValidChannelId = (targetId) => {
+const isValidChannelTarget = (targetId) => {
     const s = String(targetId).trim();
-    return /^-100\d+$/.test(s);
+    return /^-100\d+$/.test(s) || /^@[\w\d_]{5,}$/.test(s);
 };
 
 // Helpers
@@ -241,7 +248,7 @@ Turn any clip into a face swap demo in seconds.
 
 async function postStartupPromo(targetId) {
     try {
-        const normalizedTargetId = normalizeNumericTargetId(targetId);
+        const normalizedTargetId = normalizeTargetId(targetId);
         if (normalizedTargetId === null) {
             throw new Error(`invalid targetId: ${String(targetId)}`);
         }
@@ -287,7 +294,7 @@ async function runPromo() {
         envChannelId: process.env.CHANNEL_ID
     });
 
-    if (isValidChannelId(channelId)) {
+    if (isValidChannelTarget(channelId)) {
         try {
             await postStartupPromo(channelId);
             logger.info('promo: posted startup promo for channel', { promoChannelId: channelId });
