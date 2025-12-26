@@ -368,6 +368,28 @@ bot.on('channel_post', async (ctx) => {
     }
 });
 
+// Callback handler for 69 free credits button - works from anywhere!
+bot.action('get_free_credits', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        logger.info('get_free_credits callback', { userId });
+        
+        // Check if user already has welcome credits
+        const existingCredits = getCredits({ telegramUserId: userId });
+        if (existingCredits > 0) {
+            await ctx.reply(`You already have ${existingCredits} credits! Use them to create amazing face swap videos.\n\nTap "Create new demo" below to get started.`);
+            await sendDemoMenu(ctx);
+            return;
+        }
+        
+        // Show Stripe setup checkout
+        await startWelcomeCreditsCheckout(ctx);
+    } catch (e) {
+        logger.error('get_free_credits action failed', { error: e.message });
+        ctx.reply('❌ Error processing request. Please try again.');
+    }
+});
 
 
 bot.action('buy_points', async (ctx) => {
