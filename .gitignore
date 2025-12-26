@@ -17,3 +17,7 @@ backend/outputs/
 
 telegram/
 status*.txt
+-e 
+# Environment files
+*.env
+*.env.*
