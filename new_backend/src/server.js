@@ -3,7 +3,7 @@ const app = express();
 const { getUser, updateUserPoints, addTransaction, markPurchased } = require('./database');
 const { grantWelcomeCredits } = require('./services/creditsService');
 const demoCfg = require('./services/a2eConfig');
-const bot = require('./bot'); // Ensure bot is exported and available
+const { bot } = require('./bot'); // Ensure bot is exported and available
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const HealthMonitor = require('./health');
 const winston = require('winston');
@@ -51,17 +51,49 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         const session = event.data.object;
         const userId = session.client_reference_id;
         const pointsFromMetadata = session.metadata && session.metadata.points ? parseInt(session.metadata.points) : 0;
-        const amount = session.amount_total;
+        const creditsFromMetadata = session.metadata && session.metadata.credits ? parseInt(session.metadata.credits) : 0;
+        const isWelcomeCredits = session.metadata && session.metadata.type === 'welcome_credits';
+        const amount = session.amount_total || 0;
 
         logger.info('Processing checkout session completed', { 
             userId: userId,
             sessionId: session.id,
             amount: amount,
-            pointsFromMetadata: pointsFromMetadata
+            pointsFromMetadata: pointsFromMetadata,
+            creditsFromMetadata: creditsFromMetadata,
+            isWelcomeCredits: isWelcomeCredits,
+            mode: session.mode
         });
 
         if (userId) {
-            // Determine points to add: prefer metadata, fallback to amount-based logic, or default to 100
+            // Handle 69 welcome credits flow
+            if (isWelcomeCredits && creditsFromMetadata > 0) {
+                try {
+                    const stripeCustomerId = session.customer || `checkout_${session.id}`;
+                    const granted = grantWelcomeCredits({ telegramUserId: userId, stripeCustomerId });
+                    
+                    if (granted) {
+                        logger.info('Welcome credits granted', { userId, credits: creditsFromMetadata });
+                        try {
+                            bot.telegram.sendMessage(userId, `🎉 Welcome! ${creditsFromMetadata} credits added to your account.\n\n✅ Your first 5-second video costs 60 credits\n✅ You'll have 9 credits left over after your first swap!\n\nUse /start to begin creating face swap videos!`);
+                        } catch (err) {
+                            logger.error('Failed to send welcome credits message', { userId, error: err.message });
+                        }
+                    } else {
+                        logger.info('Welcome credits already granted for user', { userId });
+                        try {
+                            bot.telegram.sendMessage(userId, `You've already received your welcome credits. Use /start to check your balance!`);
+                        } catch (err) {
+                            logger.error('Failed to send already-granted message', { userId, error: err.message });
+                        }
+                    }
+                } catch (error) {
+                    logger.error('Failed to grant welcome credits', { userId, error: error.message });
+                }
+                return res.json({ received: true });
+            }
+
+            // Handle paid checkout (points purchase)
             let pointsToAdd = pointsFromMetadata;
             
             if (!pointsToAdd) {
@@ -76,13 +108,13 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
                 updateUserPoints(userId, pointsToAdd);
                 addTransaction(userId, pointsToAdd, 'purchase_stripe');
                 
-                // Grant 69 welcome credits if applicable
+                // Grant 69 welcome credits if applicable (for paid purchases too)
                 const stripeCustomerId = session.customer;
                 if (stripeCustomerId) {
                     const granted = grantWelcomeCredits({ telegramUserId: userId, stripeCustomerId });
                     if (granted) {
                         try {
-                            bot.telegram.sendMessage(userId, `Welcome! 69 credits added to your account. Your first 5-second video costs 60 credits; you’ll have 9 credits left.`);
+                            bot.telegram.sendMessage(userId, `🎉 Welcome bonus! 69 extra credits added on top of your purchase!`);
                         } catch (err) {
                             logger.error('Failed to send welcome credits message', { userId, error: err.message });
                         }
@@ -117,6 +149,13 @@ You received ${rewardPoints} points (enough for a free 5s demo).`, { parse_mode:
                     userId: userId,
                     pointsAdded: pointsToAdd 
                 });
+
+                // Notify user of successful purchase
+                try {
+                    bot.telegram.sendMessage(userId, `✅ Payment successful! ${pointsToAdd} points have been added to your account.`);
+                } catch (err) {
+                    logger.error('Failed to send purchase confirmation', { userId, error: err.message });
+                }
             } catch (error) {
                 logger.error('Failed to add points', { 
                     userId: userId,

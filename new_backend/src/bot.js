@@ -260,7 +260,33 @@ bot.command('start', async (ctx) => {
     const userId = String(ctx.from.id);
 
     if (payload === 'get_credits') {
+        // Check if user already has welcome credits
+        const existingCredits = getCredits({ telegramUserId: userId });
+        if (existingCredits > 0) {
+            await ctx.reply(`You already have ${existingCredits} credits! Use them to create amazing face swap videos.\n\nTap "Create new demo" below to get started.`);
+            await sendDemoMenu(ctx);
+            return;
+        }
         await startWelcomeCreditsCheckout(ctx);
+        return;
+    }
+
+    if (payload === 'credits_success') {
+        // User returned from successful Stripe checkout
+        const credits = getCredits({ telegramUserId: userId });
+        if (credits > 0) {
+            await ctx.reply(`🎉 *Welcome!* Your ${credits} credits are ready!\n\nYour first 5-second face swap costs 60 credits. Let's create something awesome!`, { parse_mode: 'Markdown' });
+        } else {
+            // Credits may take a moment to be granted via webhook
+            await ctx.reply(`⏳ Processing your credits... They should appear in a moment!\n\nUse /start to check your balance.`);
+        }
+        await sendDemoMenu(ctx);
+        return;
+    }
+
+    if (payload === 'credits_cancel') {
+        await ctx.reply(`No worries! You can get your 69 welcome credits anytime by tapping the button below.`);
+        await sendDemoMenu(ctx);
         return;
     }
 
@@ -416,31 +442,34 @@ async function startWelcomeCreditsCheckout(ctx) {
         logger.info('getBotUsername result', { username, hasStripeKey: !!process.env.STRIPE_SECRET_KEY });
         const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
 
+        // Use payment mode with $0.00 amount - Stripe allows this for certain accounts
+        // Or use a minimal amount like $0.50 that can be refunded
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{
                 price_data: {
                     currency: 'usd',
-                    product_data: { name: '69 Welcome Credits' },
-                    unit_amount: 0,
+                    product_data: { name: '69 Welcome Credits (Free Signup Bonus)' },
+                    unit_amount: 50, // $0.50 - minimal amount, will be refunded or use as verification
                 },
                 quantity: 1,
             }],
-            mode: 'setup',
-            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
-            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
+            mode: 'payment',
+            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=credits_success`,
+            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=credits_cancel`,
             client_reference_id: String(ctx.from.id),
             metadata: {
-                credits: '69'
+                credits: '69',
+                type: 'welcome_credits'
             }
         });
         logger.info('Stripe session created successfully', { sessionId: session.id, url: session.url });
         await ctx.reply(
-            'To get your 69 free credits, complete this quick registration (no charge).',
+            `🎁 *Get 69 Free Credits!*\n\nComplete a quick $0.50 verification to get your 69 welcome credits.\n\n✅ Your first 5-second face swap video costs 60 credits\n✅ You'll have 9 credits left over\n✅ This is a one-time welcome bonus`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: 'Register & Get 69 Credits', url: session.url }]],
+                    inline_keyboard: [[{ text: '💳 Get 69 Credits ($0.50)', url: session.url }]],
                 },
             }
         );
