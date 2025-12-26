@@ -447,42 +447,35 @@ async function startWelcomeCreditsCheckout(ctx) {
     try {
         logger.info('startWelcomeCreditsCheckout called', { userId: ctx.from.id });
         const username = await getBotUsername();
-        logger.info('getBotUsername result', { username, hasStripeKey: !!process.env.STRIPE_SECRET_KEY });
-        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
+        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/ImMoreThanJustSomeBot';
 
-        // Use payment mode with $0.00 amount - Stripe allows this for certain accounts
-        // Or use a minimal amount like $0.50 that can be refunded
+        // Setup mode - saves card without charging
+        // NO line_items for setup mode!
         const session = await stripe.checkout.sessions.create({
+            mode: 'setup',
             payment_method_types: ['card'],
-            line_items: [{
-                price_data: {
-                    currency: 'usd',
-                    product_data: { name: '69 Welcome Credits (Free Signup Bonus)' },
-                    unit_amount: 50, // $0.50 - minimal amount, will be refunded or use as verification
-                },
-                quantity: 1,
-            }],
-            mode: 'payment',
-            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=credits_success`,
-            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=credits_cancel`,
+            success_url: `${botUrl}?start=credits_success`,
+            cancel_url: `${botUrl}?start=credits_cancel`,
             client_reference_id: String(ctx.from.id),
             metadata: {
                 credits: '69',
-                type: 'welcome_credits'
+                type: 'welcome_credits',
+                telegram_user_id: String(ctx.from.id)
             }
         });
-        logger.info('Stripe session created successfully', { sessionId: session.id, url: session.url });
+        
+        logger.info('Stripe setup session created', { sessionId: session.id, url: session.url });
         await ctx.reply(
-            `🎁 *Get 69 Free Credits!*\n\nComplete a quick $0.50 verification to get your 69 welcome credits.\n\n✅ Your first 5-second face swap video costs 60 credits\n✅ You'll have 9 credits left over\n✅ This is a one-time welcome bonus`,
+            `🎁 *Get 69 Free Credits!*\n\nSave your card to verify your account (you will NOT be charged).\n\n✅ Your first 5-second face swap costs 60 credits\n✅ You'll have 9 credits left over\n✅ This is a one-time welcome bonus`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '💳 Get 69 Credits ($0.50)', url: session.url }]],
+                    inline_keyboard: [[{ text: '💳 Verify & Get 69 Free Credits', url: session.url }]],
                 },
             }
         );
     } catch (e) {
-        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, stack: e.stack, userId: ctx.from.id, hasStripeKey: !!process.env.STRIPE_SECRET_KEY });
+        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, stack: e.stack, userId: ctx.from.id });
         ctx.reply('❌ Registration system error. Please try again later.');
     }
 }
