@@ -22,7 +22,7 @@ async function postStartupVideos(bot) {
             [Markup.button.callback('Create 5s Demo', 'demo_len_5')],
             [Markup.button.callback('Create 10s Demo', 'demo_len_10')],
             [Markup.button.callback('Create 15s Demo', 'demo_len_15')],
-            [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
+            [Markup.button.callback('🎁 Get 69 Free Credits', 'get_free_credits')]
         ]);
 
         if (t5) await bot.telegram.sendVideo(channelId, t5, { caption: cap5, reply_markup: purchaseButtons.reply_markup }).catch(() => { });
