@@ -243,10 +243,8 @@ Turn any clip into a face swap demo in seconds.
         creditMsg = `\n\n💰 *Credits:* You have ${credits} credits. A 5-second video costs 60 credits. New users get 69 welcome credits, so your first video is covered and you’ll have some left over.`;
     } else {
         creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
-        // Telegram deep link for 69 credits offer
-        const botUsername = await getBotUsername();
-        const botUrl = botUsername ? `https://t.me/${botUsername}?start=get_credits` : 'https://t.me/FaceSwapVideoAiBot?start=get_credits';
-        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', botUrl)]);
+        // Use callback button instead of URL deep link
+        buttons.unshift([Markup.button.callback('🎁 Get 69 Free Credits', 'get_free_credits')]);
     }
 
     await ctx.replyWithMarkdown(
