@@ -259,32 +259,35 @@ bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
 
-    // Debug logging for payload
-    logger.info('start_command', { userId, payload: payload || 'none', hasPayload: !!payload });
+    logger.info('start_command', { userId, payload: payload || 'none' });
 
     if (payload === 'get_credits') {
-        logger.info('get_credits_flow_started', { userId });
         // Check if user already has welcome credits
         const existingCredits = getCredits({ telegramUserId: userId });
-        logger.info('existing_credits_check', { userId, existingCredits });
+        
         if (existingCredits > 0) {
             await ctx.reply(`You already have ${existingCredits} credits! Use them to create amazing face swap videos.\n\nTap "Create new demo" below to get started.`);
             await sendDemoMenu(ctx);
             return;
         }
-        await startWelcomeCreditsCheckout(ctx);
+        
+        // Grant 69 free credits directly (no Stripe required)
+        const { grantCredits } = require('./services/creditsService');
+        const granted = grantCredits({ telegramUserId: userId, amount: 69 });
+        
+        if (granted) {
+            logger.info('welcome_credits_granted', { userId, credits: 69 });
+            await ctx.reply(`🎉 *Welcome!* 69 free credits have been added to your account!\n\n✅ Your first 5-second face swap costs 60 credits\n✅ You'll have 9 credits left over\n\nTap "Create new demo" below to get started!`, { parse_mode: 'Markdown' });
+        } else {
+            await ctx.reply(`Welcome! Tap "Create new demo" to get started.`);
+        }
+        await sendDemoMenu(ctx);
         return;
     }
 
     if (payload === 'credits_success') {
-        // User returned from successful Stripe checkout
         const credits = getCredits({ telegramUserId: userId });
-        if (credits > 0) {
-            await ctx.reply(`🎉 *Welcome!* Your ${credits} credits are ready!\n\nYour first 5-second face swap costs 60 credits. Let's create something awesome!`, { parse_mode: 'Markdown' });
-        } else {
-            // Credits may take a moment to be granted via webhook
-            await ctx.reply(`⏳ Processing your credits... They should appear in a moment!\n\nUse /start to check your balance.`);
-        }
+        await ctx.reply(`🎉 *Welcome!* Your ${credits} credits are ready!`, { parse_mode: 'Markdown' });
         await sendDemoMenu(ctx);
         return;
     }
