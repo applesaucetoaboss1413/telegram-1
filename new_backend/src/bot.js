@@ -389,26 +389,6 @@ bot.action('get_free_credits', async (ctx) => {
     }
 });
 
-// Callback handler for 69 free credits button
-bot.action('get_free_credits', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const userId = String(ctx.from.id);
-        logger.info('get_free_credits callback', { userId });
-        
-        const existingCredits = getCredits({ telegramUserId: userId });
-        if (existingCredits > 0) {
-            await ctx.reply(`You already have ${existingCredits} credits!`);
-            await sendDemoMenu(ctx);
-            return;
-        }
-        
-        await startWelcomeCreditsCheckout(ctx);
-    } catch (e) {
-        logger.error('get_free_credits action failed', { error: e.message });
-        ctx.reply('Error processing request. Please try again.');
-    }
-});
 bot.action('buy_points', async (ctx) => {
     ctx.answerCbQuery();
     ctx.reply(
