@@ -271,23 +271,19 @@ bot.command('start', async (ctx) => {
             return;
         }
         
-        // Grant 69 free credits directly (no Stripe required)
-        const { grantCredits } = require('./services/creditsService');
-        const granted = grantCredits({ telegramUserId: userId, amount: 69 });
-        
-        if (granted) {
-            logger.info('welcome_credits_granted', { userId, credits: 69 });
-            await ctx.reply(`🎉 *Welcome!* 69 free credits have been added to your account!\n\n✅ Your first 5-second face swap costs 60 credits\n✅ You'll have 9 credits left over\n\nTap "Create new demo" below to get started!`, { parse_mode: 'Markdown' });
-        } else {
-            await ctx.reply(`Welcome! Tap "Create new demo" to get started.`);
-        }
-        await sendDemoMenu(ctx);
+        // Show Stripe setup checkout (save card, no charge)
+        await startWelcomeCreditsCheckout(ctx);
         return;
     }
 
     if (payload === 'credits_success') {
+        // User returned from successful Stripe setup
         const credits = getCredits({ telegramUserId: userId });
-        await ctx.reply(`🎉 *Welcome!* Your ${credits} credits are ready!`, { parse_mode: 'Markdown' });
+        if (credits > 0) {
+            await ctx.reply(`🎉 *Welcome!* Your ${credits} credits are ready!\n\nYour first 5-second face swap costs 60 credits. Let's create something awesome!`, { parse_mode: 'Markdown' });
+        } else {
+            await ctx.reply(`⏳ Processing your credits... They should appear in a moment!\n\nUse /start to check your balance.`);
+        }
         await sendDemoMenu(ctx);
         return;
     }
