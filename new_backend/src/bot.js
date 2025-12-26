@@ -259,9 +259,14 @@ bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
 
+    // Debug logging for payload
+    logger.info('start_command', { userId, payload: payload || 'none', hasPayload: !!payload });
+
     if (payload === 'get_credits') {
+        logger.info('get_credits_flow_started', { userId });
         // Check if user already has welcome credits
         const existingCredits = getCredits({ telegramUserId: userId });
+        logger.info('existing_credits_check', { userId, existingCredits });
         if (existingCredits > 0) {
             await ctx.reply(`You already have ${existingCredits} credits! Use them to create amazing face swap videos.\n\nTap "Create new demo" below to get started.`);
             await sendDemoMenu(ctx);
