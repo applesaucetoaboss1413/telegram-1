@@ -59,23 +59,23 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
             userId: userId,
             sessionId: session.id,
             amount: amount,
+            mode: session.mode,
             pointsFromMetadata: pointsFromMetadata,
             creditsFromMetadata: creditsFromMetadata,
-            isWelcomeCredits: isWelcomeCredits,
-            mode: session.mode
+            isWelcomeCredits: isWelcomeCredits
         });
 
         if (userId) {
-            // Handle 69 welcome credits flow
-            if (isWelcomeCredits && creditsFromMetadata > 0) {
+            // Handle 69 welcome credits flow (setup mode - no charge)
+            if ((session.mode === 'setup' || isWelcomeCredits) && creditsFromMetadata > 0) {
                 try {
-                    const stripeCustomerId = session.customer || `checkout_${session.id}`;
+                    const stripeCustomerId = session.customer || session.setup_intent || `setup_${session.id}`;
                     const granted = grantWelcomeCredits({ telegramUserId: userId, stripeCustomerId });
                     
                     if (granted) {
-                        logger.info('Welcome credits granted', { userId, credits: creditsFromMetadata });
+                        logger.info('Welcome credits granted via setup mode', { userId, credits: creditsFromMetadata });
                         try {
-                            bot.telegram.sendMessage(userId, `🎉 Welcome! ${creditsFromMetadata} credits added to your account.\n\n✅ Your first 5-second video costs 60 credits\n✅ You'll have 9 credits left over after your first swap!\n\nUse /start to begin creating face swap videos!`);
+                            bot.telegram.sendMessage(userId, `🎉 Welcome! ${creditsFromMetadata} free credits added to your account!\n\n✅ Your first 5-second video costs 60 credits\n✅ You'll have 9 credits left over after your first swap!\n\nUse /start to begin creating face swap videos!`);
                         } catch (err) {
                             logger.error('Failed to send welcome credits message', { userId, error: err.message });
                         }
