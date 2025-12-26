@@ -94,7 +94,7 @@ async function postInteractiveMenu(bot) {
             [Markup.button.callback('My demos', 'demo_list')],
             [Markup.button.callback('Buy points', 'buy_points_menu')],
             [Markup.button.callback('Help', 'help')],
-            [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
+            [Markup.button.callback('🎁 Get 69 Free Credits', 'get_free_credits')]
         ]);
 
         await bot.telegram.sendMessage(channelId, '🎭 *Face Swap Demo*\nTurn any clip into a face swap demo in seconds.\n\n*Steps*\n1. Buy points\n2. Create new demo\n3. Pick length & base video\n4. Upload face', {
