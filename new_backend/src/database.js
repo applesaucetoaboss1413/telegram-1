@@ -148,6 +148,16 @@ const markPurchased = (userId) => {
     db.prepare('UPDATE users SET has_purchased = 1 WHERE id = ?').run(userId);
 };
 
+const setUserLanguage = (userId, language) => {
+    getUser(userId); // Ensure user exists
+    db.prepare('UPDATE users SET language = ? WHERE id = ?').run(language, userId);
+};
+
+const getUserLanguage = (userId) => {
+    const user = getUser(userId);
+    return user.language || 'en';
+};
+
 // Job Methods
 const createJob = (requestId, userId, chatId, type, meta = {}) => {
     db.prepare(`
