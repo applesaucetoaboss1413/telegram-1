@@ -1,8 +1,8 @@
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
-const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, db } = require('./database');
-const { spendCredits, getCredits } = require('./services/creditsService');
+const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, db, trackEvent } = require('./database');
+const { spendCredits, getCredits, claimDailyCredits, isFirstPurchase, getTotalVideosCreated } = require('./services/creditsService');
 const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
 const { downloadTo, downloadBuffer, cleanupFile } = require('./utils/fileUtils');
