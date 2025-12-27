@@ -548,8 +548,8 @@ bot.action('demo_new', async (ctx) => {
 bot.action('demo_len_5', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] };
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]]));
+        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 5, price: demoCfg.demoPrices['5'] };
+        await ctx.reply(`📹 Send your own video (5 seconds or less).\n\nMake sure your video is already trimmed to 5 seconds before sending.`);
     } catch (e) {
         logger.error('demo_len_5 action failed', { error: e.message });
     }
@@ -557,8 +557,8 @@ bot.action('demo_len_5', async (ctx) => {
 bot.action('demo_len_10', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] };
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]]));
+        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 10, price: demoCfg.demoPrices['10'] };
+        await ctx.reply(`📹 Send your own video (10 seconds or less).\n\nMake sure your video is already trimmed to 10 seconds before sending.`);
     } catch (e) {
         logger.error('demo_len_10 action failed', { error: e.message });
     }
@@ -566,8 +566,8 @@ bot.action('demo_len_10', async (ctx) => {
 bot.action('demo_len_15', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] };
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')], [Markup.button.callback('Use my own video', 'demo_base_user')]]));
+        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 15, price: demoCfg.demoPrices['15'] };
+        await ctx.reply(`📹 Send your own video (15 seconds or less).\n\nMake sure your video is already trimmed to 15 seconds before sending.`););
     } catch (e) {
         logger.error('demo_len_15 action failed', { error: e.message });
     }
