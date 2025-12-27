@@ -222,6 +222,8 @@ module.exports = {
     updateUserPoints,
     setReferredBy,
     markPurchased,
+    setUserLanguage,
+    getUserLanguage,
     createJob,
     updateJobStatus,
     updateJobMeta,
