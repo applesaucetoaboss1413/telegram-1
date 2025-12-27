@@ -379,15 +379,15 @@ ${t(lang, 'videoPricing')}
 
 ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
-    // Immediate buy buttons with translations
+    // Immediate buy buttons with translations - Language button prominent at top
     let buttons = [
+        [Markup.button.callback('🌐 English / Español', 'change_language')],
         [Markup.button.callback(t(lang, 'btnGetFreeCredits'), 'get_free_credits')],
         [Markup.button.callback(t(lang, 'btnBuyMicro'), 'buy_pack_micro')],
         [Markup.button.callback(t(lang, 'btnBuyStarter'), 'buy_pack_starter')],
         [Markup.button.callback(t(lang, 'btnBuyPlus'), 'buy_pack_plus')],
         [Markup.button.callback(t(lang, 'btnCreateVideo'), 'demo_new')],
-        [Markup.button.callback(t(lang, 'btnClaimDaily'), 'claim_daily')],
-        [Markup.button.callback(t(lang, 'btnLanguage'), 'change_language')]
+        [Markup.button.callback(t(lang, 'btnClaimDaily'), 'claim_daily')]
     ];
 
     await ctx.replyWithMarkdown(msg, Markup.inlineKeyboard(buttons));
