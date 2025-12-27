@@ -30,3 +30,7 @@ venv/
 # Temporary
 *.zip
 *.tar.gz
+-e 
+# Environment files
+*.env
+*.env.*
