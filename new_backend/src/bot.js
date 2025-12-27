@@ -244,7 +244,7 @@ _Swap your face into any video in seconds!_
     ];
 
     if (credits > 0) {
-        creditMsg = `\n\n💰 *Credits:* You have ${credits} credits. A 5-second video costs 60 credits. New users get 69 welcome credits, so your first video is covered and you’ll have some left over.`;
+        creditMsg = `\n\n💰 *Your Balance:* ${credits} credits (~${Math.floor(credits/60)} videos)`;
     } else {
         creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
         // Telegram deep link for 69 credits offer
