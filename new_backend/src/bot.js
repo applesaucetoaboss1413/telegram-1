@@ -643,22 +643,63 @@ bot.action('claim_daily', async (ctx) => {
     try {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
+        const lang = getUserLanguage(userId);
         const result = claimDailyCredits({ telegramUserId: userId });
         
         if (result.granted) {
-            let msg = `🎁 *Daily Credits Claimed!*\n\n+${result.amount} credits added`;
+            let msg = t(lang, 'dailyClaimed', { amount: result.amount });
             if (result.streak > 1) {
-                msg += `\n🔥 *${result.streak}-day streak!* (+${result.streakBonus || 0} bonus)`;
+                msg += t(lang, 'dailyStreak', { streak: result.streak, bonus: result.streakBonus || 0 });
             }
-            msg += `\n\n_Come back tomorrow for more!_`;
+            msg += t(lang, 'dailyComeBack');
             await ctx.replyWithMarkdown(msg);
         } else {
             const hours = result.hoursLeft || 24;
-            await ctx.reply(`⏰ Already claimed today!\n\nCome back in ${hours} hours.\n🔥 Streak: ${result.streak || 0} days`);
+            await ctx.reply(t(lang, 'dailyAlready', { hours, streak: result.streak || 0 }));
         }
     } catch (e) {
         logger.error('claim_daily action failed', { error: e.message });
         await ctx.reply('❌ Error claiming daily credits. Please try again later.');
+    }
+});
+
+// Language change handlers
+bot.action('change_language', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        const lang = getUserLanguage(userId);
+        
+        await ctx.reply(t(lang, 'chooseLanguage'), Markup.inlineKeyboard([
+            [Markup.button.callback('🇺🇸 English', 'set_lang_en')],
+            [Markup.button.callback('🇪🇸 Español', 'set_lang_es')]
+        ]));
+    } catch (e) {
+        logger.error('change_language action failed', { error: e.message });
+    }
+});
+
+bot.action('set_lang_en', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        setUserLanguage(userId, 'en');
+        await ctx.reply(t('en', 'languageChanged'));
+        await sendDemoMenuWithBuyButtons(ctx);
+    } catch (e) {
+        logger.error('set_lang_en action failed', { error: e.message });
+    }
+});
+
+bot.action('set_lang_es', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        setUserLanguage(userId, 'es');
+        await ctx.reply(t('es', 'languageChanged'));
+        await sendDemoMenuWithBuyButtons(ctx);
+    } catch (e) {
+        logger.error('set_lang_es action failed', { error: e.message });
     }
 });
 
