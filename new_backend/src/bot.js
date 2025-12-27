@@ -1,7 +1,7 @@
 const { Telegraf, Markup, session } = require('telegraf');
 const path = require('path');
 const os = require('os');
-const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, db, trackEvent } = require('./database');
+const { getUser, updateUserPoints, createJob, addTransaction, updateJobStatus, db, trackEvent, setUserLanguage, getUserLanguage } = require('./database');
 const { spendCredits, getCredits, claimDailyCredits, isFirstPurchase, getTotalVideosCreated, grantWelcomeCredits } = require('./services/creditsService');
 const { startFaceSwap, startFaceSwapPreview, startImage2Video } = require('./services/magicService');
 const queueService = require('./services/queueService');
@@ -12,6 +12,7 @@ const winston = require('winston');
 const { uploadFromUrl } = require('./services/cloudinaryService');
 const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2VideoFlow;
 const demoCfg = require('./services/a2eConfig');
+const { t } = require('./config/translations');
 const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
