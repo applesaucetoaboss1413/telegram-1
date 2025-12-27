@@ -473,6 +473,10 @@ async function startCheckout(ctx, pack) {
     }
 }
 
+bot.action('buy_pack_micro', async (ctx) => {
+    await ctx.answerCbQuery();
+    await startCheckout(ctx, demoCfg.packs.micro);
+});
 bot.action('buy_pack_starter', async (ctx) => {
     await ctx.answerCbQuery();
     await startCheckout(ctx, demoCfg.packs.starter);
