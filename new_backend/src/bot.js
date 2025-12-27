@@ -506,6 +506,28 @@ bot.action('help', async (ctx) => {
         logger.error('help action failed', { error: e.message });
     }
 });
+bot.action('claim_daily', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        const result = claimDailyCredits({ telegramUserId: userId });
+        
+        if (result.granted) {
+            let msg = `🎁 *Daily Credits Claimed!*\n\n+${result.amount} credits added`;
+            if (result.streak > 1) {
+                msg += `\n🔥 *${result.streak}-day streak!* (+${result.streakBonus || 0} bonus)`;
+            }
+            msg += `\n\n_Come back tomorrow for more!_`;
+            await ctx.replyWithMarkdown(msg);
+        } else {
+            const hours = result.hoursLeft || 24;
+            await ctx.reply(`⏰ Already claimed today!\n\nCome back in ${hours} hours.\n🔥 Streak: ${result.streak || 0} days`);
+        }
+    } catch (e) {
+        logger.error('claim_daily action failed', { error: e.message });
+        await ctx.reply('❌ Error claiming daily credits. Please try again later.');
+    }
+});
 
 bot.action('demo_list', async (ctx) => {
     try {
