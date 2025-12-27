@@ -232,9 +232,9 @@ _Swap your face into any video in seconds!_
         if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
     }
     
-    const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
+    const approx5s = Math.floor(user.points / demoCfg.demoPrices['5']);
     
-    // Credit messaging
+    // Credit messaging - OPTIMIZED FOR CONVERSIONS
     let creditMsg = '';
     let buttons = [
         [Markup.button.callback('Create new demo', 'demo_new')],
