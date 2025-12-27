@@ -580,7 +580,7 @@ bot.action('demo_len_15', async (ctx) => {
     try {
         await ctx.answerCbQuery();
         ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 15, price: demoCfg.demoPrices['15'] };
-        await ctx.reply(`📹 Send your own video (15 seconds or less).\n\nMake sure your video is already trimmed to 15 seconds before sending.`););
+        await ctx.reply(`📹 Send your own video (15 seconds or less).\n\nMake sure your video is already trimmed to 15 seconds before sending.`);
     } catch (e) {
         logger.error('demo_len_15 action failed', { error: e.message });
     }
