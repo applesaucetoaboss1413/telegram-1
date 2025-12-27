@@ -25,7 +25,8 @@ db.exec(`
         created_at INTEGER,
         is_premium INTEGER DEFAULT 0,
         referred_by TEXT,
-        has_purchased INTEGER DEFAULT 0
+        has_purchased INTEGER DEFAULT 0,
+        language TEXT DEFAULT 'en'
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
