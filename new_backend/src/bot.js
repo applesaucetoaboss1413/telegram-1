@@ -584,6 +584,39 @@ async function startCheckout(ctx, pack) {
     }
 }
 
+async function startWelcomeCreditsCheckout(ctx) {
+    try {
+        const username = await getBotUsername();
+        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/ImMoreThanJustSomeBot';
+
+        const session = await stripe.checkout.sessions.create({
+            mode: 'setup',
+            payment_method_types: ['card'],
+            success_url: `${botUrl}?start=credits_success`,
+            cancel_url: `${botUrl}?start=credits_cancel`,
+            client_reference_id: String(ctx.from.id),
+            metadata: {
+                credits: '69',
+                type: 'welcome_credits',
+                telegram_user_id: String(ctx.from.id)
+            }
+        });
+        
+        await ctx.reply(
+            `🎁 *Get 69 FREE Credits!*\n\nVerify your card to unlock your welcome bonus.\n\n✅ You will NOT be charged\n✅ 69 credits = 1 free video + extras\n✅ ⚠️ *Limited time offer!*\n\n_We verify cards to prevent abuse_`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🎁 Verify & Get 69 Free Credits', url: session.url }]],
+                },
+            }
+        );
+    } catch (e) {
+        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, userId: ctx.from.id });
+        ctx.reply('❌ Registration system error. Please try again later.');
+    }
+}
+
 bot.action('buy_pack_micro', async (ctx) => {
     await ctx.answerCbQuery();
     await startCheckout(ctx, demoCfg.packs.micro);
