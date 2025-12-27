@@ -245,6 +245,9 @@ _Swap your face into any video in seconds!_
 
     if (credits > 0) {
         creditMsg = `\n\n💰 *Your Balance:* ${credits} credits (~${Math.floor(credits/60)} videos)`;
+        if (credits < 60) {
+            creditMsg += `\n⚠️ _Not enough for a video - top up below!_`;
+        }
     } else {
         creditMsg = `\n\n🎁 *Welcome Offer:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
         // Telegram deep link for 69 credits offer
