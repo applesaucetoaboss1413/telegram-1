@@ -427,17 +427,7 @@ bot.action('buy_points', async (ctx) => {
 bot.action('buy_points_menu', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const p10 = demoCfg.demoPrices['10'];
-        const approx = (pts) => Math.max(1, Math.floor(pts / p10));
-        const s = demoCfg.packs.starter.points;
-        const pl = demoCfg.packs.plus.points;
-        const pr = demoCfg.packs.pro.points;
-        const text = `Choose a credit pack:\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)`;
-        await ctx.reply(text, Markup.inlineKeyboard([
-            [Markup.button.callback(`${demoCfg.packs.starter.label} – ${s} pts`, 'buy_pack_starter')],
-            [Markup.button.callback(`${demoCfg.packs.plus.label} – ${pl} pts`, 'buy_pack_plus')],
-            [Markup.button.callback(`${demoCfg.packs.pro.label} – ${pr} pts`, 'buy_pack_pro')],
-        ]));
+        await sendBuyPointsMenu(ctx);
     } catch (e) {
         logger.error('buy_points_menu action failed', { error: e.message });
     }
