@@ -265,12 +265,58 @@ bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
     
-    if (payload === 'get_69_credits') {
+    // Handle deep links for purchases
+    if (payload === 'buy_micro') {
+        await startCheckout(ctx, demoCfg.packs.micro);
+        return;
+    }
+    if (payload === 'buy_starter') {
+        await startCheckout(ctx, demoCfg.packs.starter);
+        return;
+    }
+    if (payload === 'buy_plus') {
+        await startCheckout(ctx, demoCfg.packs.plus);
+        return;
+    }
+    if (payload === 'buy_pro') {
+        await startCheckout(ctx, demoCfg.packs.pro);
+        return;
+    }
+    
+    // Handle deep links for demo creation
+    if (payload === 'demo_5') {
+        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 5, price: demoCfg.demoPrices['5'] };
+        await ctx.reply(`📹 Send your video (5 seconds or less).\n\n⚠️ Make sure it's already trimmed to 5 seconds!`);
+        return;
+    }
+    if (payload === 'demo_10') {
+        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 10, price: demoCfg.demoPrices['10'] };
+        await ctx.reply(`📹 Send your video (10 seconds or less).\n\n⚠️ Make sure it's already trimmed to 10 seconds!`);
+        return;
+    }
+    if (payload === 'demo_15') {
+        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 15, price: demoCfg.demoPrices['15'] };
+        await ctx.reply(`📹 Send your video (15 seconds or less).\n\n⚠️ Make sure it's already trimmed to 15 seconds!`);
+        return;
+    }
+    if (payload === 'create') {
+        // Show demo options
+        await ctx.reply(
+            '📏 Choose video length:',
+            Markup.inlineKeyboard([
+                [Markup.button.callback(`5 seconds – ${demoCfg.demoPrices['5']} credits`, 'demo_len_5')],
+                [Markup.button.callback(`10 seconds – ${demoCfg.demoPrices['10']} credits`, 'demo_len_10')],
+                [Markup.button.callback(`15 seconds – ${demoCfg.demoPrices['15']} credits`, 'demo_len_15')],
+            ])
+        );
+        return;
+    }
+    
+    if (payload === 'get_69_credits' || payload === 'get_credits') {
         const credits = getCredits({ telegramUserId: userId });
         const userCreditsRecord = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(userId);
         
         if (userCreditsRecord && userCreditsRecord.stripe_customer_id) {
-            // Already Stripe-linked, try to grant welcome credits if not already done
             const granted = grantWelcomeCredits({ 
                 telegramUserId: userId, 
                 stripeCustomerId: userCreditsRecord.stripe_customer_id 
@@ -284,15 +330,8 @@ bot.command('start', async (ctx) => {
                 await ctx.replyWithMarkdown(`👋 Welcome back! You've already used your welcome credits.`);
             }
         } else {
-            // Not Stripe-linked
-            await ctx.replyWithMarkdown(
-                `🎁 *Claim Your 69 Free Credits*\n\nConnect Stripe to claim your 69 free credits (enough for your first 5-second video).`,
-                Markup.inlineKeyboard([
-                    // Telegram deep link for 69 credits offer
-                    [Markup.button.url('🎁 Connect Stripe (69 free credits)', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
-                ])
-            );
-            return; // Don't show regular menu yet to keep focus on the offer
+            await startWelcomeCreditsCheckout(ctx);
+            return;
         }
     }
 
@@ -300,8 +339,82 @@ bot.command('start', async (ctx) => {
         return sendBuyPointsMenu(ctx);
     }
     
-    await sendDemoMenu(ctx);
+    // Show main menu with immediate buy options
+    await sendDemoMenuWithBuyButtons(ctx);
 });
+
+// New function that shows buy buttons immediately
+async function sendDemoMenuWithBuyButtons(ctx) {
+    const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
+    const user = getUser(userId);
+    const credits = getCredits({ telegramUserId: userId });
+    const totalVideos = getTotalVideosCreated();
+    const p = demoCfg.packs;
+    
+    if (ctx.session) ctx.session.step = null;
+
+    // Main message with all info
+    const msg = `🎭 *AI Face Swap Bot*
+_Swap your face into any video in seconds!_
+
+📊 *${totalVideos.toLocaleString()}+ videos created*
+
+━━━━━━━━━━━━━━━━━━━━━
+💰 *CREDIT PACKS*
+━━━━━━━━━━━━━━━━━━━━━
+
+🎯 *Try It* – 80 credits – *$0.99*
+⭐ *Starter* – 400 credits – $4.99
+🔥 *Plus* – 800 credits – $8.99 ⭐ BEST VALUE
+💎 *Pro* – 1600 credits – $14.99
+
+━━━━━━━━━━━━━━━━━━━━━
+🎁 *FREE CREDITS*
+━━━━━━━━━━━━━━━━━━━━━
+
+✨ *69 FREE* – Verify card (no charge) ⚠️ *Limited!*
+🔄 *10 FREE daily* – Claim every 24h
+
+━━━━━━━━━━━━━━━━━━━━━
+📹 *VIDEO PRICING*
+━━━━━━━━━━━━━━━━━━━━━
+
+• 5s = 60 credits • 10s = 90 credits • 15s = 125 credits
+
+💰 *Your Balance:* ${credits > 0 ? credits : user.points} credits`;
+
+    // Immediate buy buttons
+    let buttons = [
+        [Markup.button.callback('🎁 Get 69 FREE Credits', 'get_free_credits')],
+        [Markup.button.callback('🎯 Buy $0.99 (80 credits)', 'buy_pack_micro')],
+        [Markup.button.callback('⭐ Buy $4.99 (400 credits)', 'buy_pack_starter')],
+        [Markup.button.callback('🔥 Buy $8.99 (800 credits)', 'buy_pack_plus')],
+        [Markup.button.callback('🎬 Create Video', 'demo_new')],
+        [Markup.button.callback('🎁 Claim Daily Credits', 'claim_daily')]
+    ];
+
+    await ctx.replyWithMarkdown(msg, Markup.inlineKeyboard(buttons));
+
+    // Send template examples
+    if (ctx.chat && ctx.chat.type === 'private') {
+        const t5 = demoCfg.templates['5'];
+        const t10 = demoCfg.templates['10'];
+        const t15 = demoCfg.templates['15'];
+
+        const blurUrl = (url) => {
+            if (!url || !url.includes('cloudinary.com')) return url;
+            return url.replace('/upload/', '/upload/e_blur:800/');
+        };
+
+        const c5 = demoCfg.demoCosts['5'];
+        const c10 = demoCfg.demoCosts['10'];
+        const c15 = demoCfg.demoCosts['15'];
+
+        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t5), { caption: `5s – ${c5.points} pts (~$${c5.usd})` }); } catch (_) { } }
+        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t10), { caption: `10s – ${c10.points} pts (~$${c10.usd})` }); } catch (_) { } }
+        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t15), { caption: `15s – ${c15.points} pts (~$${c15.usd})` }); } catch (_) { } }
+    }
+}
 
 async function sendBuyPointsMenu(ctx) {
     const userId = String(ctx.from.id);
