@@ -252,7 +252,7 @@ _Swap your face into any video in seconds!_
     }
 
     await ctx.replyWithMarkdown(
-        `👋 Welcome! You have ${user.points} points (~${approx10s} 10s demos).${creditMsg}`,
+        `👋 Welcome! You have ${user.points} points (~${approx5s} 5s demos).${creditMsg}`,
         Markup.inlineKeyboard(buttons)
     );
 }
