@@ -195,22 +195,24 @@ async function sendDemoMenu(ctx) {
 
     if (ctx.chat && (ctx.chat.type === 'private' || ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
         const p = demoCfg.packs;
-        const msg = `🎭 *Face Swap Demo*
-Turn any clip into a face swap demo in seconds.
+        const msg = `🎭 *Face Swap Service*
+Turn any clip into a face swap in seconds.
 
-*Packs*
-• ${p.starter.label} – ${p.starter.points} pts (~${p.starter.approxDemos} demos) – ${p.starter.priceDisplay}
-• ${p.plus.label} – ${p.plus.points} pts (~${p.plus.approxDemos} demos) – ${p.plus.priceDisplay}
-• ${p.pro.label} – ${p.pro.points} pts (~${p.pro.approxDemos} demos) – ${p.pro.priceDisplay}
-
-*Steps*
-1. Buy points
+*How it works:*
+1. Buy points or claim free credits
 2. Create new demo
-3. Pick length & base video
-4. Upload face`;
+3. Pick length (5s, 10s, or 15s)
+4. Send YOUR video (pre-trimmed)
+5. Send the face photo
+6. Get your swapped video!
+
+*Pricing*
+• 5 seconds – ${demoCfg.demoPrices['5']} pts
+• 10 seconds – ${demoCfg.demoPrices['10']} pts  
+• 15 seconds – ${demoCfg.demoPrices['15']} pts`;
         await ctx.replyWithMarkdown(msg);
 
-        // Automatically send template examples
+        // Send blurred template examples with action buttons
         const t5 = demoCfg.templates['5'];
         const t10 = demoCfg.templates['10'];
         const t15 = demoCfg.templates['15'];
@@ -219,13 +221,24 @@ Turn any clip into a face swap demo in seconds.
         const c10 = demoCfg.demoCosts['10'];
         const c15 = demoCfg.demoCosts['15'];
 
-        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
-        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
-        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+        // Add blur effect to Cloudinary URLs for NSFW content
+        const blurUrl = (url) => {
+            if (!url || !url.includes('cloudinary.com')) return url;
+            // Insert blur transformation after /upload/
+            return url.replace('/upload/', '/upload/e_blur:800/');
+        };
 
-        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { } }
-        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { } }
-        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
+        const cap5 = `🔞 5s Example (blurred) – ${c5.points} pts (~$${c5.usd})`;
+        const cap10 = `🔞 10s Example (blurred) – ${c10.points} pts (~$${c10.usd})`;
+        const cap15 = `🔞 15s Example (blurred) – ${c15.points} pts (~$${c15.usd})`;
+
+        const btn5 = Markup.inlineKeyboard([[Markup.button.callback('▶️ Create 5s Swap', 'demo_len_5')]]);
+        const btn10 = Markup.inlineKeyboard([[Markup.button.callback('▶️ Create 10s Swap', 'demo_len_10')]]);
+        const btn15 = Markup.inlineKeyboard([[Markup.button.callback('▶️ Create 15s Swap', 'demo_len_15')]]);
+
+        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t5), { caption: cap5, reply_markup: btn5.reply_markup }); } catch (_) { } }
+        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t10), { caption: cap10, reply_markup: btn10.reply_markup }); } catch (_) { } }
+        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t15), { caption: cap15, reply_markup: btn15.reply_markup }); } catch (_) { } }
     }
 
     const approx10s = Math.floor(user.points / demoCfg.demoPrices['10']);
