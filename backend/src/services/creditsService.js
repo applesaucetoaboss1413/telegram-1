@@ -72,8 +72,6 @@ const spendCredits = ({ telegramUserId, amount }) => {
         const now = Date.now();
 
         // Find the first available record with enough credits (simple logic for now)
-        // In a multi-record scenario (unlikely per spec), we might need to deduct across records.
-        // But per spec, we usually have one primary record for this user.
         const record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ? AND credits >= ? ORDER BY updated_at DESC')
             .get(tId, amount);
 
@@ -170,6 +168,117 @@ const getAllUserCredits = () => {
     }
 };
 
+// ============ NEW MONETIZATION FEATURES ============
+
+/**
+ * Check and grant daily free credits (10 credits/day to drive engagement)
+ * Returns { granted: boolean, amount: number, nextClaimTime: number }
+ */
+const claimDailyCredits = ({ telegramUserId }) => {
+    try {
+        const tId = String(telegramUserId);
+        const now = Date.now();
+        const dailyAmount = Number(process.env.DAILY_FREE_CREDITS || 10);
+        
+        // Get or create daily claims record
+        let claim = db.prepare('SELECT * FROM daily_claims WHERE telegram_user_id = ?').get(tId);
+        
+        if (!claim) {
+            // First claim ever - grant credits
+            db.prepare('INSERT INTO daily_claims (telegram_user_id, last_claim, streak) VALUES (?, ?, 1)').run(tId, now);
+            grantCredits({ telegramUserId: tId, amount: dailyAmount });
+            logger.info('Daily credits claimed (first time)', { telegramUserId: tId, amount: dailyAmount });
+            return { granted: true, amount: dailyAmount, streak: 1, nextClaimTime: now + 24 * 60 * 60 * 1000 };
+        }
+        
+        const lastClaim = claim.last_claim;
+        const timeSinceClaim = now - lastClaim;
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        
+        if (timeSinceClaim < oneDayMs) {
+            // Too soon - can't claim yet
+            const nextClaimTime = lastClaim + oneDayMs;
+            const hoursLeft = Math.ceil((nextClaimTime - now) / (60 * 60 * 1000));
+            return { granted: false, amount: 0, streak: claim.streak, nextClaimTime, hoursLeft };
+        }
+        
+        // Can claim! Check streak
+        const twoDaysMs = 2 * oneDayMs;
+        let newStreak = timeSinceClaim < twoDaysMs ? (claim.streak || 0) + 1 : 1;
+        
+        // Streak bonus: +2 credits per day of streak (max +20)
+        const streakBonus = Math.min(newStreak * 2, 20);
+        const totalAmount = dailyAmount + streakBonus;
+        
+        db.prepare('UPDATE daily_claims SET last_claim = ?, streak = ? WHERE telegram_user_id = ?').run(now, newStreak, tId);
+        grantCredits({ telegramUserId: tId, amount: totalAmount });
+        
+        logger.info('Daily credits claimed', { telegramUserId: tId, amount: totalAmount, streak: newStreak, streakBonus });
+        return { granted: true, amount: totalAmount, streak: newStreak, streakBonus, nextClaimTime: now + oneDayMs };
+        
+    } catch (error) {
+        logger.error('Error claiming daily credits', { error: error.message, telegramUserId });
+        return { granted: false, amount: 0, error: error.message };
+    }
+};
+
+/**
+ * Get user's purchase history to determine if first purchase (for discount)
+ */
+const isFirstPurchase = ({ telegramUserId }) => {
+    try {
+        const tId = String(telegramUserId);
+        const purchase = db.prepare('SELECT * FROM purchases WHERE telegram_user_id = ? LIMIT 1').get(tId);
+        return !purchase;
+    } catch (error) {
+        logger.error('Error checking first purchase', { error: error.message, telegramUserId });
+        return true; // Assume first purchase on error (better for conversion)
+    }
+};
+
+/**
+ * Record a purchase
+ */
+const recordPurchase = ({ telegramUserId, amount, packType, stripeSessionId }) => {
+    try {
+        const tId = String(telegramUserId);
+        const now = Date.now();
+        db.prepare('INSERT INTO purchases (telegram_user_id, amount_cents, pack_type, stripe_session_id, created_at) VALUES (?, ?, ?, ?, ?)')
+            .run(tId, amount, packType, stripeSessionId, now);
+        logger.info('Purchase recorded', { telegramUserId: tId, amount, packType });
+        return true;
+    } catch (error) {
+        logger.error('Error recording purchase', { error: error.message, telegramUserId });
+        return false;
+    }
+};
+
+/**
+ * Get total videos created (for social proof)
+ */
+const getTotalVideosCreated = () => {
+    try {
+        const result = db.prepare("SELECT COUNT(*) as count FROM jobs WHERE status = 'completed'").get();
+        return result ? result.count : 0;
+    } catch (error) {
+        logger.error('Error getting total videos', { error: error.message });
+        return 0;
+    }
+};
+
+/**
+ * Get total paying users (for social proof)
+ */
+const getTotalPayingUsers = () => {
+    try {
+        const result = db.prepare('SELECT COUNT(DISTINCT telegram_user_id) as count FROM purchases').get();
+        return result ? result.count : 0;
+    } catch (error) {
+        logger.error('Error getting total paying users', { error: error.message });
+        return 0;
+    }
+};
+
 module.exports = {
     grantWelcomeCredits,
     getCredits,
@@ -177,5 +286,11 @@ module.exports = {
     grantCredits,
     deductCredits,
     initializeUserCredits,
-    getAllUserCredits
+    getAllUserCredits,
+    // New monetization features
+    claimDailyCredits,
+    isFirstPurchase,
+    recordPurchase,
+    getTotalVideosCreated,
+    getTotalPayingUsers
 };
