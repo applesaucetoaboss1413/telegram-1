@@ -1,9 +1,9 @@
 const express = require('express');
 const app = express();
-const { getUser, updateUserPoints, addTransaction, markPurchased } = require('./database');
-const { grantWelcomeCredits } = require('./services/creditsService');
+const { getUser, updateUserPoints, addTransaction, markPurchased, trackEvent } = require('./database');
+const { grantWelcomeCredits, recordPurchase, grantCredits } = require('./services/creditsService');
 const demoCfg = require('./services/a2eConfig');
-const { bot } = require('./bot'); // Ensure bot is exported and available
+const { bot } = require('./bot');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const HealthMonitor = require('./health');
 const winston = require('winston');
@@ -26,7 +26,7 @@ const logger = winston.createLogger({
 const healthMonitor = new HealthMonitor();
 
 // Use raw body for webhook handling
-app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
@@ -53,19 +53,29 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         const pointsFromMetadata = session.metadata && session.metadata.points ? parseInt(session.metadata.points) : 0;
         const creditsFromMetadata = session.metadata && session.metadata.credits ? parseInt(session.metadata.credits) : 0;
         const isWelcomeCredits = session.metadata && session.metadata.type === 'welcome_credits';
+        const packType = session.metadata && session.metadata.pack_type;
         const amount = session.amount_total || 0;
 
         logger.info('Processing checkout session completed', { 
-            userId: userId,
+            userId,
             sessionId: session.id,
-            amount: amount,
+            amount,
             mode: session.mode,
-            pointsFromMetadata: pointsFromMetadata,
-            creditsFromMetadata: creditsFromMetadata,
-            isWelcomeCredits: isWelcomeCredits
+            pointsFromMetadata,
+            creditsFromMetadata,
+            isWelcomeCredits,
+            packType
         });
 
         if (userId) {
+            // Track the purchase event
+            trackEvent(userId, 'checkout_completed', { 
+                amount, 
+                packType, 
+                mode: session.mode,
+                isWelcomeCredits 
+            });
+
             // Handle 69 welcome credits flow (setup mode - no charge)
             if ((session.mode === 'setup' || isWelcomeCredits) && creditsFromMetadata > 0) {
                 try {
@@ -74,15 +84,24 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
                     
                     if (granted) {
                         logger.info('Welcome credits granted via setup mode', { userId, credits: creditsFromMetadata });
+                        trackEvent(userId, 'welcome_credits_granted', { credits: creditsFromMetadata });
+                        
                         try {
-                            bot.telegram.sendMessage(userId, `🎉 Welcome! ${creditsFromMetadata} free credits added to your account!\n\n✅ Your first 5-second video costs 60 credits\n✅ You'll have 9 credits left over after your first swap!\n\nUse /start to begin creating face swap videos!`);
+                            await bot.telegram.sendMessage(userId, 
+`🎉 *Welcome Bonus Activated!*
+
+✅ ${creditsFromMetadata} FREE credits added!
+✅ Enough for your first video + extras
+
+Ready to create your first face swap?
+Tap /start to begin!`, { parse_mode: 'Markdown' });
                         } catch (err) {
                             logger.error('Failed to send welcome credits message', { userId, error: err.message });
                         }
                     } else {
                         logger.info('Welcome credits already granted for user', { userId });
                         try {
-                            bot.telegram.sendMessage(userId, `You've already received your welcome credits. Use /start to check your balance!`);
+                            await bot.telegram.sendMessage(userId, `You've already received your welcome credits. Use /start to check your balance!`);
                         } catch (err) {
                             logger.error('Failed to send already-granted message', { userId, error: err.message });
                         }
@@ -93,28 +112,47 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
                 return res.json({ received: true });
             }
 
-            // Handle paid checkout (points purchase)
+            // Handle paid checkout (points/credits purchase)
             let pointsToAdd = pointsFromMetadata;
             
             if (!pointsToAdd) {
-                // Fallback logic if metadata is missing (e.g. legacy sessions)
+                // Fallback logic if metadata is missing
                 if (amount >= 1499) pointsToAdd = demoCfg.packs.pro.points;
                 else if (amount >= 899) pointsToAdd = demoCfg.packs.plus.points;
                 else if (amount >= 499) pointsToAdd = demoCfg.packs.starter.points;
-                else pointsToAdd = 100; // Final fallback
+                else if (amount >= 99) pointsToAdd = demoCfg.packs.micro.points;
+                else pointsToAdd = 80; // Minimum fallback
             }
             
             try {
+                // Add points to user account
                 updateUserPoints(userId, pointsToAdd);
                 addTransaction(userId, pointsToAdd, 'purchase_stripe');
                 
-                // Grant 69 welcome credits if applicable (for paid purchases too)
+                // Also grant as credits for the new system
+                grantCredits({ telegramUserId: userId, amount: pointsToAdd });
+                
+                // Record the purchase
+                recordPurchase({ 
+                    telegramUserId: userId, 
+                    amount, 
+                    packType: packType || 'unknown',
+                    stripeSessionId: session.id 
+                });
+                
+                trackEvent(userId, 'purchase_completed', { 
+                    amount, 
+                    points: pointsToAdd, 
+                    packType 
+                });
+
+                // Grant welcome credits for paid purchases too (if first time)
                 const stripeCustomerId = session.customer;
                 if (stripeCustomerId) {
                     const granted = grantWelcomeCredits({ telegramUserId: userId, stripeCustomerId });
                     if (granted) {
                         try {
-                            bot.telegram.sendMessage(userId, `🎉 Welcome bonus! 69 extra credits added on top of your purchase!`);
+                            await bot.telegram.sendMessage(userId, `🎁 *BONUS:* 69 extra welcome credits added on top of your purchase!`, { parse_mode: 'Markdown' });
                         } catch (err) {
                             logger.error('Failed to send welcome credits message', { userId, error: err.message });
                         }
@@ -125,19 +163,24 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
                 const user = getUser(userId);
                 if (user && !user.has_purchased && user.referred_by) {
                     const referrerId = user.referred_by;
-                    const rewardPoints = demoCfg.demoPrices['5'] || 60; // Default to 60 if missing
+                    const rewardPoints = demoCfg.referralReward || 60;
                     
                     updateUserPoints(referrerId, rewardPoints);
                     addTransaction(referrerId, rewardPoints, 'referral_reward');
+                    grantCredits({ telegramUserId: referrerId, amount: rewardPoints });
                     markPurchased(userId);
                     
-                    logger.info(`referral reward – referrer=${referrerId} got ${rewardPoints} pts because referred user ${userId} made first purchase.`);
+                    logger.info(`referral reward – referrer=${referrerId} got ${rewardPoints} pts`);
+                    trackEvent(referrerId, 'referral_reward_received', { amount: rewardPoints, referredUser: userId });
                     
-                    // Notify referrer
                     try {
-                         bot.telegram.sendMessage(referrerId, `🎉 *Referral Bonus!*
+                        await bot.telegram.sendMessage(referrerId, 
+`🎉 *Referral Bonus!*
+
 Your friend just made their first purchase!
-You received ${rewardPoints} points (enough for a free 5s demo).`, { parse_mode: 'Markdown' });
+You earned *${rewardPoints} credits* (enough for a free video!)
+
+Keep sharing to earn more!`, { parse_mode: 'Markdown' });
                     } catch (e) {
                         logger.error('Failed to notify referrer', { error: e.message });
                     }
@@ -145,23 +188,31 @@ You received ${rewardPoints} points (enough for a free 5s demo).`, { parse_mode:
                     markPurchased(userId);
                 }
 
-                logger.info('Points added successfully', { 
-                    userId: userId,
-                    pointsAdded: pointsToAdd 
-                });
+                logger.info('Points added successfully', { userId, pointsAdded: pointsToAdd });
 
-                // Notify user of successful purchase
+                // Send purchase confirmation with upsell for next purchase
                 try {
-                    bot.telegram.sendMessage(userId, `✅ Payment successful! ${pointsToAdd} points have been added to your account.`);
+                    const videosCount = Math.floor(pointsToAdd / 60);
+                    let successMsg = `✅ *Payment Successful!*
+
++${pointsToAdd} credits added to your account
+📹 That's enough for ~${videosCount} videos!
+
+Ready to create? Tap /start`;
+
+                    // Add upsell for micro purchasers
+                    if (packType === 'micro') {
+                        successMsg += `
+
+💡 *Tip:* Loved it? Upgrade to Starter Pack for better value - 400 credits for $4.99 (save 40%!)`;
+                    }
+
+                    await bot.telegram.sendMessage(userId, successMsg, { parse_mode: 'Markdown' });
                 } catch (err) {
                     logger.error('Failed to send purchase confirmation', { userId, error: err.message });
                 }
             } catch (error) {
-                logger.error('Failed to add points', { 
-                    userId: userId,
-                    pointsToAdd: pointsToAdd,
-                    error: error.message 
-                });
+                logger.error('Failed to add points', { userId, pointsToAdd, error: error.message });
             }
         } else {
             logger.warn('No userId found in session', { sessionId: session.id });
@@ -174,7 +225,7 @@ You received ${rewardPoints} points (enough for a free 5s demo).`, { parse_mode:
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Telegram Bot Backend V2 Running');
+    res.send('Telegram Bot Backend V2 - Monetization Optimized');
 });
 
 // Health check endpoint
@@ -210,40 +261,51 @@ app.get('/alive', (req, res) => {
     });
 });
 
+// Stats endpoint for monitoring conversions
+app.get('/stats', (req, res) => {
+    try {
+        const { db } = require('./database');
+        const { getTotalVideosCreated, getTotalPayingUsers } = require('./services/creditsService');
+        
+        const totalVideos = getTotalVideosCreated();
+        const payingUsers = getTotalPayingUsers();
+        const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get()?.count || 0;
+        const totalRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases').get()?.total || 0;
+        
+        res.json({
+            totalVideos,
+            payingUsers,
+            totalUsers,
+            conversionRate: totalUsers > 0 ? ((payingUsers / totalUsers) * 100).toFixed(2) + '%' : '0%',
+            totalRevenue: `$${(totalRevenue / 100).toFixed(2)}`,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Admin Endpoint
 app.post('/admin/grant', (req, res) => {
     const { secret, userId, amount } = req.body;
     
-    logger.info('Admin grant request received', { 
-        userId: userId,
-        amount: amount,
-        hasSecret: !!secret 
-    });
+    logger.info('Admin grant request received', { userId, amount, hasSecret: !!secret });
     
     if (secret !== process.env.ADMIN_SECRET) {
-        logger.warn('Invalid admin secret provided', { 
-            userId: userId,
-            providedSecret: secret ? 'present' : 'missing' 
-        });
+        logger.warn('Invalid admin secret provided', { userId });
         return res.status(403).json({ error: 'Forbidden' });
     }
     
     try {
         updateUserPoints(userId, amount);
         addTransaction(userId, amount, 'admin_grant');
+        grantCredits({ telegramUserId: userId, amount });
         
-        logger.info('Admin grant successful', { 
-            userId: userId,
-            amount: amount 
-        });
+        logger.info('Admin grant successful', { userId, amount });
         
         res.json({ success: true });
     } catch (error) {
-        logger.error('Admin grant failed', { 
-            userId: userId,
-            amount: amount,
-            error: error.message 
-        });
+        logger.error('Admin grant failed', { userId, amount, error: error.message });
         res.status(500).json({ error: 'Internal server error' });
     }
 });
