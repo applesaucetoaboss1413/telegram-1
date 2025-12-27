@@ -1,6 +1,12 @@
 const { PROMO_IMAGES } = require('../config/promoImages');
 const demoCfg = require('./a2eConfig');
 
+// Add blur effect to Cloudinary URLs for NSFW content
+const blurUrl = (url) => {
+    if (!url || !url.includes('cloudinary.com')) return url;
+    return url.replace('/upload/', '/upload/e_blur:800/');
+};
+
 async function postStartupVideos(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
@@ -12,22 +18,28 @@ async function postStartupVideos(bot) {
         const c10 = demoCfg.demoCosts['10'];
         const c15 = demoCfg.demoCosts['15'];
 
-        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
-        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
-        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
+        const cap5 = `🔞 5s Example (blurred) – ${c5.points} pts (~$${c5.usd})`;
+        const cap10 = `🔞 10s Example (blurred) – ${c10.points} pts (~$${c10.usd})`;
+        const cap15 = `🔞 15s Example (blurred) – ${c15.points} pts (~$${c15.usd})`;
 
-        // Add purchase buttons to each video
         const Markup = require('telegraf').Markup;
-        const purchaseButtons = Markup.inlineKeyboard([
-            [Markup.button.callback('Create 5s Demo', 'demo_len_5')],
-            [Markup.button.callback('Create 10s Demo', 'demo_len_10')],
-            [Markup.button.callback('Create 15s Demo', 'demo_len_15')],
+        
+        const btn5 = Markup.inlineKeyboard([
+            [Markup.button.callback('▶️ Create 5s Swap', 'demo_len_5')],
+            [Markup.button.callback('🎁 Get 69 Free Credits', 'get_free_credits')]
+        ]);
+        const btn10 = Markup.inlineKeyboard([
+            [Markup.button.callback('▶️ Create 10s Swap', 'demo_len_10')],
+            [Markup.button.callback('🎁 Get 69 Free Credits', 'get_free_credits')]
+        ]);
+        const btn15 = Markup.inlineKeyboard([
+            [Markup.button.callback('▶️ Create 15s Swap', 'demo_len_15')],
             [Markup.button.callback('🎁 Get 69 Free Credits', 'get_free_credits')]
         ]);
 
-        if (t5) await bot.telegram.sendVideo(channelId, t5, { caption: cap5, reply_markup: purchaseButtons.reply_markup }).catch(() => { });
-        if (t10) await bot.telegram.sendVideo(channelId, t10, { caption: cap10, reply_markup: purchaseButtons.reply_markup }).catch(() => { });
-        if (t15) await bot.telegram.sendVideo(channelId, t15, { caption: cap15, reply_markup: purchaseButtons.reply_markup }).catch(() => { });
+        if (t5) await bot.telegram.sendVideo(channelId, blurUrl(t5), { caption: cap5, reply_markup: btn5.reply_markup }).catch(() => { });
+        if (t10) await bot.telegram.sendVideo(channelId, blurUrl(t10), { caption: cap10, reply_markup: btn10.reply_markup }).catch(() => { });
+        if (t15) await bot.telegram.sendVideo(channelId, blurUrl(t15), { caption: cap15, reply_markup: btn15.reply_markup }).catch(() => { });
 
         console.log('Startup videos posted to channel with purchase buttons.');
     } catch (error) {
