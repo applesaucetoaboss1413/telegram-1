@@ -17,7 +17,7 @@ if (!fs.existsSync(dbPath)) {
 
 const db = new Database(path.join(dbPath, 'faceswap.db'));
 
-// Initialize Schema
+// Initialize Schema - including new monetization tables
 db.exec(`
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -58,6 +58,49 @@ db.exec(`
         updated_at INTEGER,
         UNIQUE(telegram_user_id, stripe_customer_id)
     );
+
+    -- NEW: Daily claims for engagement
+    CREATE TABLE IF NOT EXISTS daily_claims (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_user_id TEXT UNIQUE,
+        last_claim INTEGER,
+        streak INTEGER DEFAULT 0
+    );
+
+    -- NEW: Purchase history for tracking first purchase discounts
+    CREATE TABLE IF NOT EXISTS purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_user_id TEXT,
+        amount_cents INTEGER,
+        pack_type TEXT,
+        stripe_session_id TEXT,
+        created_at INTEGER
+    );
+
+    -- NEW: Promotional credits with expiry
+    CREATE TABLE IF NOT EXISTS promo_credits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_user_id TEXT,
+        credits INTEGER,
+        source TEXT,
+        expires_at INTEGER,
+        created_at INTEGER
+    );
+
+    -- NEW: Analytics events for conversion tracking
+    CREATE TABLE IF NOT EXISTS analytics_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_user_id TEXT,
+        event_type TEXT,
+        event_data TEXT,
+        created_at INTEGER
+    );
+
+    -- Create indexes for performance
+    CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(telegram_user_id);
+    CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
 `);
 
 // User Methods
@@ -68,13 +111,11 @@ const getUser = (id) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     if (adminIds.includes(String(id))) {
         if (!user) {
-            // If admin doesn't exist, create with 10000 points
             const now = Date.now();
             db.prepare('INSERT INTO users (id, points, created_at) VALUES (?, ?, ?)').run(String(id), 10000, now);
             logger.info(`test user ${id} created with balance=10000`);
             return { id: String(id), points: 10000, created_at: now, is_premium: 0, referred_by: null, has_purchased: 0 };
         } else if (user.points < 10000) {
-            // If admin exists but has low points, top up to 10000
             db.prepare('UPDATE users SET points = 10000 WHERE id = ?').run(String(id));
             logger.info(`test user ${id} balance updated to 10000`);
             user.points = 10000;
@@ -83,7 +124,6 @@ const getUser = (id) => {
 
     if (!user) {
         const now = Date.now();
-        // New regular users start with 0 points
         db.prepare('INSERT INTO users (id, points, created_at) VALUES (?, 0, ?)').run(id, now);
         return { id, points: 0, created_at: now, is_premium: 0, referred_by: null, has_purchased: 0 };
     }
@@ -96,7 +136,6 @@ const updateUserPoints = (id, delta) => {
 };
 
 const setReferredBy = (userId, referrerId) => {
-    // Only set if not already set and not self-referral
     if (userId === referrerId) return;
     const user = getUser(userId);
     if (!user.referred_by) {
@@ -132,6 +171,7 @@ const updateJobMeta = (requestId, meta = {}) => {
         WHERE request_id = ?
     `).run(JSON.stringify(meta), requestId);
 };
+
 const getPendingJobs = () => {
     return db.prepare("SELECT * FROM jobs WHERE status = 'processing'").all();
 };
@@ -145,6 +185,26 @@ const addTransaction = (userId, amount, reason) => {
     db.prepare('INSERT INTO transactions (user_id, amount, reason, created_at) VALUES (?, ?, ?, ?)').run(userId, amount, reason, Date.now());
 };
 
+// Analytics Methods (NEW)
+const trackEvent = (telegramUserId, eventType, eventData = {}) => {
+    try {
+        db.prepare('INSERT INTO analytics_events (telegram_user_id, event_type, event_data, created_at) VALUES (?, ?, ?, ?)')
+            .run(String(telegramUserId), eventType, JSON.stringify(eventData), Date.now());
+    } catch (error) {
+        logger.error('Error tracking event', { error: error.message, eventType });
+    }
+};
+
+const getEventCount = (eventType, sinceTimestamp = 0) => {
+    try {
+        const result = db.prepare('SELECT COUNT(*) as count FROM analytics_events WHERE event_type = ? AND created_at > ?')
+            .get(eventType, sinceTimestamp);
+        return result ? result.count : 0;
+    } catch (error) {
+        return 0;
+    }
+};
+
 module.exports = {
     db,
     getUser,
@@ -156,5 +216,7 @@ module.exports = {
     updateJobMeta,
     getPendingJobs,
     getJob,
-    addTransaction
+    addTransaction,
+    trackEvent,
+    getEventCount
 };
