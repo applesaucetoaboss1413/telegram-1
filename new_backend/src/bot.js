@@ -296,18 +296,47 @@ bot.command('start', async (ctx) => {
 });
 
 async function sendBuyPointsMenu(ctx) {
-    const p10 = demoCfg.demoPrices['10'];
-    const approx = (pts) => Math.max(1, Math.floor(pts / p10));
-    const s = demoCfg.packs.starter.points;
-    const pl = demoCfg.packs.plus.points;
-    const pr = demoCfg.packs.pro.points;
-    const text = `Choose a credit pack:\nStarter – ${s} pts (~${approx(s)} demos)\nPlus – ${pl} pts (~${approx(pl)} demos)\nPro – ${pr} pts (~${approx(pr)} demos)`;
-    return ctx.reply(text, Markup.inlineKeyboard([
-        [Markup.button.callback(`${demoCfg.packs.starter.label} – ${s} pts`, 'buy_pack_starter')],
-        [Markup.button.callback(`${demoCfg.packs.plus.label} – ${pl} pts`, 'buy_pack_plus')],
-        [Markup.button.callback(`${demoCfg.packs.pro.label} – ${pr} pts`, 'buy_pack_pro')],
+    const userId = String(ctx.from.id);
+    const firstPurchase = isFirstPurchase({ telegramUserId: userId });
+    const p = demoCfg.packs;
+    const approx5s = (pts) => Math.max(1, Math.floor(pts / demoCfg.demoPrices['5']));
+    
+    let header = '💳 *Choose a credit pack:*\n\n';
+    if (firstPurchase) {
+        header = '🎁 *FIRST-TIME BUYER SPECIAL!*\n\nStart with just $0.99:\n\n';
+    }
+    
+    const text = `${header}` +
+        `🎯 *Try It* - ${p.micro.points} credits (~${approx5s(p.micro.points)} videos)\n   └ *$${(p.micro.price_cents/100).toFixed(2)}*\n\n` +
+        `⭐ *Starter* - ${p.starter.points} credits (~${approx5s(p.starter.points)} videos)\n   └ *$${(p.starter.price_cents/100).toFixed(2)}*\n\n` +
+        `🔥 *Plus* - ${p.plus.points} credits (~${approx5s(p.plus.points)} videos)\n   └ *$${(p.plus.price_cents/100).toFixed(2)}* (Best Value!)\n\n` +
+        `💎 *Pro* - ${p.pro.points} credits (~${approx5s(p.pro.points)} videos)\n   └ *$${(p.pro.price_cents/100).toFixed(2)}*`;
+    
+    return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+        [Markup.button.callback(`🎯 $0.99 - ${p.micro.points} credits`, 'buy_pack_micro')],
+        [Markup.button.callback(`⭐ $4.99 - ${p.starter.points} credits`, 'buy_pack_starter')],
+        [Markup.button.callback(`🔥 $8.99 - ${p.plus.points} credits`, 'buy_pack_plus')],
+        [Markup.button.callback(`💎 $14.99 - ${p.pro.points} credits`, 'buy_pack_pro')],
     ]));
 }
+
+// Daily credits command
+bot.command('daily', async (ctx) => {
+    const userId = String(ctx.from.id);
+    const result = claimDailyCredits({ telegramUserId: userId });
+    
+    if (result.granted) {
+        let msg = `🎁 *Daily Credits Claimed!*\n\n+${result.amount} credits added`;
+        if (result.streak > 1) {
+            msg += `\n🔥 *${result.streak}-day streak!* (+${result.streakBonus || 0} bonus)`;
+        }
+        msg += `\n\n_Come back tomorrow for more!_`;
+        await ctx.replyWithMarkdown(msg);
+    } else {
+        const hours = result.hoursLeft || 24;
+        await ctx.reply(`⏰ Already claimed today!\n\nCome back in ${hours} hours.\n🔥 Streak: ${result.streak || 0} days`);
+    }
+});
 
 
 
