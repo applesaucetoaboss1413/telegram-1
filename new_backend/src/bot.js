@@ -350,48 +350,44 @@ async function sendDemoMenuWithBuyButtons(ctx) {
     const user = getUser(userId);
     const credits = getCredits({ telegramUserId: userId });
     const totalVideos = getTotalVideosCreated();
+    const lang = getUserLanguage(userId);
     const p = demoCfg.packs;
     
     if (ctx.session) ctx.session.step = null;
 
-    // Main message with all info
-    const msg = `🎭 *AI Face Swap Bot*
-_Swap your face into any video in seconds!_
+    // Main message with all info - using translations
+    const msg = `${t(lang, 'title')}
+${t(lang, 'subtitle')}
 
-📊 *${totalVideos.toLocaleString()}+ videos created*
+${t(lang, 'videosCreated', { count: totalVideos.toLocaleString() })}
 
-━━━━━━━━━━━━━━━━━━━━━
-💰 *CREDIT PACKS*
-━━━━━━━━━━━━━━━━━━━━━
+${t(lang, 'creditPacksTitle')}
 
-🎯 *Try It* – 80 credits – *$0.99*
-⭐ *Starter* – 400 credits – $4.99
-🔥 *Plus* – 800 credits – $8.99 ⭐ BEST VALUE
-💎 *Pro* – 1600 credits – $14.99
+${t(lang, 'tryIt')}
+${t(lang, 'starter')}
+${t(lang, 'plus')}
+${t(lang, 'pro')}
 
-━━━━━━━━━━━━━━━━━━━━━
-🎁 *FREE CREDITS*
-━━━━━━━━━━━━━━━━━━━━━
+${t(lang, 'freeCreditsTitle')}
 
-✨ *69 FREE* – Verify card (no charge) ⚠️ *Limited!*
-🔄 *10 FREE daily* – Claim every 24h
+${t(lang, 'welcomeCredits')}
+${t(lang, 'dailyCredits')}
 
-━━━━━━━━━━━━━━━━━━━━━
-📹 *VIDEO PRICING*
-━━━━━━━━━━━━━━━━━━━━━
+${t(lang, 'videoPricingTitle')}
 
-• 5s = 60 credits • 10s = 90 credits • 15s = 125 credits
+${t(lang, 'videoPricing')}
 
-💰 *Your Balance:* ${credits > 0 ? credits : user.points} credits`;
+${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
-    // Immediate buy buttons
+    // Immediate buy buttons with translations
     let buttons = [
-        [Markup.button.callback('🎁 Get 69 FREE Credits', 'get_free_credits')],
-        [Markup.button.callback('🎯 Buy $0.99 (80 credits)', 'buy_pack_micro')],
-        [Markup.button.callback('⭐ Buy $4.99 (400 credits)', 'buy_pack_starter')],
-        [Markup.button.callback('🔥 Buy $8.99 (800 credits)', 'buy_pack_plus')],
-        [Markup.button.callback('🎬 Create Video', 'demo_new')],
-        [Markup.button.callback('🎁 Claim Daily Credits', 'claim_daily')]
+        [Markup.button.callback(t(lang, 'btnGetFreeCredits'), 'get_free_credits')],
+        [Markup.button.callback(t(lang, 'btnBuyMicro'), 'buy_pack_micro')],
+        [Markup.button.callback(t(lang, 'btnBuyStarter'), 'buy_pack_starter')],
+        [Markup.button.callback(t(lang, 'btnBuyPlus'), 'buy_pack_plus')],
+        [Markup.button.callback(t(lang, 'btnCreateVideo'), 'demo_new')],
+        [Markup.button.callback(t(lang, 'btnClaimDaily'), 'claim_daily')],
+        [Markup.button.callback(t(lang, 'btnLanguage'), 'change_language')]
     ];
 
     await ctx.replyWithMarkdown(msg, Markup.inlineKeyboard(buttons));
