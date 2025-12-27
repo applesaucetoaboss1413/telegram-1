@@ -248,9 +248,10 @@ _Swap your face into any video in seconds!_
         if (credits < 60) {
             creditMsg += `\n⚠️ _Not enough for a video - top up below!_`;
         }
+    } else if (user.points > 0) {
+        creditMsg = `\n\n💰 *Your Points:* ${user.points} (~${approx5s} videos)`;
     } else {
-        creditMsg = `\n\n🎁 *New User Bonus:* Get 69 FREE credits - enough for your first video!.`;
-        // Telegram deep link for 69 credits offer
+        creditMsg = `\n\n🎁 *New User Bonus:* Get 69 FREE credits - enough for your first video!`;
         buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]);
     }
 
