@@ -157,13 +157,22 @@ const markPurchased = (userId) => {
 };
 
 const setUserLanguage = (userId, language) => {
-    getUser(userId); // Ensure user exists
-    db.prepare('UPDATE users SET language = ? WHERE id = ?').run(language, userId);
+    try {
+        getUser(userId); // Ensure user exists
+        db.prepare('UPDATE users SET language = ? WHERE id = ?').run(language, String(userId));
+        console.log(`Language set to ${language} for user ${userId}`);
+    } catch (e) {
+        console.error('setUserLanguage error:', e.message);
+    }
 };
 
 const getUserLanguage = (userId) => {
-    const user = getUser(userId);
-    return user.language || 'en';
+    try {
+        const user = getUser(userId);
+        return user?.language || 'en';
+    } catch (e) {
+        return 'en';
+    }
 };
 
 // Job Methods
