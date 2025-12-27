@@ -104,6 +104,14 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
 `);
 
+// Add language column if it doesn't exist (migration for existing databases)
+try {
+    db.prepare("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'").run();
+    console.log('Added language column to users table');
+} catch (e) {
+    // Column already exists, ignore
+}
+
 // User Methods
 const getUser = (id) => {
     let user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
