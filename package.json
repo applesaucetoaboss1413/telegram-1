@@ -1,0 +1,31 @@
+{
+  "name": "telegram-bot",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "scripts": {
+    "start": "node new_backend/index.js",
+    "build": "echo 'no build step'"
+  },
+  "dependencies": {
+    "axios": "^1.13.2",
+    "better-sqlite3": "^12.5.0",
+    "cloudinary": "^2.8.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-rate-limit": "^8.2.1",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^2.7.0",
+    "p-queue": "^6.6.2",
+    "pg": "^8.11.0",
+    "stripe": "^14.25.0",
+    "telegraf": "^4.16.3",
+    "uuid": "^13.0.0",
+    "winston": "^3.19.0"
+  }
+}
