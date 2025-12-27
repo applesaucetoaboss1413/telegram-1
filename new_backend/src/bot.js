@@ -249,7 +249,7 @@ _Swap your face into any video in seconds!_
             creditMsg += `\n⚠️ _Not enough for a video - top up below!_`;
         }
     } else {
-        creditMsg = `\n\n🎁 *New User Bonus:* New users get 69 free credits when they connect Stripe (enough for your first 5-second video).`;
+        creditMsg = `\n\n🎁 *New User Bonus:* Get 69 FREE credits - enough for your first video!.`;
         // Telegram deep link for 69 credits offer
         buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]);
     }
