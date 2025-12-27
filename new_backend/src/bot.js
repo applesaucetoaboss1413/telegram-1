@@ -237,10 +237,10 @@ _Swap your face into any video in seconds!_
     // Credit messaging - OPTIMIZED FOR CONVERSIONS
     let creditMsg = '';
     let buttons = [
-        [Markup.button.callback('Create new demo', 'demo_new')],
-        [Markup.button.callback('My demos', 'demo_list')],
-        [Markup.button.callback('Buy points', 'buy_points_menu')],
-        [Markup.button.callback('Help', 'help')]
+        [Markup.button.callback('🎬 Create Video', 'demo_new')],
+        [Markup.button.callback('🎁 Daily Free Credits', 'claim_daily')],
+        [Markup.button.callback('💳 Buy Credits', 'buy_points_menu')],
+        [Markup.button.callback('❓ Help', 'help')]
     ];
 
     if (credits > 0) {
