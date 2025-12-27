@@ -190,24 +190,28 @@ async function sendDemoMenu(ctx) {
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
     const credits = getCredits({ telegramUserId: userId });
+    const totalVideos = getTotalVideosCreated();
     
     if (ctx.session) ctx.session.step = null;
 
     if (ctx.chat && (ctx.chat.type === 'private' || ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
         const p = demoCfg.packs;
-        const msg = `🎭 *Face Swap Demo*
-Turn any clip into a face swap demo in seconds.
+        const msg = `🎭 *AI Face Swap Bot*
+_Swap your face into any video in seconds!_
 
-*Packs*
-• ${p.starter.label} – ${p.starter.points} pts (~${p.starter.approxDemos} demos) – ${p.starter.priceDisplay}
-• ${p.plus.label} – ${p.plus.points} pts (~${p.plus.approxDemos} demos) – ${p.plus.priceDisplay}
-• ${p.pro.label} – ${p.pro.points} pts (~${p.pro.approxDemos} demos) – ${p.pro.priceDisplay}
+📊 *${totalVideos.toLocaleString()}+ videos created*
 
-*Steps*
-1. Buy points
-2. Create new demo
-3. Pick length & base video
-4. Upload face`;
+*💰 Credit Packs:*
+🎯 Try It – ${p.micro.points} pts (~1 video) – *$0.99*
+⭐ Starter – ${p.starter.points} pts (~${p.starter.approx5sDemos} videos) – $4.99
+🔥 Plus – ${p.plus.points} pts (~${p.plus.approx5sDemos} videos) – $8.99
+💎 Pro – ${p.pro.points} pts (~${p.pro.approx5sDemos} videos) – $14.99
+
+*How it works:*
+1️⃣ Get credits (free welcome bonus available!)
+2️⃣ Choose video length (5s, 10s, or 15s)
+3️⃣ Send video + face photo
+4️⃣ Get your AI face-swapped video!`;
         await ctx.replyWithMarkdown(msg);
 
         // Automatically send template examples
