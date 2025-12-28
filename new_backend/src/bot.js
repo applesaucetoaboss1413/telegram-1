@@ -644,16 +644,20 @@ bot.action('open_studio', async (ctx) => {
         await ctx.answerCbQuery();
         const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
         await ctx.reply(
-            `✨ *AI Studio*\n\nTap below to open the full app!`,
+            `✨ *AI Studio*\n\nTap the button below to open!`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]]
+                    keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
                 }
             }
         );
     } catch (e) {
         logger.error('open_studio action failed', { error: e.message });
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
+        await ctx.reply(`Open AI Studio: ${webAppUrl}`);
     }
 });
 
