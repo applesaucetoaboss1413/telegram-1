@@ -310,4 +310,302 @@ app.post('/admin/grant', (req, res) => {
     }
 });
 
+// ==================== MINI APP API ====================
+const path = require('path');
+const multer = require('multer');
+const { uploadFromBuffer } = require('./services/cloudinaryService');
+const { getCredits, deductCredits } = require('./services/creditsService');
+const {
+    startFaceSwap, checkFaceSwapTaskStatus,
+    startImage2Video, checkImage2VideoStatus,
+    startTalkingAvatar, checkTalkingAvatarStatus,
+    startVideoEnhancement, checkVideoEnhancementStatus,
+    startBackgroundRemoval, checkBackgroundRemovalStatus
+} = require('./services/magicService');
+
+// Serve Mini App static files
+app.use('/miniapp', express.static(path.join(__dirname, '../miniapp')));
+
+// Multer for file uploads
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
+
+// Service cost configurations
+const SERVICE_COSTS = {
+    faceswap: { base: 60, perSecond: 5 },
+    avatar: { base: 80 },
+    img2vid: { base: 50 },
+    enhance: { base: 40 },
+    bgremove: { base: 20 }
+};
+
+// Mini App: Get credits
+app.get('/api/miniapp/credits', (req, res) => {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    
+    try {
+        const credits = getCredits({ telegramUserId: userId });
+        res.json({ credits });
+    } catch (e) {
+        logger.error('Mini app credits error', { error: e.message });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mini App: Get recent creations
+app.get('/api/miniapp/creations', (req, res) => {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    
+    try {
+        const { db } = require('./database');
+        const creations = db.prepare(`
+            SELECT * FROM miniapp_creations 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT 10
+        `).all(userId);
+        res.json({ creations: creations || [] });
+    } catch (e) {
+        // Table might not exist yet
+        res.json({ creations: [] });
+    }
+});
+
+// Mini App: Upload file
+app.post('/api/miniapp/upload', upload.single('file'), async (req, res) => {
+    try {
+        const file = req.file;
+        if (!file) return res.status(400).json({ error: 'No file uploaded' });
+        
+        const resourceType = file.mimetype.startsWith('video/') ? 'video' : 
+                            file.mimetype.startsWith('audio/') ? 'video' : 'image';
+        
+        const result = await uploadFromBuffer(file.buffer, resourceType);
+        res.json({ url: result });
+    } catch (e) {
+        logger.error('Mini app upload error', { error: e.message });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mini App: Process service
+app.post('/api/miniapp/process', async (req, res) => {
+    const { userId, service, files, inputs } = req.body;
+    
+    if (!userId || !service) {
+        return res.status(400).json({ error: 'userId and service required' });
+    }
+    
+    try {
+        // Check credits
+        const credits = getCredits({ telegramUserId: userId });
+        const cost = SERVICE_COSTS[service]?.base || 50;
+        
+        if (credits < cost) {
+            return res.status(402).json({ error: 'Insufficient credits', required: cost, available: credits });
+        }
+        
+        let taskId;
+        
+        switch (service) {
+            case 'faceswap':
+                if (!files.face || !files.video) {
+                    return res.status(400).json({ error: 'Face photo and video required' });
+                }
+                taskId = await startFaceSwap(files.face, files.video);
+                break;
+                
+            case 'avatar':
+                if (!files.photo) {
+                    return res.status(400).json({ error: 'Photo required' });
+                }
+                taskId = await startTalkingAvatar(files.photo, files.audio, inputs?.text);
+                break;
+                
+            case 'img2vid':
+                if (!files.image) {
+                    return res.status(400).json({ error: 'Image required' });
+                }
+                taskId = await startImage2Video(files.image, inputs?.prompt || 'subtle motion');
+                break;
+                
+            case 'enhance':
+                if (!files.video) {
+                    return res.status(400).json({ error: 'Video required' });
+                }
+                taskId = await startVideoEnhancement(files.video, '4k');
+                break;
+                
+            case 'bgremove':
+                if (!files.image) {
+                    return res.status(400).json({ error: 'Image required' });
+                }
+                const bgResult = await startBackgroundRemoval(files.image);
+                if (bgResult.instant) {
+                    // Instant result - deduct credits and return
+                    deductCredits({ telegramUserId: userId, amount: cost });
+                    saveCreation(userId, service, bgResult.result_url);
+                    return res.json({ taskId: bgResult.id, instant: true, result_url: bgResult.result_url });
+                }
+                taskId = bgResult.id;
+                break;
+                
+            default:
+                return res.status(400).json({ error: 'Invalid service' });
+        }
+        
+        // Deduct credits
+        deductCredits({ telegramUserId: userId, amount: cost });
+        
+        // Store task for tracking
+        storeTask(userId, service, taskId, cost);
+        
+        logger.info('Mini app task started', { userId, service, taskId, cost });
+        res.json({ taskId, cost });
+        
+    } catch (e) {
+        logger.error('Mini app process error', { error: e.message, service });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mini App: Check status
+app.get('/api/miniapp/status', async (req, res) => {
+    const { taskId, service } = req.query;
+    
+    if (!taskId || !service) {
+        return res.status(400).json({ error: 'taskId and service required' });
+    }
+    
+    try {
+        let result;
+        
+        switch (service) {
+            case 'faceswap':
+                result = await checkFaceSwapTaskStatus(taskId);
+                break;
+            case 'avatar':
+                result = await checkTalkingAvatarStatus(taskId);
+                break;
+            case 'img2vid':
+                result = await checkImage2VideoStatus(taskId);
+                break;
+            case 'enhance':
+                result = await checkVideoEnhancementStatus(taskId);
+                break;
+            case 'bgremove':
+                result = await checkBackgroundRemovalStatus(taskId);
+                break;
+            default:
+                return res.status(400).json({ error: 'Invalid service' });
+        }
+        
+        // Save creation if completed
+        if (result.status === 'completed' && result.result_url) {
+            const task = getTask(taskId);
+            if (task) {
+                saveCreation(task.user_id, service, result.result_url);
+            }
+        }
+        
+        res.json(result);
+        
+    } catch (e) {
+        logger.error('Mini app status error', { error: e.message, taskId });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Mini App: Create checkout
+app.post('/api/miniapp/checkout', async (req, res) => {
+    const { userId, packType, currency } = req.body;
+    
+    if (!userId || !packType) {
+        return res.status(400).json({ error: 'userId and packType required' });
+    }
+    
+    const pack = demoCfg.packs[packType];
+    if (!pack) {
+        return res.status(400).json({ error: 'Invalid pack type' });
+    }
+    
+    try {
+        // Currency conversion
+        const SAFE_RATES = { MXN: 17.5, EUR: 0.92, GBP: 0.79, CAD: 1.36 };
+        const curr = (currency || 'usd').toLowerCase();
+        let amountInCurrency = pack.price_cents;
+        
+        if (curr !== 'usd') {
+            const rate = SAFE_RATES[curr.toUpperCase()] || 1;
+            amountInCurrency = Math.round(pack.price_cents * rate * 1.03);
+        }
+        
+        const session = await stripe.checkout.sessions.create({
+            line_items: [{
+                price_data: {
+                    currency: curr,
+                    product_data: { name: pack.label },
+                    unit_amount: amountInCurrency,
+                },
+                quantity: 1,
+            }],
+            mode: 'payment',
+            success_url: process.env.MINIAPP_URL || `https://t.me/ImMoreThanJustSomeBot?start=success`,
+            cancel_url: process.env.MINIAPP_URL || `https://t.me/ImMoreThanJustSomeBot?start=cancel`,
+            client_reference_id: userId,
+            metadata: {
+                points: String(pack.points),
+                pack_type: packType,
+                source: 'miniapp'
+            }
+        });
+        
+        res.json({ url: session.url });
+        
+    } catch (e) {
+        logger.error('Mini app checkout error', { error: e.message });
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Helper functions for task tracking
+const taskStore = new Map();
+
+function storeTask(userId, service, taskId, cost) {
+    taskStore.set(taskId, { user_id: userId, service, cost, created_at: Date.now() });
+}
+
+function getTask(taskId) {
+    return taskStore.get(taskId);
+}
+
+function saveCreation(userId, type, resultUrl) {
+    try {
+        const { db } = require('./database');
+        
+        // Create table if not exists
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS miniapp_creations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                result_url TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+            )
+        `);
+        
+        db.prepare(`
+            INSERT INTO miniapp_creations (user_id, type, result_url, created_at)
+            VALUES (?, ?, ?, ?)
+        `).run(userId, type, resultUrl, Date.now());
+        
+    } catch (e) {
+        logger.error('Save creation error', { error: e.message });
+    }
+}
+
 module.exports = app;
