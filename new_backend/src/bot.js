@@ -629,7 +629,7 @@ bot.command('studio', async (ctx) => {
 bot.action('open_studio', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegram-1-i38q.onrender.com'}/miniapp`;
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
         await ctx.reply(
             `✨ *AI Studio*\n\nTap below to open the full app!`,
             {
