@@ -521,7 +521,6 @@ async function startWelcomeCreditsCheckout(ctx) {
 
         const session = await stripe.checkout.sessions.create({
             mode: 'setup',
-            payment_method_types: ['card'],
             success_url: `${botUrl}?start=credits_success`,
             cancel_url: `${botUrl}?start=credits_cancel`,
             client_reference_id: String(ctx.from.id),
