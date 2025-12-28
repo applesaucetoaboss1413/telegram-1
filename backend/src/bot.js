@@ -471,6 +471,46 @@ async function getBotUsername() {
     return cachedBotUsername;
 }
 
+// Cache for Stripe Price IDs - Adaptive Pricing requires real Price objects, not price_data
+const priceCache = {};
+
+async function getOrCreatePrice(pack, packKey) {
+    // Return cached price if available
+    if (priceCache[packKey]) {
+        return priceCache[packKey];
+    }
+    
+    // Search for existing price with matching metadata
+    const existingPrices = await stripe.prices.search({
+        query: `metadata['pack_key']:'${packKey}' active:'true'`,
+        limit: 1
+    });
+    
+    if (existingPrices.data.length > 0) {
+        priceCache[packKey] = existingPrices.data[0].id;
+        logger.info('Found existing Stripe price', { packKey, priceId: priceCache[packKey] });
+        return priceCache[packKey];
+    }
+    
+    // Create product first
+    const product = await stripe.products.create({
+        name: pack.label,
+        metadata: { pack_key: packKey }
+    });
+    
+    // Create price for the product
+    const price = await stripe.prices.create({
+        product: product.id,
+        unit_amount: pack.price_cents,
+        currency: 'usd',
+        metadata: { pack_key: packKey }
+    });
+    
+    priceCache[packKey] = price.id;
+    logger.info('Created new Stripe price', { packKey, priceId: price.id, productId: product.id });
+    return price.id;
+}
+
 async function startCheckout(ctx, pack, packKey) {
     try {
         const username = await getBotUsername();
@@ -479,20 +519,16 @@ async function startCheckout(ctx, pack, packKey) {
         
         trackEvent(userId, 'checkout_started', { pack: packKey, amount: pack.price_cents });
 
+        // Get or create a real Stripe Price object - required for Adaptive Pricing to work
+        const priceId = await getOrCreatePrice(pack, packKey);
+
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{
-                price_data: {
-                    currency: 'usd',
-                    product_data: { name: pack.label },
-                    unit_amount: pack.price_cents,
-                },
+                price: priceId,
                 quantity: 1,
             }],
             mode: 'payment',
-            // Enable Adaptive Pricing - allows customers to pay in their local currency (e.g., MXN)
-            // while you receive funds in USD. Stripe handles the conversion automatically.
-            adaptive_currency: true,
             success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
             cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
             client_reference_id: userId,
