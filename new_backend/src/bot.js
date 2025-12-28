@@ -816,6 +816,7 @@ bot.action(/pay:(\w+):(.+)/, async (ctx) => {
         trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
 
         const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'], // Force card only, disable Link
             line_items: [{
                 price_data: {
                     currency: currency,
