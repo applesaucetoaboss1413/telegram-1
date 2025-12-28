@@ -592,18 +592,17 @@ bot.action('cancel_payment', async (ctx) => {
 bot.action(/pay:(\w+):(.+)/, async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const currency = ctx.match[1].toLowerCase();
+        const currency = 'mxn'; // Force MXN for Mexican Stripe account
         const packKey = ctx.match[2];
         const pack = demoCfg.packs[packKey];
         
         if (!pack) return ctx.reply('Invalid pack');
-        if (!SUPPORTED_CURRENCIES.includes(currency)) return ctx.reply('Unsupported currency');
         
         const username = await getBotUsername();
         const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
         const userId = String(ctx.from.id);
         
-        // Get exchange rate and convert
+        // Get exchange rate and convert to MXN
         const rate = await fetchUsdRate(currency);
         const amountInCurrency = toMinorUnits(pack.price_cents / 100, currency, rate);
         const displayAmount = (amountInCurrency / 100).toFixed(2);
@@ -637,13 +636,13 @@ bot.action(/pay:(\w+):(.+)/, async (ctx) => {
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]],
+                    inline_keyboard: [[{ text: '💳 Pagar Ahora / Pay Now', url: session.url }]],
                 },
             }
         );
     } catch (e) {
         logger.error('Payment checkout failed', { error: e.message, userId: ctx.from?.id });
-        ctx.reply('❌ Payment system error. Please try again later.');
+        ctx.reply('❌ Error en el sistema de pago. Por favor intenta de nuevo. / Payment system error. Please try again.');
     }
 });
 
