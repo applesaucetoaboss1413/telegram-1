@@ -240,6 +240,13 @@ async function sendDemoMenu(ctx) {
 
     if (ctx.chat && (ctx.chat.type === 'private' || ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
         const p = demoCfg.packs;
+        
+        // Convert USD prices to MXN for display
+        const rate = await fetchUsdRate('mxn');
+        const price5sMxn = ((demoCfg.demoCosts['5'].points / 80) * ((p.micro.price_cents / 100) * rate)).toFixed(2);
+        const price10sMxn = ((demoCfg.demoCosts['10'].points / 80) * ((p.micro.price_cents / 100) * rate)).toFixed(2);
+        const price15sMxn = ((demoCfg.demoCosts['15'].points / 80) * ((p.micro.price_cents / 100) * rate)).toFixed(2);
+        
         const msg = `🎭 *AI Face Swap Bot*
 _Swap your face into any video in seconds_
 
@@ -252,9 +259,9 @@ _Swap your face into any video in seconds_
 4️⃣ Get your AI face-swapped video!
 
 *Pricing:*
-• 5 seconds – 60 credits (~$0.75)
-• 10 seconds – 90 credits (~$1.12)  
-• 15 seconds – 125 credits (~$1.56)`;
+• 5 seconds – 60 credits (~MX$${price5sMxn})
+• 10 seconds – 90 credits (~MX$${price10sMxn})  
+• 15 seconds – 125 credits (~MX$${price15sMxn})`;
         await ctx.replyWithMarkdown(msg);
 
         // Send blurred template examples with action buttons
