@@ -873,18 +873,7 @@ async function startCheckout(ctx, pack, packKey) {
         ctx.reply('❌ Payment system error. Please try again later.');
     }
 }
-        
-        // Get exchange rate and convert to MXN
-        const rate = await fetchUsdRate(currency);
-        const amountInCurrency = toMinorUnits(pack.price_cents / 100, currency, rate);
-        const displayAmount = (amountInCurrency / 100).toFixed(2);
-        const symbol = CURRENCY_SYMBOLS[currency] || currency.toUpperCase();
-        
-        trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
 
-        const session = await stripe.checkout.sessions.create({
-            line_items: [{
-                price_data: {
 async function startWelcomeCreditsCheckout(ctx) {
     try {
         const username = await getBotUsername();
