@@ -889,25 +889,55 @@ bot.action(/pay:(\w+):(.+)/, async (ctx) => {
 });
 
 async function startCheckout(ctx, pack, packKey) {
-    // Show currency selection instead of direct checkout
+    // Direct to MXN payment for Mexican Stripe account
     try {
-        const usdPrice = (pack.price_cents / 100).toFixed(2);
+        await ctx.answerCbQuery();
+        const currency = 'mxn';
+        const userId = String(ctx.from.id);
+        const username = await getBotUsername();
+        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
+        
+        // Get exchange rate and convert to MXN
+        const rate = await fetchUsdRate(currency);
+        const amountInCurrency = toMinorUnits(pack.price_cents / 100, currency, rate);
+        const displayAmount = (amountInCurrency / 100).toFixed(2);
+        const symbol = CURRENCY_SYMBOLS[currency] || currency.toUpperCase();
+        
+        trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
+
+        const session = await stripe.checkout.sessions.create({
+            line_items: [{
+                price_data: {
+                    currency: currency,
+                    product_data: { name: pack.label },
+                    unit_amount: amountInCurrency,
+                },
+                quantity: 1,
+            }],
+            mode: 'payment',
+            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
+            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
+            client_reference_id: userId,
+            metadata: {
+                points: String(pack.points),
+                pack_type: packKey,
+                currency: currency,
+                usd_equivalent: String(pack.price_cents)
+            }
+        });
         
         await ctx.reply(
-            `💰 *${pack.label}*\n${pack.points} credits for $${usdPrice} USD\n\n🌍 *Select your currency:*`,
+            `💳 *${pack.label}*\n\n${pack.points} credits for *${symbol}${displayAmount}*\n\nTap below to complete your purchase:`,
             {
                 parse_mode: 'Markdown',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.callback('🇺🇸 USD', `pay:usd:${packKey}`), Markup.button.callback('🇲🇽 MXN', `pay:mxn:${packKey}`)],
-                    [Markup.button.callback('🇪🇺 EUR', `pay:eur:${packKey}`), Markup.button.callback('🇬🇧 GBP', `pay:gbp:${packKey}`)],
-                    [Markup.button.callback('🇨🇦 CAD', `pay:cad:${packKey}`)],
-                    [Markup.button.callback('❌ Cancel', 'cancel_payment')]
-                ]).reply_markup
+                reply_markup: {
+                    inline_keyboard: [[{ text: '💳 Pagar Ahora / Pay Now', url: session.url }]],
+                },
             }
         );
     } catch (e) {
         logger.error('startCheckout failed', { error: e.message, pack: pack.label, userId: ctx.from.id });
-        ctx.reply('❌ Payment system error. Please try again later.');
+        ctx.reply('❌ Error en el sistema de pago. Por favor intenta de nuevo. / Payment system error. Please try again.');
     }
 }
 
