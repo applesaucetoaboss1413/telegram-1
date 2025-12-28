@@ -266,6 +266,21 @@ bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
     
+    // Handle Mini App launch
+    if (payload === 'studio' || payload === 'app') {
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://your-app.onrender.com'}/miniapp`;
+        await ctx.reply(
+            `✨ *AI Studio*\n\nAccess all our AI services in one place!`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]]
+                }
+            }
+        );
+        return;
+    }
+    
     // Handle deep links for purchases
     if (payload === 'buy_micro') {
         await startCheckout(ctx, demoCfg.packs.micro);
