@@ -269,15 +269,21 @@ bot.command('start', async (ctx) => {
     // Handle Mini App launch
     if (payload === 'studio' || payload === 'app') {
         const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
-        await ctx.reply(
-            `✨ *AI Studio*\n\nAccess all our AI services in one place!`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]]
+        try {
+            await ctx.reply(
+                `✨ *AI Studio*\n\nAccess all our AI services in one place!`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]],
+                        resize_keyboard: true,
+                        one_time_keyboard: true
+                    }
                 }
-            }
-        );
+            );
+        } catch (e) {
+            await ctx.reply(`✨ *AI Studio*\n\nOpen here: ${webAppUrl}`, { parse_mode: 'Markdown' });
+        }
         return;
     }
     
