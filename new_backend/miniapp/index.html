@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Studio</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        body { 
+            background: var(--tg-theme-bg-color, #1a1a2e); 
+            color: var(--tg-theme-text-color, #fff);
+            min-height: 100vh;
+        }
+        .service-card {
+            background: var(--tg-theme-secondary-bg-color, #16213e);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+        }
+        .service-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(99, 102, 241, 0.5);
+            box-shadow: 0 8px 30px rgba(99, 102, 241, 0.2);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+        }
+        .credits-badge {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .upload-zone {
+            border: 2px dashed rgba(255,255,255,0.3);
+            transition: all 0.3s ease;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+        .processing-spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .tab-active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="pb-20">
+    <!-- Header -->
+    <div class="sticky top-0 z-50 bg-opacity-90 backdrop-blur-lg p-4" style="background: var(--tg-theme-bg-color, #1a1a2e);">
+        <div class="flex items-center justify-between">
+            <h1 class="text-xl font-bold gradient-text">✨ AI Studio</h1>
+            <div class="credits-badge px-3 py-1 rounded-full text-white text-sm font-semibold">
+                💰 <span id="credits-display">0</span> credits
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="px-4">
+        <!-- Services Grid -->
+        <div id="services-view">
+            <p class="text-gray-400 text-sm mb-4">Choose a service to get started</p>
+            
+            <div class="grid grid-cols-2 gap-3">
+                <!-- Face Swap Video -->
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="selectService('faceswap')">
+                    <div class="text-3xl mb-2">🎭</div>
+                    <h3 class="font-semibold text-white">Face Swap</h3>
+                    <p class="text-xs text-gray-400 mt-1">Swap faces in videos</p>
+                    <div class="mt-2 text-xs text-purple-400 font-medium">60-125 credits</div>
+                </div>
+
+                <!-- Talking Avatar -->
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="selectService('avatar')">
+                    <div class="text-3xl mb-2">🗣️</div>
+                    <h3 class="font-semibold text-white">Talking Avatar</h3>
+                    <p class="text-xs text-gray-400 mt-1">Make photos talk</p>
+                    <div class="mt-2 text-xs text-purple-400 font-medium">80-150 credits</div>
+                </div>
+
+                <!-- Image to Video -->
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="selectService('img2vid')">
+                    <div class="text-3xl mb-2">🎬</div>
+                    <h3 class="font-semibold text-white">Image to Video</h3>
+                    <p class="text-xs text-gray-400 mt-1">Animate any photo</p>
+                    <div class="mt-2 text-xs text-purple-400 font-medium">50-100 credits</div>
+                </div>
+
+                <!-- Video Enhancement -->
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="selectService('enhance')">
+                    <div class="text-3xl mb-2">✨</div>
+                    <h3 class="font-semibold text-white">4K Enhance</h3>
+                    <p class="text-xs text-gray-400 mt-1">Upscale to 4K</p>
+                    <div class="mt-2 text-xs text-purple-400 font-medium">40-80 credits</div>
+                </div>
+
+                <!-- Background Removal -->
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="selectService('bgremove')">
+                    <div class="text-3xl mb-2">🖼️</div>
+                    <h3 class="font-semibold text-white">Remove BG</h3>
+                    <p class="text-xs text-gray-400 mt-1">Remove backgrounds</p>
+                    <div class="mt-2 text-xs text-purple-400 font-medium">20-30 credits</div>
+                </div>
+
+                <!-- Buy Credits -->
+                <div class="service-card rounded-xl p-4 cursor-pointer border-2 border-purple-500" onclick="showBuyCredits()">
+                    <div class="text-3xl mb-2">💳</div>
+                    <h3 class="font-semibold text-white">Buy Credits</h3>
+                    <p class="text-xs text-gray-400 mt-1">Get more credits</p>
+                    <div class="mt-2 text-xs text-green-400 font-medium">From $0.99</div>
+                </div>
+            </div>
+
+            <!-- Recent Creations -->
+            <div class="mt-6">
+                <h2 class="font-semibold text-white mb-3">📁 Recent Creations</h2>
+                <div id="recent-creations" class="space-y-2">
+                    <p class="text-gray-500 text-sm text-center py-4">No creations yet</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Service View (hidden by default) -->
+        <div id="service-view" class="hidden">
+            <button onclick="goBack()" class="flex items-center text-gray-400 mb-4">
+                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                Back
+            </button>
+
+            <div id="service-content">
+                <!-- Dynamic content loaded here -->
+            </div>
+        </div>
+
+        <!-- Processing View -->
+        <div id="processing-view" class="hidden text-center py-12">
+            <div class="processing-spinner w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <h3 class="text-xl font-semibold text-white mb-2">Processing...</h3>
+            <p class="text-gray-400" id="processing-status">This may take 1-2 minutes</p>
+        </div>
+
+        <!-- Result View -->
+        <div id="result-view" class="hidden">
+            <div class="text-center py-8">
+                <div class="text-5xl mb-4">🎉</div>
+                <h3 class="text-xl font-semibold text-white mb-2">Done!</h3>
+                <div id="result-content" class="my-4">
+                    <!-- Result media displayed here -->
+                </div>
+                <div class="flex gap-3 justify-center mt-6">
+                    <button onclick="downloadResult()" class="btn-primary px-6 py-3 rounded-xl text-white font-semibold">
+                        📥 Download
+                    </button>
+                    <button onclick="shareResult()" class="bg-gray-700 px-6 py-3 rounded-xl text-white font-semibold">
+                        📤 Share
+                    </button>
+                </div>
+                <button onclick="goHome()" class="mt-4 text-purple-400">Create Another</button>
+            </div>
+        </div>
+
+        <!-- Buy Credits View -->
+        <div id="buy-credits-view" class="hidden">
+            <button onclick="goBack()" class="flex items-center text-gray-400 mb-4">
+                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                Back
+            </button>
+
+            <h2 class="text-xl font-bold text-white mb-4">💳 Buy Credits</h2>
+            
+            <div class="space-y-3">
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="buyPack('micro')">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="font-semibold text-white">🎯 Try It</h3>
+                            <p class="text-sm text-gray-400">80 credits • 1 video</p>
+                        </div>
+                        <div class="text-xl font-bold text-green-400">$0.99</div>
+                    </div>
+                </div>
+
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="buyPack('starter')">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="font-semibold text-white">⭐ Starter</h3>
+                            <p class="text-sm text-gray-400">400 credits • ~6 videos</p>
+                        </div>
+                        <div class="text-xl font-bold text-green-400">$4.99</div>
+                    </div>
+                </div>
+
+                <div class="service-card rounded-xl p-4 cursor-pointer border-2 border-purple-500 relative" onclick="buyPack('plus')">
+                    <div class="absolute -top-2 right-4 bg-purple-500 text-xs px-2 py-1 rounded-full">BEST VALUE</div>
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="font-semibold text-white">🔥 Plus</h3>
+                            <p class="text-sm text-gray-400">800 credits • ~13 videos</p>
+                        </div>
+                        <div class="text-xl font-bold text-green-400">$8.99</div>
+                    </div>
+                </div>
+
+                <div class="service-card rounded-xl p-4 cursor-pointer" onclick="buyPack('pro')">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="font-semibold text-white">💎 Pro</h3>
+                            <p class="text-sm text-gray-400">1600 credits • ~26 videos</p>
+                        </div>
+                        <div class="text-xl font-bold text-green-400">$14.99</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Currency Selection -->
+            <div class="mt-6">
+                <p class="text-sm text-gray-400 mb-2">Select currency:</p>
+                <div class="flex gap-2 flex-wrap">
+                    <button class="currency-btn px-3 py-1 rounded-lg bg-purple-600 text-white text-sm" data-currency="usd">🇺🇸 USD</button>
+                    <button class="currency-btn px-3 py-1 rounded-lg bg-gray-700 text-white text-sm" data-currency="mxn">🇲🇽 MXN</button>
+                    <button class="currency-btn px-3 py-1 rounded-lg bg-gray-700 text-white text-sm" data-currency="eur">🇪🇺 EUR</button>
+                    <button class="currency-btn px-3 py-1 rounded-lg bg-gray-700 text-white text-sm" data-currency="gbp">🇬🇧 GBP</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // State
+        let currentService = null;
+        let currentResultUrl = null;
+        let selectedCurrency = 'usd';
+        let userId = tg.initDataUnsafe?.user?.id || 'test_user';
+
+        // API base URL
+        const API_BASE = window.location.origin + '/api/miniapp';
+
+        // Initialize
+        async function init() {
+            await fetchCredits();
+            await fetchRecentCreations();
+        }
+
+        async function fetchCredits() {
+            try {
+                const res = await fetch(`${API_BASE}/credits?userId=${userId}`);
+                const data = await res.json();
+                document.getElementById('credits-display').textContent = data.credits || 0;
+            } catch (e) {
+                console.error('Failed to fetch credits:', e);
+            }
+        }
+
+        async function fetchRecentCreations() {
+            try {
+                const res = await fetch(`${API_BASE}/creations?userId=${userId}`);
+                const data = await res.json();
+                const container = document.getElementById('recent-creations');
+                
+                if (data.creations && data.creations.length > 0) {
+                    container.innerHTML = data.creations.map(c => `
+                        <div class="service-card rounded-lg p-3 flex items-center gap-3">
+                            <div class="text-2xl">${getServiceEmoji(c.type)}</div>
+                            <div class="flex-1">
+                                <p class="text-sm text-white">${getServiceName(c.type)}</p>
+                                <p class="text-xs text-gray-400">${new Date(c.created_at).toLocaleDateString()}</p>
+                            </div>
+                            <a href="${c.result_url}" target="_blank" class="text-purple-400 text-sm">View</a>
+                        </div>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to fetch creations:', e);
+            }
+        }
+
+        function getServiceEmoji(type) {
+            const emojis = { faceswap: '🎭', avatar: '🗣️', img2vid: '🎬', enhance: '✨', bgremove: '🖼️' };
+            return emojis[type] || '📁';
+        }
+
+        function getServiceName(type) {
+            const names = { faceswap: 'Face Swap', avatar: 'Talking Avatar', img2vid: 'Image to Video', enhance: '4K Enhance', bgremove: 'BG Removal' };
+            return names[type] || type;
+        }
+
+        function selectService(service) {
+            currentService = service;
+            showView('service-view');
+            renderServiceUI(service);
+        }
+
+        function renderServiceUI(service) {
+            const content = document.getElementById('service-content');
+            
+            const configs = {
+                faceswap: {
+                    title: '🎭 Face Swap Video',
+                    description: 'Swap your face into any video',
+                    fields: [
+                        { id: 'face', label: 'Your Face Photo', type: 'image', required: true },
+                        { id: 'video', label: 'Target Video', type: 'video', required: true }
+                    ],
+                    cost: '60-125 credits'
+                },
+                avatar: {
+                    title: '🗣️ Talking Avatar',
+                    description: 'Make any photo talk with your voice',
+                    fields: [
+                        { id: 'photo', label: 'Photo to Animate', type: 'image', required: true },
+                        { id: 'audio', label: 'Audio/Voice', type: 'audio', required: false },
+                        { id: 'text', label: 'Or enter text to speak', type: 'textarea', required: false }
+                    ],
+                    cost: '80-150 credits'
+                },
+                img2vid: {
+                    title: '🎬 Image to Video',
+                    description: 'Animate any still image',
+                    fields: [
+                        { id: 'image', label: 'Image to Animate', type: 'image', required: true },
+                        { id: 'prompt', label: 'Motion Description (optional)', type: 'text', placeholder: 'e.g., gentle wind blowing hair' }
+                    ],
+                    cost: '50-100 credits'
+                },
+                enhance: {
+                    title: '✨ 4K Video Enhancement',
+                    description: 'Upscale and enhance video quality',
+                    fields: [
+                        { id: 'video', label: 'Video to Enhance', type: 'video', required: true }
+                    ],
+                    cost: '40-80 credits'
+                },
+                bgremove: {
+                    title: '🖼️ Background Removal',
+                    description: 'Remove background from images',
+                    fields: [
+                        { id: 'image', label: 'Image', type: 'image', required: true }
+                    ],
+                    cost: '20-30 credits'
+                }
+            };
+
+            const config = configs[service];
+            
+            content.innerHTML = `
+                <h2 class="text-xl font-bold text-white mb-2">${config.title}</h2>
+                <p class="text-gray-400 text-sm mb-4">${config.description}</p>
+                <p class="text-purple-400 text-sm mb-6">Cost: ${config.cost}</p>
+                
+                <form id="service-form" class="space-y-4">
+                    ${config.fields.map(field => renderField(field)).join('')}
+                    
+                    <button type="submit" class="w-full btn-primary py-4 rounded-xl text-white font-semibold text-lg mt-6">
+                        🚀 Create Now
+                    </button>
+                </form>
+            `;
+
+            document.getElementById('service-form').addEventListener('submit', handleSubmit);
+        }
+
+        function renderField(field) {
+            if (field.type === 'image' || field.type === 'video' || field.type === 'audio') {
+                return `
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">${field.label}</label>
+                        <div class="upload-zone rounded-xl p-6 text-center cursor-pointer" 
+                             onclick="document.getElementById('file-${field.id}').click()"
+                             ondragover="this.classList.add('dragover'); event.preventDefault()"
+                             ondragleave="this.classList.remove('dragover')"
+                             ondrop="handleDrop(event, '${field.id}')">
+                            <input type="file" id="file-${field.id}" class="hidden" 
+                                   accept="${field.type === 'image' ? 'image/*' : field.type === 'video' ? 'video/*' : 'audio/*'}"
+                                   onchange="handleFileSelect(this, '${field.id}')">
+                            <div id="preview-${field.id}">
+                                <div class="text-4xl mb-2">${field.type === 'image' ? '📷' : field.type === 'video' ? '🎥' : '🎵'}</div>
+                                <p class="text-gray-400">Tap to upload ${field.type}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (field.type === 'textarea') {
+                return `
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">${field.label}</label>
+                        <textarea id="input-${field.id}" rows="3" 
+                                  class="w-full bg-gray-800 rounded-xl p-3 text-white border border-gray-700 focus:border-purple-500 outline-none"
+                                  placeholder="${field.placeholder || ''}"></textarea>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">${field.label}</label>
+                        <input type="text" id="input-${field.id}" 
+                               class="w-full bg-gray-800 rounded-xl p-3 text-white border border-gray-700 focus:border-purple-500 outline-none"
+                               placeholder="${field.placeholder || ''}">
+                    </div>
+                `;
+            }
+        }
+
+        const uploadedFiles = {};
+
+        function handleFileSelect(input, fieldId) {
+            const file = input.files[0];
+            if (file) {
+                uploadedFiles[fieldId] = file;
+                showPreview(fieldId, file);
+            }
+        }
+
+        function handleDrop(event, fieldId) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('dragover');
+            const file = event.dataTransfer.files[0];
+            if (file) {
+                uploadedFiles[fieldId] = file;
+                showPreview(fieldId, file);
+            }
+        }
+
+        function showPreview(fieldId, file) {
+            const preview = document.getElementById(`preview-${fieldId}`);
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    preview.innerHTML = `<img src="${e.target.result}" class="max-h-32 mx-auto rounded-lg">`;
+                };
+                reader.readAsDataURL(file);
+            } else if (file.type.startsWith('video/')) {
+                preview.innerHTML = `<div class="text-green-400">✅ ${file.name}</div>`;
+            } else if (file.type.startsWith('audio/')) {
+                preview.innerHTML = `<div class="text-green-400">✅ ${file.name}</div>`;
+            }
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+            
+            showView('processing-view');
+            
+            try {
+                // Upload files first
+                const uploadedUrls = {};
+                for (const [fieldId, file] of Object.entries(uploadedFiles)) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('userId', userId);
+                    
+                    const res = await fetch(`${API_BASE}/upload`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    uploadedUrls[fieldId] = data.url;
+                }
+
+                // Get text inputs
+                const textInputs = {};
+                document.querySelectorAll('[id^="input-"]').forEach(input => {
+                    const fieldId = input.id.replace('input-', '');
+                    if (input.value) textInputs[fieldId] = input.value;
+                });
+
+                // Start processing
+                const res = await fetch(`${API_BASE}/process`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId,
+                        service: currentService,
+                        files: uploadedUrls,
+                        inputs: textInputs
+                    })
+                });
+
+                const data = await res.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Poll for result
+                await pollForResult(data.taskId);
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                goBack();
+            }
+        }
+
+        async function pollForResult(taskId) {
+            const maxAttempts = 60;
+            let attempts = 0;
+
+            while (attempts < maxAttempts) {
+                await new Promise(r => setTimeout(r, 3000));
+                
+                try {
+                    const res = await fetch(`${API_BASE}/status?taskId=${taskId}&service=${currentService}`);
+                    const data = await res.json();
+
+                    document.getElementById('processing-status').textContent = 
+                        `Processing... (${Math.round((attempts / maxAttempts) * 100)}%)`;
+
+                    if (data.status === 'completed' && data.result_url) {
+                        currentResultUrl = data.result_url;
+                        showResult(data.result_url);
+                        await fetchCredits();
+                        return;
+                    } else if (data.status === 'failed') {
+                        throw new Error('Processing failed');
+                    }
+                } catch (e) {
+                    console.error('Poll error:', e);
+                }
+
+                attempts++;
+            }
+
+            throw new Error('Processing timed out');
+        }
+
+        function showResult(url) {
+            showView('result-view');
+            const content = document.getElementById('result-content');
+            
+            if (url.match(/\.(mp4|webm|mov)$/i)) {
+                content.innerHTML = `<video src="${url}" controls class="max-w-full rounded-xl mx-auto" style="max-height: 300px;"></video>`;
+            } else {
+                content.innerHTML = `<img src="${url}" class="max-w-full rounded-xl mx-auto" style="max-height: 300px;">`;
+            }
+        }
+
+        function downloadResult() {
+            if (currentResultUrl) {
+                window.open(currentResultUrl, '_blank');
+            }
+        }
+
+        function shareResult() {
+            if (currentResultUrl) {
+                tg.switchInlineQuery(currentResultUrl, ['users', 'groups', 'channels']);
+            }
+        }
+
+        function showBuyCredits() {
+            showView('buy-credits-view');
+        }
+
+        async function buyPack(packType) {
+            try {
+                const res = await fetch(`${API_BASE}/checkout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId,
+                        packType,
+                        currency: selectedCurrency
+                    })
+                });
+                const data = await res.json();
+                
+                if (data.url) {
+                    tg.openLink(data.url);
+                } else {
+                    alert('Error creating checkout');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // Currency selection
+        document.querySelectorAll('.currency-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('bg-purple-600'));
+                btn.classList.add('bg-purple-600');
+                btn.classList.remove('bg-gray-700');
+                selectedCurrency = btn.dataset.currency;
+            });
+        });
+
+        function showView(viewId) {
+            ['services-view', 'service-view', 'processing-view', 'result-view', 'buy-credits-view'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(viewId).classList.remove('hidden');
+        }
+
+        function goBack() {
+            uploadedFiles = {};
+            showView('services-view');
+        }
+
+        function goHome() {
+            currentResultUrl = null;
+            uploadedFiles = {};
+            showView('services-view');
+            fetchCredits();
+        }
+
+        // Initialize
+        init();
+    </script>
+</body>
+</html>
