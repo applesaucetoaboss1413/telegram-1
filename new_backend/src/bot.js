@@ -729,9 +729,11 @@ bot.action('buy_points_menu', async (ctx) => {
 
 // Currency conversion helpers
 const https = require('https');
-const SUPPORTED_CURRENCIES = ['usd', 'mxn', 'eur', 'gbp', 'cad'];
-const CURRENCY_SYMBOLS = { usd: '$', mxn: 'MX$', eur: '€', gbp: '£', cad: 'C$' };
-const SAFE_RATES = { MXN: 17.5, EUR: 0.92, GBP: 0.79, CAD: 1.36 };
+// IMPORTANT: Mexican Stripe accounts can ONLY process MXN
+// Do not add other currencies - they will be rejected by Stripe
+const SUPPORTED_CURRENCIES = ['mxn']; // Only MXN for Mexican Stripe accounts
+const CURRENCY_SYMBOLS = { mxn: 'MX$' };
+const SAFE_RATES = { MXN: 18.0 }; // Updated MXN rate
 
 async function fetchUsdRate(toCurrency) {
     return new Promise((resolve) => {
