@@ -11,6 +11,7 @@ const logger = winston.createLogger({
     transports: [new winston.transports.Console()]
 });
 
+// ==================== FACE SWAP ====================
 const startFaceSwap = async (faceUrl, videoUrl) => {
     const endpoint = `${A2E_API_RESOURCE_BASE}/userFaceSwapTask/add`;
     const payload = { name: `faceswap_${Date.now()}`, face_url: faceUrl, video_url: videoUrl };
@@ -79,6 +80,7 @@ const checkFaceSwapPreviewStatus = async (previewId) => {
     return { status, result_url: resultUrl };
 };
 
+// ==================== IMAGE TO VIDEO ====================
 const startImage2Video = async (imageUrl, prompt) => {
     const endpoint = `${A2E_API_RESOURCE_BASE}/userImage2Video/start`;
     const payload = { name: `image2video_${Date.now()}`, image_url: imageUrl, prompt };
@@ -91,7 +93,6 @@ const startImage2Video = async (imageUrl, prompt) => {
 };
 
 const checkImage2VideoStatus = async (taskId) => {
-    // Provider has routed status under the video host; api host may return docs HTML
     const endpoint = `${A2E_API_RESOURCE_BASE}/userImage2Video/${encodeURIComponent(taskId)}`;
     try {
         const response = await axios.get(endpoint, { 
@@ -133,11 +134,211 @@ const checkImage2VideoStatus = async (taskId) => {
     }
 };
 
+// ==================== TALKING AVATAR ====================
+const startTalkingAvatar = async (imageUrl, audioUrl, text = null) => {
+    const endpoint = `${A2E_API_BASE}/talking-avatar/create`;
+    const payload = { 
+        name: `avatar_${Date.now()}`, 
+        image_url: imageUrl,
+        ...(audioUrl ? { audio_url: audioUrl } : {}),
+        ...(text ? { text: text, voice: 'en-US-Standard-A' } : {})
+    };
+    
+    try {
+        const response = await axios.post(endpoint, payload, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}`, 'Content-Type': 'application/json' } 
+        });
+        const json = response.data || {};
+        const id = json?.data?._id || json?.data?.id || json?.id || json?.task_id;
+        if (!id) throw new Error('No task id returned');
+        logger.info('a2e_start', { type: 'talking_avatar', endpoint, status: response.status, id });
+        return id;
+    } catch (e) {
+        // Try alternate endpoint
+        const altEndpoint = `${A2E_API_RESOURCE_BASE}/userTalkingPhoto/add`;
+        const response = await axios.post(altEndpoint, payload, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}`, 'Content-Type': 'application/json' } 
+        });
+        const json = response.data || {};
+        const id = json?.data?._id || json?.data?.id || json?.id || json?.task_id;
+        if (!id) throw new Error('No task id returned');
+        logger.info('a2e_start', { type: 'talking_avatar', endpoint: altEndpoint, status: response.status, id });
+        return id;
+    }
+};
+
+const checkTalkingAvatarStatus = async (taskId) => {
+    const endpoints = [
+        `${A2E_API_BASE}/talking-avatar/${encodeURIComponent(taskId)}`,
+        `${A2E_API_RESOURCE_BASE}/userTalkingPhoto/${encodeURIComponent(taskId)}`
+    ];
+    
+    for (const endpoint of endpoints) {
+        try {
+            const response = await axios.get(endpoint, { 
+                headers: { Authorization: `Bearer ${A2E_KEY}` },
+                validateStatus: () => true
+            });
+            
+            if (response.status === 404) continue;
+            
+            const json = response.data || {};
+            const data = json.data || json;
+            const status = data.current_status || data.status;
+            const resultUrl = data.result_url || data.video_url;
+            
+            let mapped = 'processing';
+            if (status === 'completed' || status === 'success') mapped = 'completed';
+            else if (status === 'failed' || status === 'error') mapped = 'failed';
+            
+            logger.info('a2e_status', { type: 'talking_avatar', id: taskId, status: mapped });
+            return { status: mapped, result_url: resultUrl };
+        } catch (e) {
+            continue;
+        }
+    }
+    return { status: 'processing', result_url: null };
+};
+
+// ==================== VIDEO ENHANCEMENT ====================
+const startVideoEnhancement = async (videoUrl, targetResolution = '4k') => {
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userVideoEnhance/add`;
+    const payload = { 
+        name: `enhance_${Date.now()}`, 
+        video_url: videoUrl,
+        target_resolution: targetResolution
+    };
+    
+    try {
+        const response = await axios.post(endpoint, payload, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}`, 'Content-Type': 'application/json' } 
+        });
+        const json = response.data || {};
+        const id = json?.data?._id || json?.data?.id || json?.id || json?.task_id;
+        if (!id) throw new Error('No task id returned');
+        logger.info('a2e_start', { type: 'video_enhance', endpoint, status: response.status, id });
+        return id;
+    } catch (e) {
+        logger.error('video_enhance_error', { error: e.message });
+        throw e;
+    }
+};
+
+const checkVideoEnhancementStatus = async (taskId) => {
+    const endpoint = `${A2E_API_RESOURCE_BASE}/userVideoEnhance/${encodeURIComponent(taskId)}`;
+    try {
+        const response = await axios.get(endpoint, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}` },
+            validateStatus: () => true
+        });
+        
+        const json = response.data || {};
+        const data = json.data || json;
+        const status = data.current_status || data.status;
+        const resultUrl = data.result_url || data.enhanced_url;
+        
+        let mapped = 'processing';
+        if (status === 'completed' || status === 'success') mapped = 'completed';
+        else if (status === 'failed' || status === 'error') mapped = 'failed';
+        
+        logger.info('a2e_status', { type: 'video_enhance', id: taskId, status: mapped });
+        return { status: mapped, result_url: resultUrl };
+    } catch (e) {
+        logger.error('a2e_poll_error', { type: 'video_enhance', id: taskId, error: e.message });
+        return { status: 'processing', result_url: null };
+    }
+};
+
+// ==================== BACKGROUND REMOVAL ====================
+const startBackgroundRemoval = async (imageUrl) => {
+    const endpoint = `${A2E_API_BASE}/background/remove`;
+    const payload = { 
+        name: `bgremove_${Date.now()}`, 
+        image_url: imageUrl
+    };
+    
+    try {
+        const response = await axios.post(endpoint, payload, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}`, 'Content-Type': 'application/json' } 
+        });
+        const json = response.data || {};
+        
+        // Background removal might return result directly
+        if (json.data?.result_url || json.result_url) {
+            return { 
+                id: `instant_${Date.now()}`, 
+                instant: true, 
+                result_url: json.data?.result_url || json.result_url 
+            };
+        }
+        
+        const id = json?.data?._id || json?.data?.id || json?.id || json?.task_id;
+        if (!id) throw new Error('No task id returned');
+        logger.info('a2e_start', { type: 'bg_removal', endpoint, status: response.status, id });
+        return { id, instant: false };
+    } catch (e) {
+        // Try alternate endpoint
+        const altEndpoint = `${A2E_API_RESOURCE_BASE}/userBackgroundRemove/add`;
+        const response = await axios.post(altEndpoint, payload, { 
+            headers: { Authorization: `Bearer ${A2E_KEY}`, 'Content-Type': 'application/json' } 
+        });
+        const json = response.data || {};
+        const id = json?.data?._id || json?.data?.id || json?.id || json?.task_id;
+        if (!id) throw new Error('No task id returned');
+        logger.info('a2e_start', { type: 'bg_removal', endpoint: altEndpoint, status: response.status, id });
+        return { id, instant: false };
+    }
+};
+
+const checkBackgroundRemovalStatus = async (taskId) => {
+    const endpoints = [
+        `${A2E_API_BASE}/background/${encodeURIComponent(taskId)}`,
+        `${A2E_API_RESOURCE_BASE}/userBackgroundRemove/${encodeURIComponent(taskId)}`
+    ];
+    
+    for (const endpoint of endpoints) {
+        try {
+            const response = await axios.get(endpoint, { 
+                headers: { Authorization: `Bearer ${A2E_KEY}` },
+                validateStatus: () => true
+            });
+            
+            if (response.status === 404) continue;
+            
+            const json = response.data || {};
+            const data = json.data || json;
+            const status = data.current_status || data.status;
+            const resultUrl = data.result_url || data.image_url;
+            
+            let mapped = 'processing';
+            if (status === 'completed' || status === 'success') mapped = 'completed';
+            else if (status === 'failed' || status === 'error') mapped = 'failed';
+            
+            logger.info('a2e_status', { type: 'bg_removal', id: taskId, status: mapped });
+            return { status: mapped, result_url: resultUrl };
+        } catch (e) {
+            continue;
+        }
+    }
+    return { status: 'processing', result_url: null };
+};
+
 module.exports = {
+    // Face Swap
     startFaceSwap,
     checkFaceSwapTaskStatus,
     startFaceSwapPreview,
     checkFaceSwapPreviewStatus,
+    // Image to Video
     startImage2Video,
-    checkImage2VideoStatus
+    checkImage2VideoStatus,
+    // Talking Avatar
+    startTalkingAvatar,
+    checkTalkingAvatarStatus,
+    // Video Enhancement
+    startVideoEnhancement,
+    checkVideoEnhancementStatus,
+    // Background Removal
+    startBackgroundRemoval,
+    checkBackgroundRemovalStatus
 };
