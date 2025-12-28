@@ -230,18 +230,20 @@ Keep sharing to earn more!`, { parse_mode: 'Markdown' });
                 // Send purchase confirmation with upsell for next purchase
                 try {
                     const videosCount = Math.floor(pointsToAdd / 60);
-                    let successMsg = `✅ *Payment Successful!*
+                    let successMsg = `✅ *¡Pago Exitoso!*
 
-+${pointsToAdd} credits added to your account
-📹 That's enough for ~${videosCount} videos!
++${pointsToAdd} créditos agregados a tu cuenta
+📹 ¡Son suficientes para ~${videosCount} videos!
 
-Ready to create? Tap /start`;
+¿Listo para crear? Presiona /start`;
 
-                    // Add upsell for micro purchasers
+                    // Add upsell for micro purchasers with MXN pricing
                     if (packType === 'micro') {
+                        const rate = await fetchUsdRate('mxn');
+                        const starterMxn = ((demoCfg.packs.starter.price_cents / 100) * rate).toFixed(2);
                         successMsg += `
 
-💡 *Tip:* Loved it? Upgrade to Starter Pack for better value - 400 credits for $4.99 (save 40%!)`;
+💡 *Consejo:* ¿Te gustó? Actualiza al Paquete Starter para mejor valor - 400 créditos por MX$${starterMxn} (¡ahorra 40%!)`;
                     }
 
                     await bot.telegram.sendMessage(userId, successMsg, { parse_mode: 'Markdown' });
