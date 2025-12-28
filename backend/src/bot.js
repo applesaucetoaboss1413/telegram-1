@@ -201,10 +201,15 @@ bot.on('photo', async (ctx) => {
             const u = getUser(userId);
             
             if (u.points < price) {
-                return ctx.reply(`❌ Not enough points. You need ${price}, but have ${u.points}.\n\nTap the button below to get more:`, 
+                const rate = await fetchUsdRate('mxn');
+                const p = demoCfg.packs;
+                const microMxn = ((p.micro.price_cents / 100) * rate).toFixed(2);
+                const starterMxn = ((p.starter.price_cents / 100) * rate).toFixed(2);
+                
+                return ctx.reply(`❌ No tienes suficientes puntos. Necesitas ${price}, pero tienes ${u.points}.\n\nPresiona el botón para obtener más:`, 
                     Markup.inlineKeyboard([
-                        [Markup.button.callback('🎯 $0.99 - Quick Top-up', 'buy_pack_micro')],
-                        [Markup.button.callback('⭐ $4.99 - Starter Pack', 'buy_pack_starter')]
+                        [Markup.button.callback(`🎯 MX$${microMxn} - Recarga Rápida`, 'buy_pack_micro')],
+                        [Markup.button.callback(`⭐ MX$${starterMxn} - Paquete Starter`, 'buy_pack_starter')]
                     ])
                 );
             }
