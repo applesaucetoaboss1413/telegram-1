@@ -388,24 +388,33 @@ async function sendBuyPointsMenu(ctx) {
     
     trackEvent(userId, 'buy_menu_viewed', { firstPurchase });
     
-    let header = '💳 *Choose a credit pack:*\n\n';
+    // Convert USD prices to MXN for display
+    const rate = await fetchUsdRate('mxn');
+    const p = demoCfg.packs;
+    
+    // Convert each pack price to MXN
+    const microMxn = ((p.micro.price_cents / 100) * rate).toFixed(2);
+    const starterMxn = ((p.starter.price_cents / 100) * rate).toFixed(2);
+    const plusMxn = ((p.plus.price_cents / 100) * rate).toFixed(2);
+    const proMxn = ((p.pro.price_cents / 100) * rate).toFixed(2);
+    
+    let header = '💳 *Elige tu paquete de créditos:*\n\n';
     
     if (firstPurchase) {
-        header = '🎁 *FIRST-TIME BUYER SPECIAL!*\n\nTry us out for just $0.99:\n\n';
+        header = `🎁 *¡OFERTA ESPECIAL!*\n\nPruébanos por solo MX$${microMxn}:\n\n`;
     }
     
-    const p = demoCfg.packs;
     const text = `${header}` +
-        `🎯 *Try It* - ${p.micro.points} credits = 1 video\n   └ *$${(p.micro.price_cents/100).toFixed(2)}* ${firstPurchase ? '← Start Here!' : ''}\n\n` +
-        `⭐ *Starter* - ${p.starter.points} credits = ~${p.starter.approx5sDemos} videos\n   └ *$${(p.starter.price_cents/100).toFixed(2)}*\n\n` +
-        `🔥 *Plus* - ${p.plus.points} credits = ~${p.plus.approx5sDemos} videos\n   └ *$${(p.plus.price_cents/100).toFixed(2)}* (Best Value!)\n\n` +
-        `💎 *Pro* - ${p.pro.points} credits = ~${p.pro.approx5sDemos} videos\n   └ *$${(p.pro.price_cents/100).toFixed(2)}* (25% savings!)`;
+        `🎯 *Try It* - ${p.micro.points} credits = 1 video\n   └ *MX$${microMxn}* ${firstPurchase ? '← ¡Empieza aquí!' : ''}\n\n` +
+        `⭐ *Starter* - ${p.starter.points} credits = ~${p.starter.approx5sDemos} videos\n   └ *MX$${starterMxn}*\n\n` +
+        `🔥 *Plus* - ${p.plus.points} credits = ~${p.plus.approx5sDemos} videos\n   └ *MX$${plusMxn}* (¡Mejor valor!)\n\n` +
+        `💎 *Pro* - ${p.pro.points} credits = ~${p.pro.approx5sDemos} videos\n   └ *MX$${proMxn}* (¡25% de ahorro!)`;
     
     return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-        [Markup.button.callback(`🎯 $0.99 - ${p.micro.points} credits`, 'buy_pack_micro')],
-        [Markup.button.callback(`⭐ $4.99 - ${p.starter.points} credits`, 'buy_pack_starter')],
-        [Markup.button.callback(`🔥 $8.99 - ${p.plus.points} credits`, 'buy_pack_plus')],
-        [Markup.button.callback(`💎 $14.99 - ${p.pro.points} credits`, 'buy_pack_pro')],
+        [Markup.button.callback(`🎯 MX$${microMxn} - ${p.micro.points} credits`, 'buy_pack_micro')],
+        [Markup.button.callback(`⭐ MX$${starterMxn} - ${p.starter.points} credits`, 'buy_pack_starter')],
+        [Markup.button.callback(`🔥 MX$${plusMxn} - ${p.plus.points} credits`, 'buy_pack_plus')],
+        [Markup.button.callback(`💎 MX$${proMxn} - ${p.pro.points} credits`, 'buy_pack_pro')],
     ]));
 }
 
