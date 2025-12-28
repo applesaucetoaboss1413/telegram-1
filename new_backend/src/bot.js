@@ -716,19 +716,19 @@ async function startWelcomeCreditsCheckout(ctx) {
 
 bot.action('buy_pack_micro', async (ctx) => {
     await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.micro);
+    await startCheckout(ctx, demoCfg.packs.micro, 'micro');
 });
 bot.action('buy_pack_starter', async (ctx) => {
     await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.starter);
+    await startCheckout(ctx, demoCfg.packs.starter, 'starter');
 });
 bot.action('buy_pack_plus', async (ctx) => {
     await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.plus);
+    await startCheckout(ctx, demoCfg.packs.plus, 'plus');
 });
 bot.action('buy_pack_pro', async (ctx) => {
     await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.pro);
+    await startCheckout(ctx, demoCfg.packs.pro, 'pro');
 });
 
 bot.action('help', async (ctx) => {
