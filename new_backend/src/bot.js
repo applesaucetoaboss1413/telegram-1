@@ -885,39 +885,6 @@ async function startCheckout(ctx, pack, packKey) {
         const session = await stripe.checkout.sessions.create({
             line_items: [{
                 price_data: {
-                    currency: currency,
-                    product_data: { name: pack.label },
-                    unit_amount: amountInCurrency,
-                },
-                quantity: 1,
-            }],
-            mode: 'payment',
-            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
-            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
-            client_reference_id: userId,
-            metadata: {
-                points: String(pack.points),
-                pack_type: packKey,
-                currency: currency,
-                usd_equivalent: String(pack.price_cents)
-            }
-        });
-        
-        await ctx.reply(
-            `💳 *${pack.label}*\n\n${pack.points} credits for *${symbol}${displayAmount}*\n\nTap below to complete your purchase:`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '💳 Pagar Ahora / Pay Now', url: session.url }]],
-                },
-            }
-        );
-    } catch (e) {
-        logger.error('startCheckout failed', { error: e.message, pack: pack.label, userId: ctx.from.id });
-        ctx.reply('❌ Error en el sistema de pago. Por favor intenta de nuevo. / Payment system error. Please try again.');
-    }
-}
-
 async function startWelcomeCreditsCheckout(ctx) {
     try {
         const username = await getBotUsername();
