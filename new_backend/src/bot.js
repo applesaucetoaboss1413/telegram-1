@@ -440,22 +440,29 @@ async function sendBuyPointsMenu(ctx) {
     const p = demoCfg.packs;
     const approx5s = (pts) => Math.max(1, Math.floor(pts / demoCfg.demoPrices['5']));
     
-    let header = '💳 *Choose a credit pack:*\n\n';
+    // Convert USD prices to MXN for display
+    const rate = await fetchUsdRate('mxn');
+    const microMxn = ((p.micro.price_cents / 100) * rate).toFixed(2);
+    const starterMxn = ((p.starter.price_cents / 100) * rate).toFixed(2);
+    const plusMxn = ((p.plus.price_cents / 100) * rate).toFixed(2);
+    const proMxn = ((p.pro.price_cents / 100) * rate).toFixed(2);
+    
+    let header = '💳 *Elige tu paquete de créditos:*\n\n';
     if (firstPurchase) {
-        header = '🎁 *FIRST-TIME BUYER SPECIAL!*\n\nStart with just $0.99:\n\n';
+        header = `🎁 *¡OFERTA ESPECIAL!*\n\nComienza con solo MX$${microMxn}:\n\n`;
     }
     
     const text = `${header}` +
-        `🎯 *Try It* - ${p.micro.points} credits (~${approx5s(p.micro.points)} videos)\n   └ *$${(p.micro.price_cents/100).toFixed(2)}*\n\n` +
-        `⭐ *Starter* - ${p.starter.points} credits (~${approx5s(p.starter.points)} videos)\n   └ *$${(p.starter.price_cents/100).toFixed(2)}*\n\n` +
-        `🔥 *Plus* - ${p.plus.points} credits (~${approx5s(p.plus.points)} videos)\n   └ *$${(p.plus.price_cents/100).toFixed(2)}* (Best Value!)\n\n` +
-        `💎 *Pro* - ${p.pro.points} credits (~${approx5s(p.pro.points)} videos)\n   └ *$${(p.pro.price_cents/100).toFixed(2)}*`;
+        `🎯 *Try It* - ${p.micro.points} credits (~${approx5s(p.micro.points)} videos)\n   └ *MX$${microMxn}*\n\n` +
+        `⭐ *Starter* - ${p.starter.points} credits (~${approx5s(p.starter.points)} videos)\n   └ *MX$${starterMxn}*\n\n` +
+        `🔥 *Plus* - ${p.plus.points} credits (~${approx5s(p.plus.points)} videos)\n   └ *MX$${plusMxn}* (¡Mejor valor!)\n\n` +
+        `💎 *Pro* - ${p.pro.points} credits (~${approx5s(p.pro.points)} videos)\n   └ *MX$${proMxn}*`;
     
     return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-        [Markup.button.callback(`🎯 $0.99 - ${p.micro.points} credits`, 'buy_pack_micro')],
-        [Markup.button.callback(`⭐ $4.99 - ${p.starter.points} credits`, 'buy_pack_starter')],
-        [Markup.button.callback(`🔥 $8.99 - ${p.plus.points} credits`, 'buy_pack_plus')],
-        [Markup.button.callback(`💎 $14.99 - ${p.pro.points} credits`, 'buy_pack_pro')],
+        [Markup.button.callback(`🎯 MX$${microMxn} - ${p.micro.points} credits`, 'buy_pack_micro')],
+        [Markup.button.callback(`⭐ MX$${starterMxn} - ${p.starter.points} credits`, 'buy_pack_starter')],
+        [Markup.button.callback(`🔥 MX$${plusMxn} - ${p.plus.points} credits`, 'buy_pack_plus')],
+        [Markup.button.callback(`💎 MX$${proMxn} - ${p.pro.points} credits`, 'buy_pack_pro')],
     ]));
 }
 
