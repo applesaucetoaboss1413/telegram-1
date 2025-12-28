@@ -609,6 +609,7 @@ app.post('/api/miniapp/checkout', async (req, res) => {
         });
         
         const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'], // Force card only, disable Link
             line_items: [{
                 price_data: {
                     currency: curr,
