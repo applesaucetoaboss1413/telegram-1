@@ -7,6 +7,43 @@ const { bot } = require('./bot');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const HealthMonitor = require('./health');
 const winston = require('winston');
+const https = require('https');
+
+// MXN exchange rate helper (same as in bot.js)
+const SAFE_RATES = { MXN: 18.0 };
+async function fetchUsdRate(toCurrency) {
+    return new Promise((resolve) => {
+        try {
+            const symbol = String(toCurrency || '').toUpperCase();
+            if (symbol === 'USD') return resolve(1);
+            
+            const req = https.request({ 
+                hostname: 'api.exchangerate-api.com', 
+                path: '/v4/latest/USD', 
+                method: 'GET',
+                timeout: 4000 
+            }, res => {
+                let buf = ''; 
+                res.on('data', c => buf += c); 
+                res.on('end', () => {
+                    try { 
+                        const j = JSON.parse(buf); 
+                        const rate = j && j.rates && j.rates[symbol]; 
+                        if (typeof rate === 'number') resolve(rate);
+                        else resolve(SAFE_RATES[symbol] || 1);
+                    } catch (_) { 
+                        resolve(SAFE_RATES[symbol] || 1); 
+                    }
+                });
+            });
+            req.on('error', () => resolve(SAFE_RATES[symbol] || 1));
+            req.on('timeout', () => { req.destroy(); resolve(SAFE_RATES[symbol] || 1); });
+            req.end();
+        } catch (_) { 
+            resolve(SAFE_RATES[toCurrency.toUpperCase()] || 1); 
+        }
+    });
+}
 
 // Configure logging
 const logger = winston.createLogger({
