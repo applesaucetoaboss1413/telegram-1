@@ -112,6 +112,22 @@ try {
     // Column already exists, ignore
 }
 
+// Add last_activity column for re-engagement tracking
+try {
+    db.prepare("ALTER TABLE users ADD COLUMN last_activity INTEGER").run();
+    console.log('Added last_activity column to users table');
+} catch (e) {
+    // Column already exists, ignore
+}
+
+// Add winback_sent column for tracking win-back offers
+try {
+    db.prepare("ALTER TABLE users ADD COLUMN winback_sent INTEGER DEFAULT 0").run();
+    console.log('Added winback_sent column to users table');
+} catch (e) {
+    // Column already exists, ignore
+}
+
 // User Methods
 const getUser = (id) => {
     let user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
@@ -136,6 +152,10 @@ const getUser = (id) => {
         db.prepare('INSERT INTO users (id, points, created_at) VALUES (?, 0, ?)').run(id, now);
         return { id, points: 0, created_at: now, is_premium: 0, referred_by: null, has_purchased: 0 };
     }
+    
+    // Update last activity
+    db.prepare('UPDATE users SET last_activity = ? WHERE id = ?').run(Date.now(), id);
+    
     return user;
 };
 
