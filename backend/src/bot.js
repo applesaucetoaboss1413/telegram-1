@@ -471,15 +471,6 @@ async function getBotUsername() {
     return cachedBotUsername;
 }
 
-// USD to MXN conversion rate - Mexican Stripe accounts MUST charge in MXN
-// Update this periodically or fetch dynamically
-const USD_TO_MXN_RATE = Number(process.env.USD_TO_MXN_RATE || 17.5);
-
-// Convert USD cents to MXN cents
-function usdToMxnCents(usdCents) {
-    return Math.round(usdCents * USD_TO_MXN_RATE);
-}
-
 async function startCheckout(ctx, pack, packKey) {
     try {
         const username = await getBotUsername();
@@ -488,18 +479,13 @@ async function startCheckout(ctx, pack, packKey) {
         
         trackEvent(userId, 'checkout_started', { pack: packKey, amount: pack.price_cents });
 
-        // Convert USD price to MXN - Mexican Stripe accounts can ONLY charge in MXN
-        const mxnCents = usdToMxnCents(pack.price_cents);
-        const mxnDisplay = (mxnCents / 100).toFixed(2);
-        const usdDisplay = (pack.price_cents / 100).toFixed(2);
-
         const session = await stripe.checkout.sessions.create({
-            automatic_payment_methods: { enabled: true },
+            payment_method_types: ['card'],
             line_items: [{
                 price_data: {
-                    currency: 'mxn',
+                    currency: 'usd',
                     product_data: { name: pack.label },
-                    unit_amount: mxnCents,
+                    unit_amount: pack.price_cents,
                 },
                 quantity: 1,
             }],
@@ -509,13 +495,12 @@ async function startCheckout(ctx, pack, packKey) {
             client_reference_id: userId,
             metadata: {
                 points: String(pack.points),
-                pack_type: packKey,
-                usd_amount: String(pack.price_cents)
+                pack_type: packKey
             }
         });
         
         await ctx.reply(
-            `💳 *${pack.label}*\n\n${pack.points} credits for *$${usdDisplay} USD* (~MXN $${mxnDisplay})\n\nTap below to complete your purchase:`,
+            `💳 *${pack.label}*\n\n${pack.points} credits for *$${(pack.price_cents/100).toFixed(2)}*\n\nTap below to complete your purchase:`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
