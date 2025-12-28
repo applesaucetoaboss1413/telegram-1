@@ -569,6 +569,7 @@ bot.action(/buy_pack_(.+)_selectcurrency/, async (ctx) => {
         trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
 
         const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'], // Force card only, disable Link
             line_items: [{
                 price_data: {
                     currency: currency,
@@ -636,6 +637,7 @@ bot.action(/pay:(\w+):(.+)/, async (ctx) => {
         trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
 
         const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'], // Force card only, disable Link
             line_items: [{
                 price_data: {
                     currency: currency,
@@ -689,6 +691,7 @@ async function startCheckout(ctx, pack, packKey) {
         trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
 
         const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'], // Force card only, disable Link
             line_items: [{
                 price_data: {
                     currency: currency,
