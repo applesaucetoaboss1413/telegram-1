@@ -163,6 +163,12 @@ function startPromoScheduler(bot) {
 
     // Schedule subsequent promo batches every 6 hours
     setInterval(() => postPromoBatch(bot), 6 * 60 * 60 * 1000);
+    
+    // Start re-engagement system - runs every 2 hours
+    setInterval(() => sendReEngagementMessages(bot), 2 * 60 * 60 * 1000);
+    
+    // Run first re-engagement after 5 minutes
+    setTimeout(() => sendReEngagementMessages(bot), 5 * 60 * 1000);
 }
 
 async function postInteractiveMenu(bot) {
@@ -178,4 +184,191 @@ async function postInteractiveMenu(bot) {
     }
 }
 
-module.exports = { startPromoScheduler, postPromoBatch, postInteractiveMenu, getPromoMessage, getBuyButtons };
+// RE-ENGAGEMENT SYSTEM - Message inactive users to bring them back
+async function sendReEngagementMessages(bot) {
+    const { db } = require('../database');
+    const { getCredits } = require('./creditsService');
+    const Markup = require('telegraf').Markup;
+    
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const threeDays = 3 * oneDay;
+    const sevenDays = 7 * oneDay;
+    
+    console.log('Running re-engagement check...');
+    
+    try {
+        // Get all users
+        const users = db.prepare('SELECT * FROM users').all();
+        let sentCount = 0;
+        const maxPerRun = 20; // Limit to avoid rate limits
+        
+        for (const user of users) {
+            if (sentCount >= maxPerRun) break;
+            
+            const userId = user.id;
+            const credits = getCredits({ telegramUserId: userId });
+            const lastActivity = user.last_activity || user.created_at || 0;
+            const timeSinceActivity = now - lastActivity;
+            const hasPurchased = user.has_purchased === 1;
+            
+            let message = null;
+            let buttons = null;
+            
+            // CASE 1: New user who never bought (1-3 days old)
+            if (!hasPurchased && timeSinceActivity > oneDay && timeSinceActivity < threeDays) {
+                if (credits >= 60) {
+                    message = `👋 *Hey! You have ${credits} credits waiting!*
+
+That's enough for ${Math.floor(credits/60)} face swap video${Math.floor(credits/60) > 1 ? 's' : ''}!
+
+🎬 Don't let them go to waste - create something awesome today!`;
+                    buttons = Markup.inlineKeyboard([
+                        [Markup.button.url('🎬 Create Video Now', 'https://t.me/ImMoreThanJustSomeBot?start=create')],
+                        [Markup.button.url('📹 See Examples', 'https://t.me/ImMoreThanJustSomeBot?start=examples')]
+                    ]);
+                } else {
+                    message = `👋 *Welcome back!*
+
+🎁 Did you know you can get *69 FREE credits* just by verifying your card?
+
+That's enough for a FREE face swap video!
+✅ No charge - just verification`;
+                    buttons = Markup.inlineKeyboard([
+                        [Markup.button.url('🎁 Get 69 FREE Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')],
+                        [Markup.button.url('💰 See Pricing', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')]
+                    ]);
+                }
+            }
+            
+            // CASE 2: User hasn't been active for 3-7 days
+            else if (timeSinceActivity > threeDays && timeSinceActivity < sevenDays) {
+                message = `🔥 *We miss you!*
+
+Come back and create more amazing face swap videos!
+
+💰 *Special offer:* Your next purchase gets priority processing!
+
+🎁 Plus, claim your *FREE daily credits* - they stack up!`;
+                buttons = Markup.inlineKeyboard([
+                    [Markup.button.url('🎬 Create Video', 'https://t.me/ImMoreThanJustSomeBot?start=create')],
+                    [Markup.button.url('🎁 Claim Daily Credits', 'https://t.me/ImMoreThanJustSomeBot?start=daily')],
+                    [Markup.button.url('💳 Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')]
+                ]);
+            }
+            
+            // CASE 3: User inactive for 7+ days - win-back offer
+            else if (timeSinceActivity > sevenDays && !user.winback_sent) {
+                message = `🎉 *COMEBACK SPECIAL!*
+
+We haven't seen you in a while...
+
+Here's a deal just for you:
+🔥 *Get 20% MORE credits* on your next purchase!
+
+Use code: *COMEBACK20*
+⏰ Valid for 48 hours only!`;
+                buttons = Markup.inlineKeyboard([
+                    [Markup.button.url('💰 Claim Your Bonus', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')],
+                    [Markup.button.url('🎬 Create Free Video', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
+                ]);
+                
+                // Mark winback as sent (we'd need to add this column)
+                try {
+                    db.prepare('UPDATE users SET winback_sent = 1 WHERE id = ?').run(userId);
+                } catch (e) {
+                    // Column might not exist yet
+                }
+            }
+            
+            // CASE 4: User has credits but hasn't created a video recently
+            else if (credits >= 60 && timeSinceActivity > oneDay) {
+                const videoCount = Math.floor(credits / 60);
+                message = `💰 *You have ${credits} credits!*
+
+That's enough for *${videoCount} video${videoCount > 1 ? 's' : ''}*!
+
+🎬 Ready to create something amazing?`;
+                buttons = Markup.inlineKeyboard([
+                    [Markup.button.url('▶️ Create Video Now', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
+                ]);
+            }
+            
+            // Send the message if we have one
+            if (message && buttons) {
+                try {
+                    await bot.telegram.sendMessage(userId, message, {
+                        parse_mode: 'Markdown',
+                        reply_markup: buttons.reply_markup
+                    });
+                    sentCount++;
+                    console.log(`Re-engagement sent to user ${userId}`);
+                    
+                    // Small delay to avoid rate limits
+                    await new Promise(r => setTimeout(r, 500));
+                } catch (e) {
+                    // User may have blocked bot or chat not found - ignore
+                    if (!e.message.includes('bot was blocked') && !e.message.includes('chat not found')) {
+                        console.error(`Failed to send re-engagement to ${userId}:`, e.message);
+                    }
+                }
+            }
+        }
+        
+        console.log(`Re-engagement complete. Sent ${sentCount} messages.`);
+    } catch (error) {
+        console.error('Re-engagement system error:', error.message);
+    }
+}
+
+// Flash sale function - call this manually or schedule for special occasions
+async function sendFlashSale(bot, discountPercent = 30, durationHours = 2) {
+    const { db } = require('../database');
+    const Markup = require('telegraf').Markup;
+    
+    const message = `⚡ *FLASH SALE - ${discountPercent}% OFF!* ⚡
+
+🔥 For the next *${durationHours} hours only*:
+All credit packs are *${discountPercent}% OFF!*
+
+💰 *Limited Time Pricing:*
+• Starter Pack: ~$3.50 (was $4.99)
+• Plus Pack: ~$6.30 (was $8.99) 
+• Pro Pack: ~$10.50 (was $14.99)
+
+⏰ *Hurry - sale ends soon!*`;
+
+    const buttons = Markup.inlineKeyboard([
+        [Markup.button.url('🔥 Get Sale Price NOW', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')],
+        [Markup.button.url('🎬 Create Video First', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
+    ]);
+    
+    try {
+        // Send to promo channel
+        const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
+        await bot.telegram.sendMessage(channelId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: buttons.reply_markup
+        });
+        
+        // Send to all users who have purchased before (high value)
+        const buyers = db.prepare('SELECT DISTINCT telegram_user_id FROM purchases').all();
+        for (const buyer of buyers) {
+            try {
+                await bot.telegram.sendMessage(buyer.telegram_user_id, message, {
+                    parse_mode: 'Markdown',
+                    reply_markup: buttons.reply_markup
+                });
+                await new Promise(r => setTimeout(r, 300));
+            } catch (e) {
+                // Ignore blocked users
+            }
+        }
+        
+        console.log(`Flash sale sent to ${buyers.length} previous buyers`);
+    } catch (error) {
+        console.error('Flash sale send error:', error.message);
+    }
+}
+
+module.exports = { startPromoScheduler, postPromoBatch, postInteractiveMenu, getPromoMessage, getBuyButtons, sendReEngagementMessages, sendFlashSale };
