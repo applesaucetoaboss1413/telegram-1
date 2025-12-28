@@ -572,16 +572,41 @@ app.post('/api/miniapp/checkout', async (req, res) => {
         return res.status(400).json({ error: 'Invalid pack type' });
     }
     
+    // Supported currencies
+    const SUPPORTED_CURRENCIES = ['usd', 'mxn', 'eur', 'gbp', 'cad'];
+    const curr = (currency || 'usd').toLowerCase();
+    
+    if (!SUPPORTED_CURRENCIES.includes(curr)) {
+        return res.status(400).json({ error: 'Unsupported currency' });
+    }
+    
     try {
-        // Currency conversion
-        const SAFE_RATES = { MXN: 17.5, EUR: 0.92, GBP: 0.79, CAD: 1.36 };
-        const curr = (currency || 'usd').toLowerCase();
-        let amountInCurrency = pack.price_cents;
+        // Get live exchange rate
+        const rate = await fetchUsdRate(curr);
         
-        if (curr !== 'usd') {
-            const rate = SAFE_RATES[curr.toUpperCase()] || 1;
-            amountInCurrency = Math.round(pack.price_cents * rate * 1.03);
+        // Convert USD cents to target currency cents
+        // pack.price_cents is in USD cents (e.g., 99 = $0.99)
+        // We need to convert to target currency cents
+        const usdAmount = pack.price_cents / 100; // Convert to dollars first
+        let amountInCurrency;
+        
+        if (curr === 'usd') {
+            amountInCurrency = pack.price_cents;
+        } else {
+            // Apply exchange rate and 3% spread, then convert to minor units
+            const convertedAmount = usdAmount * rate * 1.03;
+            amountInCurrency = Math.round(convertedAmount * 100);
         }
+        
+        logger.info('Mini app checkout', { 
+            userId, 
+            packType, 
+            currency: curr, 
+            rate, 
+            usdCents: pack.price_cents,
+            targetCents: amountInCurrency,
+            targetAmount: (amountInCurrency / 100).toFixed(2)
+        });
         
         const session = await stripe.checkout.sessions.create({
             line_items: [{
@@ -599,14 +624,16 @@ app.post('/api/miniapp/checkout', async (req, res) => {
             metadata: {
                 points: String(pack.points),
                 pack_type: packType,
-                source: 'miniapp'
+                source: 'miniapp',
+                currency: curr,
+                usd_equivalent: String(pack.price_cents)
             }
         });
         
         res.json({ url: session.url });
         
     } catch (e) {
-        logger.error('Mini app checkout error', { error: e.message });
+        logger.error('Mini app checkout error', { error: e.message, stack: e.stack });
         res.status(500).json({ error: e.message });
     }
 });
