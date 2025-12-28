@@ -791,15 +791,59 @@ bot.action('cancel_payment', async (ctx) => {
 bot.action(/pay:(\w+):(.+)/, async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const currency = ctx.match[1].toLowerCase();
+        const currency = 'mxn'; // Force MXN for Mexican Stripe account
         const packKey = ctx.match[2];
         const pack = demoCfg.packs[packKey];
         
         if (!pack) return ctx.reply('Invalid pack');
-        if (!SUPPORTED_CURRENCIES.includes(currency)) return ctx.reply('Unsupported currency');
         
         const username = await getBotUsername();
         const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
+        const userId = String(ctx.from.id);
+        
+        // Get exchange rate and convert to MXN
+        const rate = await fetchUsdRate(currency);
+        const amountInCurrency = toMinorUnits(pack.price_cents / 100, currency, rate);
+        const displayAmount = (amountInCurrency / 100).toFixed(2);
+        const symbol = CURRENCY_SYMBOLS[currency] || currency.toUpperCase();
+        
+        trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
+
+        const session = await stripe.checkout.sessions.create({
+            line_items: [{
+                price_data: {
+                    currency: currency,
+                    product_data: { name: pack.label },
+                    unit_amount: amountInCurrency,
+                },
+                quantity: 1,
+            }],
+            mode: 'payment',
+            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
+            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
+            client_reference_id: userId,
+            metadata: {
+                points: String(pack.points),
+                pack_type: packKey,
+                currency: currency,
+                usd_equivalent: String(pack.price_cents)
+            }
+        });
+        
+        await ctx.reply(
+            `💳 *${pack.label}*\n\n${pack.points} credits for *${symbol}${displayAmount}*\n\nTap below to complete your purchase:`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '💳 Pagar Ahora / Pay Now', url: session.url }]],
+                },
+            }
+        );
+    } catch (e) {
+        logger.error('Payment checkout failed', { error: e.message, userId: ctx.from?.id });
+        ctx.reply('❌ Error en el sistema de pago. Por favor intenta de nuevo. / Payment system error. Please try again.');
+    }
+});
         const userId = String(ctx.from.id);
         
         // Get exchange rate and convert
