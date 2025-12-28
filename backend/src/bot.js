@@ -480,7 +480,6 @@ async function startCheckout(ctx, pack, packKey) {
         trackEvent(userId, 'checkout_started', { pack: packKey, amount: pack.price_cents });
 
         const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
             line_items: [{
                 price_data: {
                     currency: 'usd',
