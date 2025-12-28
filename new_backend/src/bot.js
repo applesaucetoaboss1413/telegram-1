@@ -609,7 +609,7 @@ bot.command('chatid', async (ctx) => {
 // Mini App Studio command
 bot.command('studio', async (ctx) => {
     try {
-        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegram-1-i38q.onrender.com'}/miniapp`;
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
         await ctx.reply(
             `✨ *AI Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap below to open!`,
             {
