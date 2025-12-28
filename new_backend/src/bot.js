@@ -606,6 +606,44 @@ bot.command('chatid', async (ctx) => {
     }
 });
 
+// Mini App Studio command
+bot.command('studio', async (ctx) => {
+    try {
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegram-1-i38q.onrender.com'}/miniapp`;
+        await ctx.reply(
+            `✨ *AI Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap below to open!`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]]
+                }
+            }
+        );
+    } catch (e) {
+        logger.error('studio command failed', { error: e.message });
+        await ctx.reply('❌ Error opening studio. Please try again.');
+    }
+});
+
+// Mini App button action
+bot.action('open_studio', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegram-1-i38q.onrender.com'}/miniapp`;
+        await ctx.reply(
+            `✨ *AI Studio*\n\nTap below to open the full app!`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]]
+                }
+            }
+        );
+    } catch (e) {
+        logger.error('open_studio action failed', { error: e.message });
+    }
+});
+
 let cachedBotUsername = null;
 async function getBotUsername() {
     if (cachedBotUsername) return cachedBotUsername;
