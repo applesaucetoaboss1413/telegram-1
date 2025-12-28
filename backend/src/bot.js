@@ -490,6 +490,9 @@ async function startCheckout(ctx, pack, packKey) {
                 quantity: 1,
             }],
             mode: 'payment',
+            // Enable Adaptive Pricing - allows customers to pay in their local currency (e.g., MXN)
+            // while you receive funds in USD. Stripe handles the conversion automatically.
+            adaptive_currency: true,
             success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
             cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
             client_reference_id: userId,
@@ -523,6 +526,8 @@ async function startWelcomeCreditsCheckout(ctx) {
         const session = await stripe.checkout.sessions.create({
             mode: 'setup',
             payment_method_types: ['card'],
+            // Enable Adaptive Pricing for setup mode as well
+            adaptive_currency: true,
             success_url: `${botUrl}?start=credits_success`,
             cancel_url: `${botUrl}?start=credits_cancel`,
             client_reference_id: String(ctx.from.id),
