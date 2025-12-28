@@ -112,43 +112,49 @@ queueService.on('job_complete', async ({ job, output }) => {
                 try {
                     let upsellMsg;
                     if (credits < 60) {
-                        // Low credits - strong upsell
+                        // Low credits - strong upsell with MXN pricing
+                        const rate = await fetchUsdRate('mxn');
+                        const p = demoCfg.packs;
+                        const microMxn = ((p.micro.price_cents / 100) * rate).toFixed(2);
+                        const starterMxn = ((p.starter.price_cents / 100) * rate).toFixed(2);
+                        const plusMxn = ((p.plus.price_cents / 100) * rate).toFixed(2);
+                        
                         const firstPurchase = isFirstPurchase({ telegramUserId: userId });
                         if (firstPurchase) {
-                            upsellMsg = `🎉 *Love your video?*
+                            upsellMsg = `🎉 *¿Te gustó tu video?*
 
-You're almost out of credits (${credits} left).
+Te quedan pocos créditos (${credits} restantes).
 
-🎁 *FIRST-TIME OFFER:* Get 80 credits for just *$0.99* - enough for another video!
+🎁 *OFERTA ESPECIAL:* ¡80 créditos por solo *MX$${microMxn}* - suficiente para otro video!
 
-Or grab a pack for more savings:
-• Starter: 400 credits = ~6 videos for $4.99
-• Plus: 800 credits = ~13 videos for $8.99 ⭐
+O elige un paquete con más ahorro:
+• Starter: 400 créditos = ~6 videos por MX$${starterMxn}
+• Plus: 800 créditos = ~13 videos por MX$${plusMxn} ⭐
 
-📊 *${totalVideos.toLocaleString()}+ videos created by our community!*`;
+📊 *${totalVideos.toLocaleString()}+ videos creados por nuestra comunidad!*`;
                         } else {
-                            upsellMsg = `⚡ *Need more credits?*
+                            upsellMsg = `⚡ *¿Necesitas más créditos?*
 
-You have ${credits} credits left.
+Te quedan ${credits} créditos.
 
-Quick top-up options:
-• 80 credits ($0.99) = 1 more video
-• 400 credits ($4.99) = ~6 videos
-• 800 credits ($8.99) = ~13 videos`;
+Opciones de recarga rápida:
+• 80 créditos (MX$${microMxn}) = 1 video más
+• 400 créditos (MX$${starterMxn}) = ~6 videos
+• 800 créditos (MX$${plusMxn}) = ~13 videos`;
                         }
                         
                         await bot.telegram.sendMessage(job.chat_id, upsellMsg, {
                             parse_mode: 'Markdown',
                             reply_markup: Markup.inlineKeyboard([
-                                [Markup.button.callback('🎯 $0.99 - Try Again', 'buy_pack_micro')],
-                                [Markup.button.callback('⭐ $4.99 - Starter Pack', 'buy_pack_starter')],
-                                [Markup.button.callback('🔥 $8.99 - Best Value', 'buy_pack_plus')]
+                                [Markup.button.callback(`🎯 MX$${microMxn} - Intentar otra vez`, 'buy_pack_micro')],
+                                [Markup.button.callback(`⭐ MX$${starterMxn} - Paquete Starter`, 'buy_pack_starter')],
+                                [Markup.button.callback(`🔥 MX$${plusMxn} - Mejor Valor`, 'buy_pack_plus')]
                             ]).reply_markup
                         });
                     } else {
                         // Has credits - gentle reminder
                         await bot.telegram.sendMessage(job.chat_id, 
-                            `💰 You have *${credits} credits* left (~${Math.floor(credits/60)} more videos)\n\n🎬 Ready to create another? Tap /start`,
+                            `💰 Te quedan *${credits} créditos* (~${Math.floor(credits/60)} videos más)\n\n🎬 ¿Listo para crear otro? Presiona /start`,
                             { parse_mode: 'Markdown' }
                         );
                     }
