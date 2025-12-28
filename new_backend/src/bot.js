@@ -469,6 +469,120 @@ bot.command('promo', async (ctx) => {
     }
 });
 
+// ADMIN COMMAND: Trigger flash sale
+bot.command('flashsale', async (ctx) => {
+    const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
+    const userId = String(ctx.from.id);
+    
+    if (!adminIds.includes(userId)) {
+        return ctx.reply('❌ Admin only command.');
+    }
+    
+    try {
+        const { sendFlashSale } = require('./services/promoScheduler');
+        await sendFlashSale(bot, 30, 2); // 30% off for 2 hours
+        await ctx.reply('✅ Flash sale sent to channel and all previous buyers!');
+    } catch (e) {
+        logger.error('Flash sale trigger failed', { error: e.message });
+        await ctx.reply(`❌ Error: ${e.message}`);
+    }
+});
+
+// ADMIN COMMAND: Send re-engagement messages now
+bot.command('reengage', async (ctx) => {
+    const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
+    const userId = String(ctx.from.id);
+    
+    if (!adminIds.includes(userId)) {
+        return ctx.reply('❌ Admin only command.');
+    }
+    
+    try {
+        const { sendReEngagementMessages } = require('./services/promoScheduler');
+        await ctx.reply('⏳ Sending re-engagement messages...');
+        await sendReEngagementMessages(bot);
+        await ctx.reply('✅ Re-engagement messages sent!');
+    } catch (e) {
+        logger.error('Re-engagement trigger failed', { error: e.message });
+        await ctx.reply(`❌ Error: ${e.message}`);
+    }
+});
+
+// ADMIN COMMAND: View stats
+bot.command('stats', async (ctx) => {
+    const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
+    const userId = String(ctx.from.id);
+    
+    if (!adminIds.includes(userId)) {
+        return ctx.reply('❌ Admin only command.');
+    }
+    
+    try {
+        const totalVideos = getTotalVideosCreated();
+        const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get()?.count || 0;
+        const totalRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases').get()?.total || 0;
+        const buyers = db.prepare('SELECT COUNT(DISTINCT telegram_user_id) as count FROM purchases').get()?.count || 0;
+        const todayStart = new Date().setHours(0,0,0,0);
+        const todayUsers = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at > ?').get(todayStart)?.count || 0;
+        const todayRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases WHERE created_at > ?').get(todayStart)?.total || 0;
+        
+        const conversionRate = totalUsers > 0 ? ((buyers / totalUsers) * 100).toFixed(2) : 0;
+        
+        await ctx.reply(`📊 *BOT STATS*
+
+👥 *Users:* ${totalUsers.toLocaleString()}
+📹 *Videos Created:* ${totalVideos.toLocaleString()}
+💰 *Total Revenue:* $${(totalRevenue / 100).toFixed(2)}
+🛒 *Paying Users:* ${buyers}
+📈 *Conversion Rate:* ${conversionRate}%
+
+*TODAY:*
+👤 New Users: ${todayUsers}
+💵 Revenue: $${((todayRevenue || 0) / 100).toFixed(2)}`, { parse_mode: 'Markdown' });
+    } catch (e) {
+        logger.error('Stats command failed', { error: e.message });
+        await ctx.reply(`❌ Error: ${e.message}`);
+    }
+});
+
+// ADMIN COMMAND: Broadcast message to all users
+bot.command('broadcast', async (ctx) => {
+    const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
+    const userId = String(ctx.from.id);
+    
+    if (!adminIds.includes(userId)) {
+        return ctx.reply('❌ Admin only command.');
+    }
+    
+    const message = ctx.message.text.replace('/broadcast', '').trim();
+    if (!message) {
+        return ctx.reply('Usage: /broadcast Your message here');
+    }
+    
+    try {
+        const users = db.prepare('SELECT id FROM users').all();
+        let sent = 0;
+        let failed = 0;
+        
+        await ctx.reply(`⏳ Broadcasting to ${users.length} users...`);
+        
+        for (const user of users) {
+            try {
+                await bot.telegram.sendMessage(user.id, message, { parse_mode: 'Markdown' });
+                sent++;
+                await new Promise(r => setTimeout(r, 100)); // Rate limit
+            } catch (e) {
+                failed++;
+            }
+        }
+        
+        await ctx.reply(`✅ Broadcast complete!\nSent: ${sent}\nFailed: ${failed}`);
+    } catch (e) {
+        logger.error('Broadcast failed', { error: e.message });
+        await ctx.reply(`❌ Error: ${e.message}`);
+    }
+});
+
 bot.command('chatid', async (ctx) => {
     try {
         await ctx.reply(String(ctx.chat && ctx.chat.id));
