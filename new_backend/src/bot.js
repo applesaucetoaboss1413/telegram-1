@@ -543,36 +543,136 @@ bot.action('buy_points_menu', async (ctx) => {
     }
 });
 
-async function startCheckout(ctx, pack) {
+// Currency conversion helpers
+const https = require('https');
+const SUPPORTED_CURRENCIES = ['usd', 'mxn', 'eur', 'gbp', 'cad'];
+const CURRENCY_SYMBOLS = { usd: '$', mxn: 'MX$', eur: '€', gbp: '£', cad: 'C$' };
+const SAFE_RATES = { MXN: 17.5, EUR: 0.92, GBP: 0.79, CAD: 1.36 };
+
+async function fetchUsdRate(toCurrency) {
+    return new Promise((resolve) => {
+        try {
+            const symbol = String(toCurrency || '').toUpperCase();
+            if (symbol === 'USD') return resolve(1);
+            
+            const req = https.request({ 
+                hostname: 'api.exchangerate-api.com', 
+                path: '/v4/latest/USD', 
+                method: 'GET',
+                timeout: 4000 
+            }, res => {
+                let buf = ''; 
+                res.on('data', c => buf += c); 
+                res.on('end', () => {
+                    try { 
+                        const j = JSON.parse(buf); 
+                        const rate = j && j.rates && j.rates[symbol]; 
+                        if (typeof rate === 'number') resolve(rate);
+                        else resolve(SAFE_RATES[symbol] || 1);
+                    } catch (_) { 
+                        resolve(SAFE_RATES[symbol] || 1); 
+                    }
+                });
+            });
+            req.on('error', () => resolve(SAFE_RATES[symbol] || 1));
+            req.on('timeout', () => { req.destroy(); resolve(SAFE_RATES[symbol] || 1); });
+            req.end();
+        } catch (_) { 
+            resolve(SAFE_RATES[toCurrency.toUpperCase()] || 1); 
+        }
+    });
+}
+
+function toMinorUnits(usdAmount, currency, rate) {
+    let val = Number(usdAmount) * Number(rate || 1);
+    if (currency.toLowerCase() !== 'usd') {
+        val = val * 1.03; // 3% spread for FX safety
+    }
+    return Math.round(val * 100);
+}
+
+// Currency selection action handlers
+bot.action('cancel_payment', async (ctx) => {
     try {
+        await ctx.answerCbQuery();
+        await ctx.deleteMessage().catch(() => {});
+        await ctx.reply('Payment cancelled.');
+    } catch (e) {
+        logger.error('Cancel payment failed', { error: e.message });
+    }
+});
+
+bot.action(/pay:(\w+):(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const currency = ctx.match[1].toLowerCase();
+        const packKey = ctx.match[2];
+        const pack = demoCfg.packs[packKey];
+        
+        if (!pack) return ctx.reply('Invalid pack');
+        if (!SUPPORTED_CURRENCIES.includes(currency)) return ctx.reply('Unsupported currency');
+        
         const username = await getBotUsername();
         const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
+        const userId = String(ctx.from.id);
         
+        // Get exchange rate and convert
+        const rate = await fetchUsdRate(currency);
+        const amountInCurrency = toMinorUnits(pack.price_cents / 100, currency, rate);
+        const displayAmount = (amountInCurrency / 100).toFixed(2);
+        const symbol = CURRENCY_SYMBOLS[currency] || currency.toUpperCase();
+
         const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
             line_items: [{
                 price_data: {
-                    currency: 'usd',
+                    currency: currency,
                     product_data: { name: pack.label },
-                    unit_amount: pack.price_cents,
+                    unit_amount: amountInCurrency,
                 },
                 quantity: 1,
             }],
             mode: 'payment',
             success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
             cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
-            client_reference_id: String(ctx.from.id),
+            client_reference_id: userId,
             metadata: {
-                points: String(pack.points)
+                points: String(pack.points),
+                pack_type: packKey,
+                currency: currency,
+                usd_equivalent: String(pack.price_cents)
             }
         });
+        
         await ctx.reply(
-            `You selected *${pack.label}*.\n\nTap the button below to complete your payment.`,
+            `💳 *${pack.label}*\n\n${pack.points} credits for *${symbol}${displayAmount}*\n\nTap below to complete your purchase:`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '💳 Proceed to payment', url: session.url }]],
+                    inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]],
                 },
+            }
+        );
+    } catch (e) {
+        logger.error('Payment checkout failed', { error: e.message, userId: ctx.from?.id });
+        ctx.reply('❌ Payment system error. Please try again later.');
+    }
+});
+
+async function startCheckout(ctx, pack, packKey) {
+    // Show currency selection instead of direct checkout
+    try {
+        const usdPrice = (pack.price_cents / 100).toFixed(2);
+        
+        await ctx.reply(
+            `💰 *${pack.label}*\n${pack.points} credits for $${usdPrice} USD\n\n🌍 *Select your currency:*`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.callback('🇺🇸 USD', `pay:usd:${packKey}`), Markup.button.callback('🇲🇽 MXN', `pay:mxn:${packKey}`)],
+                    [Markup.button.callback('🇪🇺 EUR', `pay:eur:${packKey}`), Markup.button.callback('🇬🇧 GBP', `pay:gbp:${packKey}`)],
+                    [Markup.button.callback('🇨🇦 CAD', `pay:cad:${packKey}`)],
+                    [Markup.button.callback('❌ Cancel', 'cancel_payment')]
+                ]).reply_markup
             }
         );
     } catch (e) {
