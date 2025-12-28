@@ -268,7 +268,7 @@ bot.command('start', async (ctx) => {
     
     // Handle Mini App launch
     if (payload === 'studio' || payload === 'app') {
-        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://your-app.onrender.com'}/miniapp`;
+        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegram-1-i38q.onrender.com'}/miniapp`;
         await ctx.reply(
             `✨ *AI Studio*\n\nAccess all our AI services in one place!`,
             {
