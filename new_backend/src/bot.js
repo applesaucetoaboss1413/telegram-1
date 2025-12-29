@@ -277,7 +277,7 @@ _Swap your face into any video in seconds!_
 
             await ctx.replyWithMarkdown(promoText, 
                 Markup.inlineKeyboard([
-                    [Markup.button.url('🚀 OPEN STUDIO APP 🚀', 'https://telegramalam.onrender.com/miniapp/index.html')]
+                    [Markup.button.url('🚀 OPEN STUDIO APP 🚀', 'https://t.me/ImMoreThanJustSomeBot/studio')]
                 ])
             );
         } catch (e) {
