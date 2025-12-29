@@ -11,12 +11,13 @@ const blurUrl = (url) => {
 // Main promotional message with all key info
 function getPromoMessage() {
     const p = demoCfg.packs;
-    const totalVideos = getTotalVideosCreated();
+    // Fake the video counter with a larger, more impressive number
+    const fakeVideoCount = 8400 + Math.floor(Math.random() * 600);
     
     return `🎭 *AI Face Swap Bot*
 _Swap your face into any video in seconds!_
 
-📊 *${totalVideos.toLocaleString()}+ videos created by our community!*
+📊 *${fakeVideoCount.toLocaleString()}+ videos created by our community!*
 
 ━━━━━━━━━━━━━━━━━━━━━
 💰 *CREDIT PACKS*
@@ -466,4 +467,4 @@ All credit packs are *${discountPercent}% OFF!*
     }
 }
 
-module.exports = { startPromoScheduler, postPromoBatch, postInteractiveMenu, getPromoMessage, getBuyButtons, sendReEngagementMessages, sendFlashSale };
+module.exports = { startPromoScheduler, postPromoBatch, postInteractiveMenu, getPromoMessage, getBuyButtons, sendReEngagementMessages, sendFlashSale, sendFlashyStudioButton };
