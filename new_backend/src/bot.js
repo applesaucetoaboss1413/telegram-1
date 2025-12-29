@@ -798,12 +798,6 @@ bot.action(/pay:(\w+):(.+)/, async (ctx) => {
         trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
 
         const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'], // Force card only, disable Link
-            payment_method_options: {
-                card: {
-                    setup_future_usage: null  // Explicitly disable Link
-                }
-            },
             line_items: [{
                 price_data: {
                     currency: currency,
@@ -813,6 +807,10 @@ bot.action(/pay:(\w+):(.+)/, async (ctx) => {
                 quantity: 1,
             }],
             mode: 'payment',
+            payment_method_types: ['card'],
+            automatic_payment_methods: {
+                enabled: false  // Disable automatic payment methods including Link
+            },
             success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
             cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
             client_reference_id: userId,
