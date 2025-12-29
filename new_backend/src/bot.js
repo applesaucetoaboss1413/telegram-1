@@ -218,7 +218,7 @@ _Swap your face into any video in seconds!_
     const approx5s = Math.floor(user.points / demoCfg.demoPrices['5']);
     
     // Get the proper mini app URL
-    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
     
     // Credit messaging - OPTIMIZED FOR CONVERSIONS
     let creditMsg = '';
@@ -253,7 +253,7 @@ bot.command('start', async (ctx) => {
     
     // Handle Mini App launch
     if (payload === 'studio' || payload === 'app') {
-        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         try {
             await ctx.reply(
                 `✨ *Ai Face-Swap Studio*\n\nAccess all our AI services in one place!`,
@@ -418,7 +418,7 @@ ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
 👇 *TAP TO OPEN FULL STUDIO* 👇`;
 
-            const studioUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+            const studioUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
             await ctx.replyWithMarkdown(promoText, 
                 Markup.inlineKeyboard([
                     [Markup.button.webApp('🚀 OPEN FULL STUDIO APP 🚀', studioUrl)]
@@ -618,7 +618,7 @@ bot.command('chatid', async (ctx) => {
 // Mini App Studio command
 bot.command('studio', async (ctx) => {
     try {
-        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap the button below to open!`,
             {
@@ -632,7 +632,7 @@ bot.command('studio', async (ctx) => {
         );
     } catch (e) {
         logger.error('studio command failed', { error: e.message });
-        const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\n${fallbackUrl}`,
             { parse_mode: 'Markdown' }
@@ -644,7 +644,7 @@ bot.command('studio', async (ctx) => {
 bot.action('open_studio', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nTap the button to open:`,
             {
@@ -657,7 +657,7 @@ bot.action('open_studio', async (ctx) => {
         );
     } catch (e) {
         logger.error('open_studio action failed', { error: e.message });
-        const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(`Open Studio: ${fallbackUrl}`);
     }
 });

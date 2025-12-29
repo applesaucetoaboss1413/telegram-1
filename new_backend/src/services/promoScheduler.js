@@ -92,7 +92,7 @@ async function postStartupVideos(bot) {
         );
 
         // Message 2: Mini App Promotion (DEDICATED BLOCK)
-        const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await bot.telegram.sendMessage(channelId,
             `🎨 *INTRODUCING: Ai Face-Swap Studio*\n\n` +
             `Your complete AI creative toolkit in one app!\n\n` +
@@ -223,7 +223,7 @@ async function postPromoBatch(bot) {
 async function sendFlashyStudioButton(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     const Markup = require('telegraf').Markup;
-    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
     
     try {
         await bot.telegram.sendMessage(channelId,
