@@ -74,40 +74,53 @@ function getBuyButtons() {
 async function postStartupVideos(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
-
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
-
-        const cap5 = `🔞 5s Example (blurred) – ${c5.points} pts (~$${c5.usd})`;
-        const cap10 = `🔞 10s Example (blurred) – ${c10.points} pts (~$${c10.usd})`;
-        const cap15 = `🔞 15s Example (blurred) – ${c15.points} pts (~$${c15.usd})`;
-
         const Markup = require('telegraf').Markup;
+        const totalVideos = getTotalVideosCreated();
         
-        const btn5 = Markup.inlineKeyboard([
-            [Markup.button.url('▶️ Create 5s Swap', 'https://t.me/ImMoreThanJustSomeBot?start=demo_5')],
-            [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
-        ]);
-        const btn10 = Markup.inlineKeyboard([
-            [Markup.button.url('▶️ Create 10s Swap', 'https://t.me/ImMoreThanJustSomeBot?start=demo_10')],
-            [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
-        ]);
-        const btn15 = Markup.inlineKeyboard([
-            [Markup.button.url('▶️ Create 15s Swap', 'https://t.me/ImMoreThanJustSomeBot?start=demo_15')],
-            [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
-        ]);
+        // Send welcome intro with mini app promo
+        const introMessage = `🎭 *Welcome to Ai Face-Swap Studio!*
 
-        if (t5) await bot.telegram.sendVideo(channelId, blurUrl(t5), { caption: cap5, reply_markup: btn5.reply_markup }).catch(() => { });
-        if (t10) await bot.telegram.sendVideo(channelId, blurUrl(t10), { caption: cap10, reply_markup: btn10.reply_markup }).catch(() => { });
-        if (t15) await bot.telegram.sendVideo(channelId, blurUrl(t15), { caption: cap15, reply_markup: btn15.reply_markup }).catch(() => { });
+Transform any photo into amazing AI-powered videos in seconds!
 
-        console.log('Startup videos posted to channel with purchase buttons.');
+✨ *What You Can Do:*
+━━━━━━━━━━━━━━━━━━━━━
+🎬 *Face Swap Videos* - Swap faces in any video
+🗣️ *Talking Avatars* - Make photos talk & move
+🎥 *Image to Video* - Animate still images
+✨ *4K Enhancement* - Upscale videos to 4K quality
+🖼️ *Background Removal* - Clean backgrounds instantly
+
+━━━━━━━━━━━━━━━━━━━━━
+🚀 *Two Ways to Create:*
+━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣ *Quick Bot Commands* - Use /start for instant access
+2️⃣ *Full Studio App* - Tap 🎨 Studio button for all features!
+
+━━━━━━━━━━━━━━━━━━━━━
+🎁 *Special Offers:*
+━━━━━━━━━━━━━━━━━━━━━
+
+✅ 69 FREE credits for new users!
+✅ 10 FREE credits daily (build streaks!)
+✅ Starting at just $0.99
+
+📊 *${totalVideos.toLocaleString()}+ videos already created!*
+
+👇 *Get Started Now* 👇`;
+
+        await bot.telegram.sendMessage(channelId, introMessage, {
+            parse_mode: 'Markdown',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.url('🎨 Open Full Studio App', 'https://t.me/ImMoreThanJustSomeBot/studio')],
+                [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')],
+                [Markup.button.url('🎬 Quick Start Bot', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
+            ]).reply_markup
+        });
+
+        console.log('Startup intro with mini app promo posted to channel.');
     } catch (error) {
-        console.error('Failed to post startup videos:', error.message);
+        console.error('Failed to post startup intro:', error.message);
     }
 }
 
