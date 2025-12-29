@@ -259,7 +259,7 @@ async function sendFlashyStudioButton(bot) {
                 {
                     parse_mode: 'Markdown',
                     reply_markup: Markup.inlineKeyboard([
-                        [Markup.button.url('🚀 LAUNCH STUDIO', 'https://t.me/ImMoreThanJustSomeBot?start=studio')]
+                        [Markup.button.url('🚀 LAUNCH STUDIO', 'https://telegramalam.onrender.com/miniapp/index.html')]
                     ]).reply_markup
                 }
             );
