@@ -220,6 +220,7 @@ _Swap your face into any video in seconds!_
     // Credit messaging - OPTIMIZED FOR CONVERSIONS
     let creditMsg = '';
     let buttons = [
+        [Markup.button.url('🎨✨ OPEN FULL STUDIO APP ✨🎨', 'https://t.me/ImMoreThanJustSomeBot/studio')],
         [Markup.button.callback('🎬 Create Video', 'demo_new')],
         [Markup.button.callback('🎁 Daily Free Credits', 'claim_daily')],
         [Markup.button.callback('💳 Buy Credits', 'buy_points_menu')],
@@ -235,56 +236,12 @@ _Swap your face into any video in seconds!_
         creditMsg = `\n\n💰 *Your Points:* ${user.points} (~${approx5s} videos)`;
     } else {
         creditMsg = `\n\n🎁 *New User Bonus:* Get 69 FREE credits - enough for your first video!`;
-        buttons.unshift([Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]);
     }
 
     await ctx.replyWithMarkdown(
         `👋 Welcome! You have ${user.points} points (~${approx5s} 5s demos).${creditMsg}`,
         Markup.inlineKeyboard(buttons)
     );
-    
-    // SEND FLASHY MINI APP PROMO
-    setTimeout(async () => {
-        try {
-            const promoText = `
-🎨✨ *INTRODUCING: Ai Face-Swap Studio* ✨🎨
-
-🔥 *ALL-IN-ONE AI CREATIVE SUITE* 🔥
-
-━━━━━━━━━━━━━━━━━━━━━━
-*🎭 5 POWERFUL TOOLS:*
-
-• *Face Swap Videos* 👤→🎬
-  Transform anyone into anything
-
-• *Talking Avatars* 🗣️💬  
-  Make photos speak & move
-
-• *Image to Video* 📸→🎥
-  Animate still images to life
-
-• *4K Enhancement* ✨📺
-  Ultra HD video upscaling
-
-• *Background Removal* 🖼️🔪
-  Clean backgrounds instantly
-
-━━━━━━━━━━━━━━━━━━━━━━
-⚡ *FAST* • *EASY* • *PROFESSIONAL*
-━━━━━━━━━━━━━━━━━━━━━━
-
-👇 *TAP BELOW TO LAUNCH* 👇`;
-
-            await ctx.replyWithMarkdown(promoText, 
-                Markup.inlineKeyboard([
-                    [Markup.button.url('🚀 OPEN STUDIO APP 🚀', 'https://t.me/ImMoreThanJustSomeBot/studio')]
-                ])
-            );
-        } catch (e) {
-            logger.error('Failed to send mini app promo', { error: e.message });
-        }
-    }, 1000);
-}
 
 bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
