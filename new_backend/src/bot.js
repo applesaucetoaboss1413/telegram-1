@@ -242,6 +242,48 @@ _Swap your face into any video in seconds!_
         `👋 Welcome! You have ${user.points} points (~${approx5s} 5s demos).${creditMsg}`,
         Markup.inlineKeyboard(buttons)
     );
+    
+    // SEND FLASHY MINI APP PROMO
+    setTimeout(async () => {
+        try {
+            const promoText = `
+🎨✨ *INTRODUCING: Ai Face-Swap Studio* ✨🎨
+
+🔥 *ALL-IN-ONE AI CREATIVE SUITE* 🔥
+
+━━━━━━━━━━━━━━━━━━━━━━
+*🎭 5 POWERFUL TOOLS:*
+
+• *Face Swap Videos* 👤→🎬
+  Transform anyone into anything
+
+• *Talking Avatars* 🗣️💬  
+  Make photos speak & move
+
+• *Image to Video* 📸→🎥
+  Animate still images to life
+
+• *4K Enhancement* ✨📺
+  Ultra HD video upscaling
+
+• *Background Removal* 🖼️🔪
+  Clean backgrounds instantly
+
+━━━━━━━━━━━━━━━━━━━━━━
+⚡ *FAST* • *EASY* • *PROFESSIONAL*
+━━━━━━━━━━━━━━━━━━━━━━
+
+👇 *TAP BELOW TO LAUNCH* 👇`;
+
+            await ctx.replyWithMarkdown(promoText, 
+                Markup.inlineKeyboard([
+                    [Markup.button.url('🚀 OPEN STUDIO APP 🚀', 'https://telegramalam.onrender.com/miniapp/index.html')]
+                ])
+            );
+        } catch (e) {
+            logger.error('Failed to send mini app promo', { error: e.message });
+        }
+    }, 1000);
 }
 
 bot.command('start', async (ctx) => {
