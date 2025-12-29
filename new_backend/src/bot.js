@@ -250,7 +250,7 @@ bot.command('start', async (ctx) => {
     
     // Handle Mini App launch
     if (payload === 'studio' || payload === 'app') {
-        const webAppUrl = 'https://t.me/ImMoreThanJustSomeBot/studio';
+        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
         try {
             await ctx.reply(
                 `✨ *Ai Face-Swap Studio*\n\nAccess all our AI services in one place!`,
@@ -614,7 +614,7 @@ bot.command('chatid', async (ctx) => {
 // Mini App Studio command
 bot.command('studio', async (ctx) => {
     try {
-        const webAppUrl = 'https://t.me/ImMoreThanJustSomeBot/studio';
+        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap the button below to open!`,
             {
@@ -628,8 +628,9 @@ bot.command('studio', async (ctx) => {
         );
     } catch (e) {
         logger.error('studio command failed', { error: e.message });
+        const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
         await ctx.reply(
-            `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\nhttps://t.me/ImMoreThanJustSomeBot/studio`,
+            `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\n${fallbackUrl}`,
             { parse_mode: 'Markdown' }
         );
     }
@@ -639,7 +640,7 @@ bot.command('studio', async (ctx) => {
 bot.action('open_studio', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const webAppUrl = 'https://t.me/ImMoreThanJustSomeBot/studio';
+        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nTap the button to open:`,
             {
@@ -652,7 +653,8 @@ bot.action('open_studio', async (ctx) => {
         );
     } catch (e) {
         logger.error('open_studio action failed', { error: e.message });
-        await ctx.reply(`Open Studio: https://t.me/ImMoreThanJustSomeBot/studio`);
+        const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+        await ctx.reply(`Open Studio: ${fallbackUrl}`);
     }
 });
 
