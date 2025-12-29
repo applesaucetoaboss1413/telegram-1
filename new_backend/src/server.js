@@ -609,6 +609,7 @@ app.post('/api/miniapp/checkout', async (req, res) => {
         });
         
         const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
             line_items: [{
                 price_data: {
                     currency: curr,
@@ -618,10 +619,6 @@ app.post('/api/miniapp/checkout', async (req, res) => {
                 quantity: 1,
             }],
             mode: 'payment',
-            payment_method_types: ['card'],
-            automatic_payment_methods: {
-                enabled: false  // Disable automatic payment methods including Link
-            },
             success_url: process.env.MINIAPP_URL || `https://t.me/ImMoreThanJustSomeBot?start=success`,
             cancel_url: process.env.MINIAPP_URL || `https://t.me/ImMoreThanJustSomeBot?start=cancel`,
             client_reference_id: userId,
