@@ -217,10 +217,13 @@ _Swap your face into any video in seconds!_
     
     const approx5s = Math.floor(user.points / demoCfg.demoPrices['5']);
     
+    // Get the proper mini app URL
+    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
+    
     // Credit messaging - OPTIMIZED FOR CONVERSIONS
     let creditMsg = '';
     let buttons = [
-        [Markup.button.url('🎨✨ OPEN FULL STUDIO APP ✨🎨', 'https://t.me/ImMoreThanJustSomeBot/studio')],
+        [Markup.button.webApp('🎨✨ OPEN FULL STUDIO APP ✨🎨', miniAppUrl)],
         [Markup.button.callback('🎬 Create Video', 'demo_new')],
         [Markup.button.callback('🎁 Daily Free Credits', 'claim_daily')],
         [Markup.button.callback('💳 Buy Credits', 'buy_points_menu')],
@@ -415,9 +418,10 @@ ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
 👇 *TAP TO OPEN FULL STUDIO* 👇`;
 
+            const studioUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
             await ctx.replyWithMarkdown(promoText, 
                 Markup.inlineKeyboard([
-                    [Markup.button.url('🚀 OPEN FULL STUDIO APP 🚀', 'https://t.me/ImMoreThanJustSomeBot/studio')]
+                    [Markup.button.webApp('🚀 OPEN FULL STUDIO APP 🚀', studioUrl)]
                 ])
             );
         } catch (e) {
