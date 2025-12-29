@@ -75,50 +75,100 @@ async function postStartupVideos(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
         const Markup = require('telegraf').Markup;
-        const totalVideos = getTotalVideosCreated();
         
-        // Send welcome intro with mini app promo
-        const introMessage = `🎭 *Welcome to Ai Face-Swap Studio!*
+        // Message 1: Language Selection (BIG AND VISIBLE)
+        await bot.telegram.sendMessage(channelId, 
+            `🌍 *Choose Your Language / Elige tu Idioma*\n\n` +
+            `Select your preferred language:\n` +
+            `Selecciona tu idioma preferido:`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.url('🇺🇸 English', 'https://t.me/ImMoreThanJustSomeBot?start=lang_en')],
+                    [Markup.button.url('🇪🇸 Español', 'https://t.me/ImMoreThanJustSomeBot?start=lang_es')]
+                ]).reply_markup
+            }
+        );
 
-Transform any photo into amazing AI-powered videos in seconds!
+        // Message 2: Mini App Promotion (DEDICATED BLOCK)
+        await bot.telegram.sendMessage(channelId,
+            `🎨 *INTRODUCING: Ai Face-Swap Studio*\n\n` +
+            `Your complete AI creative toolkit in one app!\n\n` +
+            `✨ *5 Professional Tools:*\n` +
+            `• Face Swap Videos\n` +
+            `• Talking Avatars\n` +
+            `• Image Animation\n` +
+            `• 4K Enhancement\n` +
+            `• Background Removal\n\n` +
+            `🚀 *Access Everything:*\n` +
+            `No limits. All tools. One place.\n\n` +
+            `👇 *Tap to Launch Full Studio* 👇`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [{ text: '🎨 OPEN FULL STUDIO APP →', web_app: { url: 'https://telegramalam.onrender.com/new_backend/miniapp/index.html' } }]
+                ]).reply_markup
+            }
+        );
 
-✨ *What You Can Do:*
-━━━━━━━━━━━━━━━━━━━━━
-🎬 *Face Swap Videos* - Swap faces in any video
-🗣️ *Talking Avatars* - Make photos talk & move
-🎥 *Image to Video* - Animate still images
-✨ *4K Enhancement* - Upscale videos to 4K quality
-🖼️ *Background Removal* - Clean backgrounds instantly
+        // Message 3: Free Credits Offer
+        await bot.telegram.sendMessage(channelId,
+            `🎁 *FREE CREDITS AVAILABLE*\n\n` +
+            `*New Users:*\n` +
+            `✅ 69 FREE credits instantly\n` +
+            `✅ No payment required\n` +
+            `✅ Just verify your card\n\n` +
+            `*Daily Bonus:*\n` +
+            `✅ 10 FREE credits every 24 hours\n` +
+            `✅ Build streaks for bonus rewards\n` +
+            `✅ Never run out of credits`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
+                ]).reply_markup
+            }
+        );
 
-━━━━━━━━━━━━━━━━━━━━━
-🚀 *Two Ways to Create:*
-━━━━━━━━━━━━━━━━━━━━━
+        // Message 4: Pricing (Clear and Organized)
+        await bot.telegram.sendMessage(channelId,
+            `💰 *CREDIT PACKAGES*\n\n` +
+            `🎯 *Try It* - $0.99\n` +
+            `   80 credits • 1 video\n` +
+            `   Perfect first purchase\n\n` +
+            `⭐ *Starter* - $4.99\n` +
+            `   400 credits • ~6 videos\n` +
+            `   Most popular\n\n` +
+            `🔥 *Plus* - $8.99\n` +
+            `   800 credits • ~13 videos\n` +
+            `   BEST VALUE - Save 10%\n\n` +
+            `💎 *Pro* - $14.99\n` +
+            `   1600 credits • ~26 videos\n` +
+            `   Power users - Save 25%`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.url('💳 Buy Credits Now', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')]
+                ]).reply_markup
+            }
+        );
 
-1️⃣ *Quick Bot Commands* - Use /start for instant access
-2️⃣ *Full Studio App* - Tap 🎨 Studio button for all features!
+        // Message 5: Quick Start
+        await bot.telegram.sendMessage(channelId,
+            `🚀 *READY TO START?*\n\n` +
+            `Two ways to create:\n\n` +
+            `1️⃣ *Quick Bot* - Fast commands\n` +
+            `2️⃣ *Full Studio* - All features\n\n` +
+            `Choose your style and start creating!`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.url('🎬 Start Creating', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
+                ]).reply_markup
+            }
+        );
 
-━━━━━━━━━━━━━━━━━━━━━
-🎁 *Special Offers:*
-━━━━━━━━━━━━━━━━━━━━━
-
-✅ 69 FREE credits for new users!
-✅ 10 FREE credits daily (build streaks!)
-✅ Starting at just $0.99
-
-📊 *${totalVideos.toLocaleString()}+ videos already created!*
-
-👇 *Get Started Now* 👇`;
-
-        await bot.telegram.sendMessage(channelId, introMessage, {
-            parse_mode: 'Markdown',
-            reply_markup: Markup.inlineKeyboard([
-                [Markup.button.url('🎨 Open Full Studio App', 'https://t.me/ImMoreThanJustSomeBot/studio')],
-                [Markup.button.url('🎁 Get 69 Free Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')],
-                [Markup.button.url('🎬 Quick Start Bot', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
-            ]).reply_markup
-        });
-
-        console.log('Startup intro with mini app promo posted to channel.');
+        console.log('Startup intro messages posted to channel (5 separate blocks).');
     } catch (error) {
         console.error('Failed to post startup intro:', error.message);
     }
