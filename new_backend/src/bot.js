@@ -1020,27 +1020,18 @@ bot.action('demo_len_15', async (ctx) => {
 bot.action('demo_base_template', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
-
+        
+        // Show template selection without videos
         const c5 = demoCfg.demoCosts['5'];
         const c10 = demoCfg.demoCosts['10'];
         const c15 = demoCfg.demoCosts['15'];
-
-        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
-        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
-        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
-
-        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { await ctx.reply(`5s Demo: ${t5}\n${cap5}`); } }
-        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { await ctx.reply(`10s Demo: ${t10}\n${cap10}`); } }
-        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { await ctx.reply(`15s Demo: ${t15}\n${cap15}`); } }
+        
         const kb = Markup.inlineKeyboard([
-            [Markup.button.callback('Use 5s template demo', 'demo_tmpl_5')],
-            [Markup.button.callback('Use 10s template demo', 'demo_tmpl_10')],
-            [Markup.button.callback('Use 15s template demo', 'demo_tmpl_15')],
+            [Markup.button.callback(`Use 5s template (${c5.points} pts)`, 'demo_tmpl_5')],
+            [Markup.button.callback(`Use 10s template (${c10.points} pts)`, 'demo_tmpl_10')],
+            [Markup.button.callback(`Use 15s template (${c15.points} pts)`, 'demo_tmpl_15')],
         ]);
-        await ctx.reply('Pick a template to use:', kb);
+        await ctx.reply('Pick a template length:', kb);
     } catch (e) {
         logger.error('demo_base_template action failed', { error: e.message });
     }
