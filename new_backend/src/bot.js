@@ -628,7 +628,7 @@ bot.command('chatid', async (ctx) => {
 // Mini App Studio command
 bot.command('studio', async (ctx) => {
     try {
-        const webAppUrl = 'https://telegramalam.onrender.com/miniapp/index.html';
+        const webAppUrl = 'https://t.me/ImMoreThanJustSomeBot/studio';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap the button below to open!`,
             {
@@ -642,9 +642,8 @@ bot.command('studio', async (ctx) => {
         );
     } catch (e) {
         logger.error('studio command failed', { error: e.message });
-        // Fallback to regular link if web_app fails
         await ctx.reply(
-            `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\nhttps://telegramalam.onrender.com/miniapp/index.html`,
+            `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\nhttps://t.me/ImMoreThanJustSomeBot/studio`,
             { parse_mode: 'Markdown' }
         );
     }
