@@ -600,12 +600,52 @@
         // Currency selection
         document.querySelectorAll('.currency-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('bg-purple-600'));
+                document.querySelectorAll('.currency-btn').forEach(b => {
+                    b.classList.remove('bg-purple-600');
+                    b.classList.add('bg-gray-700');
+                });
                 btn.classList.add('bg-purple-600');
                 btn.classList.remove('bg-gray-700');
                 selectedCurrency = btn.dataset.currency;
+                
+                // Update all displayed prices
+                updatePrices();
             });
         });
+        
+        function updatePrices() {
+            const currencySymbols = {
+                'usd': '$',
+                'mxn': 'MX$',
+                'eur': '€',
+                'gbp': '£',
+                'cad': 'C$'
+            };
+            
+            const rates = {
+                'usd': 1,
+                'mxn': 18.0,
+                'eur': 0.92,
+                'gbp': 0.79,
+                'cad': 1.36
+            };
+            
+            const symbol = currencySymbols[selectedCurrency] || '$';
+            const rate = rates[selectedCurrency] || 1;
+            
+            // Update each pack price
+            document.querySelectorAll('[data-pack]').forEach(el => {
+                const basePrice = parseFloat(el.dataset.basePrice);
+                let convertedPrice = basePrice * rate;
+                
+                // Apply 3% spread for non-USD
+                if (selectedCurrency !== 'usd') {
+                    convertedPrice = convertedPrice * 1.03;
+                }
+                
+                el.textContent = symbol + convertedPrice.toFixed(2);
+            });
+        }
 
         function showView(viewId) {
             ['services-view', 'service-view', 'processing-view', 'result-view', 'buy-credits-view'].forEach(id => {
