@@ -395,25 +395,7 @@ ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
     await ctx.replyWithMarkdown(msg, Markup.inlineKeyboard(buttons));
 
-    // Send template examples
-    if (ctx.chat && ctx.chat.type === 'private') {
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
-
-        const blurUrl = (url) => {
-            if (!url || !url.includes('cloudinary.com')) return url;
-            return url.replace('/upload/', '/upload/e_blur:800/');
-        };
-
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
-
-        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t5), { caption: `5s – ${c5.points} pts (~$${c5.usd})` }); } catch (_) { } }
-        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t10), { caption: `10s – ${c10.points} pts (~$${c10.usd})` }); } catch (_) { } }
-        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, blurUrl(t15), { caption: `15s – ${c15.points} pts (~$${c15.usd})` }); } catch (_) { } }
-    }
+    // Template examples REMOVED - user requested no blurred videos
 }
 
 async function sendBuyPointsMenu(ctx) {
