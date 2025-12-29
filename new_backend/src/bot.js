@@ -604,13 +604,13 @@ bot.command('chatid', async (ctx) => {
 // Mini App Studio command
 bot.command('studio', async (ctx) => {
     try {
-        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
+        const webAppUrl = 'https://telegramalam.onrender.com/new_backend/miniapp/index.html';
         await ctx.reply(
-            `✨ *AI Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap the button below to open!`,
+            `✨ *Ai Face-Swap Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap the button below to open!`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    keyboard: [[{ text: '🚀 Open AI Studio', web_app: { url: webAppUrl } }]],
+                    keyboard: [[{ text: '🚀 Open Ai Face-Swap Studio', web_app: { url: webAppUrl } }]],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -619,9 +619,8 @@ bot.command('studio', async (ctx) => {
     } catch (e) {
         logger.error('studio command failed', { error: e.message });
         // Fallback to regular link if web_app fails
-        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
         await ctx.reply(
-            `✨ *AI Studio*\n\nOpen the app here:\n${webAppUrl}`,
+            `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\nhttps://telegramalam.onrender.com/new_backend/miniapp/index.html`,
             { parse_mode: 'Markdown' }
         );
     }
