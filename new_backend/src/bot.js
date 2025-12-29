@@ -382,9 +382,8 @@ ${t(lang, 'videoPricing')}
 
 ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
-    // Immediate buy buttons with translations - STUDIO BUTTON AT TOP
+    // Immediate buy buttons with translations - Language button prominent at top
     let buttons = [
-        [Markup.button.url('🎨✨ OPEN FULL STUDIO APP ✨🎨', 'https://t.me/ImMoreThanJustSomeBot/studio')],
         [Markup.button.callback('🌐 English / Español', 'change_language')],
         [Markup.button.callback(t(lang, 'btnGetFreeCredits'), 'get_free_credits')],
         [Markup.button.callback(t(lang, 'btnBuyMicro'), 'buy_pack_micro')],
@@ -396,7 +395,35 @@ ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
     await ctx.replyWithMarkdown(msg, Markup.inlineKeyboard(buttons));
 
-    // Template examples REMOVED - user requested no blurred videos
+    // SEND FLASHY STUDIO PROMO AS LAST MESSAGE - RIGHT IN THEIR FACE
+    setTimeout(async () => {
+        try {
+            const promoText = `
+🎨✨ *AI FACE-SWAP STUDIO* ✨🎨
+
+🔥 *ALL YOUR AI TOOLS IN ONE APP* 🔥
+
+━━━━━━━━━━━━━━━━━━━━━━
+🎭 Face Swap Videos
+🗣️ Talking Avatars  
+📸 Image to Video
+✨ 4K Enhancement
+🖼️ Background Removal
+━━━━━━━━━━━━━━━━━━━━━━
+
+⚡ *FAST • EASY • PROFESSIONAL* ⚡
+
+👇 *TAP TO OPEN FULL STUDIO* 👇`;
+
+            await ctx.replyWithMarkdown(promoText, 
+                Markup.inlineKeyboard([
+                    [Markup.button.url('🚀 OPEN FULL STUDIO APP 🚀', 'https://t.me/ImMoreThanJustSomeBot/studio')]
+                ])
+            );
+        } catch (e) {
+            logger.error('Failed to send studio promo', { error: e.message });
+        }
+    }, 1500);
 }
 
 async function sendBuyPointsMenu(ctx) {
