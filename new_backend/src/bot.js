@@ -242,6 +242,7 @@ _Swap your face into any video in seconds!_
         `👋 Welcome! You have ${user.points} points (~${approx5s} 5s demos).${creditMsg}`,
         Markup.inlineKeyboard(buttons)
     );
+}
 
 bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
