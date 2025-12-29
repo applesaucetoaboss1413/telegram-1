@@ -128,6 +128,18 @@ try {
     // Column already exists, ignore
 }
 
+// Migration: Add has_purchased column if it doesn't exist
+try {
+    const columns = db.pragma("table_info('users')");
+    const hasColumn = columns.some(col => col.name === 'has_purchased');
+    if (!hasColumn) {
+        db.exec('ALTER TABLE users ADD COLUMN has_purchased INTEGER DEFAULT 0');
+        console.log('Added has_purchased column to users table');
+    }
+} catch (e) {
+    console.log('Migration check for has_purchased column:', e.message);
+}
+
 // User Methods
 const getUser = (id) => {
     let user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
