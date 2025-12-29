@@ -382,8 +382,9 @@ ${t(lang, 'videoPricing')}
 
 ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
-    // Immediate buy buttons with translations - Language button prominent at top
+    // Immediate buy buttons with translations - STUDIO BUTTON AT TOP
     let buttons = [
+        [Markup.button.url('🎨✨ OPEN FULL STUDIO APP ✨🎨', 'https://t.me/ImMoreThanJustSomeBot/studio')],
         [Markup.button.callback('🌐 English / Español', 'change_language')],
         [Markup.button.callback(t(lang, 'btnGetFreeCredits'), 'get_free_credits')],
         [Markup.button.callback(t(lang, 'btnBuyMicro'), 'buy_pack_micro')],
