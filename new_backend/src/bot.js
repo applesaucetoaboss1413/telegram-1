@@ -191,7 +191,6 @@ async function sendDemoMenu(ctx) {
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
     const credits = getCredits({ telegramUserId: userId });
-    const totalVideos = getTotalVideosCreated();
     
     if (ctx.session) ctx.session.step = null;
 
@@ -199,8 +198,6 @@ async function sendDemoMenu(ctx) {
         const p = demoCfg.packs;
         const msg = `🎭 *AI Face Swap Bot*
 _Swap your face into any video in seconds!_
-
-📊 *${totalVideos.toLocaleString()}+ videos created*
 
 *💰 Credit Packs:*
 🎯 Try It – ${p.micro.points} pts (~1 video) – *$0.99*
@@ -215,22 +212,7 @@ _Swap your face into any video in seconds!_
 4️⃣ Get your AI face-swapped video!`;
         await ctx.replyWithMarkdown(msg);
 
-        // Automatically send template examples
-        const t5 = demoCfg.templates['5'];
-        const t10 = demoCfg.templates['10'];
-        const t15 = demoCfg.templates['15'];
-
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
-
-        const cap5 = `5s demo – Fastest preview. Costs ${c5.points} pts (~$${c5.usd}). Good for quick tests.`;
-        const cap10 = `10s demo – Standard length. Costs ${c10.points} pts (~$${c10.usd}). Best balance.`;
-        const cap15 = `15s demo – Maximum detail. Costs ${c15.points} pts (~$${c15.usd}). For pro results.`;
-
-        if (t5) { try { await bot.telegram.sendVideo(ctx.chat.id, t5, { caption: cap5 }); } catch (_) { } }
-        if (t10) { try { await bot.telegram.sendVideo(ctx.chat.id, t10, { caption: cap10 }); } catch (_) { } }
-        if (t15) { try { await bot.telegram.sendVideo(ctx.chat.id, t15, { caption: cap15 }); } catch (_) { } }
+        // NO TEMPLATE VIDEOS - REMOVED AS REQUESTED
     }
     
     const approx5s = Math.floor(user.points / demoCfg.demoPrices['5']);
