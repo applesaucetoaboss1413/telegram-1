@@ -106,7 +106,7 @@ async function postStartupVideos(bot) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [{ text: '🎨 OPEN FULL STUDIO APP →', web_app: { url: 'https://telegramalam.onrender.com/new_backend/miniapp/index.html' } }]
+                    [Markup.button.url('🎨 OPEN FULL STUDIO APP →', 'https://t.me/ImMoreThanJustSomeBot/studio')]
                 ]).reply_markup
             }
         );
