@@ -653,7 +653,7 @@ bot.command('studio', async (ctx) => {
 bot.action('open_studio', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const webAppUrl = 'https://telegramalam.onrender.com/miniapp/index.html';
+        const webAppUrl = 'https://t.me/ImMoreThanJustSomeBot/studio';
         await ctx.reply(
             `✨ *Ai Face-Swap Studio*\n\nTap the button to open:`,
             {
@@ -666,7 +666,7 @@ bot.action('open_studio', async (ctx) => {
         );
     } catch (e) {
         logger.error('open_studio action failed', { error: e.message });
-        await ctx.reply(`Open Studio: https://telegramalam.onrender.com/miniapp/index.html`);
+        await ctx.reply(`Open Studio: https://t.me/ImMoreThanJustSomeBot/studio`);
     }
 });
 
