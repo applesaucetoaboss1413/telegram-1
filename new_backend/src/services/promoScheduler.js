@@ -222,40 +222,70 @@ async function postPromoBatch(bot) {
 async function sendFlashyStudioButton(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     const Markup = require('telegraf').Markup;
+    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp';
     
     try {
         await bot.telegram.sendMessage(channelId,
-            `\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀\n` +
+            `🚀🚀🚀 *AI FACE-SWAP STUDIO* 🚀🚀🚀\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `       🎨 *OPEN THE FULL STUDIO* 🎨\n\n` +
-            `    👇👇👇 TAP HERE NOW 👇👇👇\n\n` +
+            `🎨 *YOUR COMPLETE AI TOOLKIT:*\n\n` +
+            `✅ *Face Swap Videos* - Put your face in ANY video\n` +
+            `✅ *Talking Avatars* - Make photos talk & sing\n` +
+            `✅ *Image Animation* - Bring still photos to life\n` +
+            `✅ *4K Enhancement* - Crystal clear upscaling\n` +
+            `✅ *Background Removal* - Clean pro edits\n\n` +
+            `💰 Use your credits across ALL tools!\n` +
+            `⚡ Fast processing, stunning results\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀\n` +
+            `     👇👇👇 *TAP TO LAUNCH* 👇👇👇\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.url('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', 'https://t.me/ImMoreThanJustSomeBot/studio')]
+                    [Markup.button.webApp('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', miniAppUrl)]
                 ]).reply_markup
             }
         );
         console.log('✅ FLASHY STUDIO BUTTON sent as the LAST message!');
     } catch (error) {
         console.error('Failed to send flashy studio button:', error.message);
+        // Fallback: try with URL button to bot DM
+        try {
+            await bot.telegram.sendMessage(channelId,
+                `🎨 *OPEN AI FACE-SWAP STUDIO*\n\n` +
+                `Tap below to access all 5 AI tools!`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Markup.inlineKeyboard([
+                        [Markup.button.url('🚀 LAUNCH STUDIO', 'https://t.me/ImMoreThanJustSomeBot?start=studio')]
+                    ]).reply_markup
+                }
+            );
+            console.log('✅ Fallback studio button sent');
+        } catch (e2) {
+            console.error('Fallback also failed:', e2.message);
+        }
     }
 }
 
-function startPromoScheduler(bot) {
-    // Run first promo batch with pricing FIRST
-    postPromoBatch(bot);
-
-    // Run startup intro videos
-    postStartupVideos(bot);
+async function startPromoScheduler(bot) {
+    // SEQUENTIAL execution - each waits for previous to complete
     
-    // Send the BIG FLASHY STUDIO BUTTON as the VERY LAST message (after 3 seconds delay)
-    setTimeout(() => sendFlashyStudioButton(bot), 3000);
+    // Step 1: Promo batch with images and pricing
+    await postPromoBatch(bot);
+    
+    // Step 2: Wait 2 seconds
+    await new Promise(r => setTimeout(r, 2000));
+    
+    // Step 3: Startup intro videos (5 blocks)
+    await postStartupVideos(bot);
+    
+    // Step 4: Wait 2 seconds
+    await new Promise(r => setTimeout(r, 2000));
+    
+    // Step 5: THE BIG FLASHY STUDIO BUTTON - ABSOLUTELY LAST
+    await sendFlashyStudioButton(bot);
 
     // Schedule subsequent promo batches every 6 hours
     setInterval(() => postPromoBatch(bot), 6 * 60 * 60 * 1000);
