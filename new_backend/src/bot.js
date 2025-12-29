@@ -250,7 +250,7 @@ bot.command('start', async (ctx) => {
     
     // Handle Mini App launch
     if (payload === 'studio' || payload === 'app') {
-        const webAppUrl = 'https://telegramalam.onrender.com/miniapp';
+        const webAppUrl = 'https://telegramalam.onrender.com/miniapp/index.html';
         try {
             await ctx.reply(
                 `✨ *Ai Face-Swap Studio*\n\nAccess all our AI services in one place!`,
