@@ -630,8 +630,21 @@ bot.command('studio', async (ctx) => {
 bot.action('open_studio', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const webAppUrl = process.env.MINIAPP_URL || `${process.env.RENDER_EXTERNAL_URL || 'https://telegramalam.onrender.com'}/miniapp`;
+        const webAppUrl = 'https://telegramalam.onrender.com/new_backend/miniapp/index.html';
         await ctx.reply(
+            `✨ *Ai Face-Swap Studio*\n\nTap the button to open:`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    keyboard: [[{ text: '🚀 Open Ai Face-Swap Studio', web_app: { url: webAppUrl } }]],
+                    resize_keyboard: true
+                }
+            }
+        );
+    } catch (e) {
+        logger.error('open_studio action failed', { error: e.message });
+    }
+});
             `✨ *AI Studio*\n\nTap the button below to open!`,
             {
                 parse_mode: 'Markdown',
