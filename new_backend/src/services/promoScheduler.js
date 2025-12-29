@@ -217,12 +217,44 @@ async function postPromoBatch(bot) {
     }
 }
 
-function startPromoScheduler(bot) {
-    // Run startup videos once
-    postStartupVideos(bot);
+// THE BIG FLASHY STUDIO BUTTON - Sent LAST after everything else
+async function sendFlashyStudioButton(bot) {
+    const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
+    const Markup = require('telegraf').Markup;
+    
+    try {
+        await bot.telegram.sendMessage(channelId,
+            `\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `       🎨 *OPEN THE FULL STUDIO* 🎨\n\n` +
+            `    👇👇👇 TAP HERE NOW 👇👇👇\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.url('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', 'https://t.me/ImMoreThanJustSomeBot/studio')]
+                ]).reply_markup
+            }
+        );
+        console.log('✅ FLASHY STUDIO BUTTON sent as the LAST message!');
+    } catch (error) {
+        console.error('Failed to send flashy studio button:', error.message);
+    }
+}
 
-    // Run first promo batch with pricing
+function startPromoScheduler(bot) {
+    // Run first promo batch with pricing FIRST
     postPromoBatch(bot);
+
+    // Run startup intro videos
+    postStartupVideos(bot);
+    
+    // Send the BIG FLASHY STUDIO BUTTON as the VERY LAST message (after 3 seconds delay)
+    setTimeout(() => sendFlashyStudioButton(bot), 3000);
 
     // Schedule subsequent promo batches every 6 hours
     setInterval(() => postPromoBatch(bot), 6 * 60 * 60 * 1000);
