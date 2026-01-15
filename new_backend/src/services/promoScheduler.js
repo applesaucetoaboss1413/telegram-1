@@ -13,7 +13,7 @@ function getPromoMessage() {
     const p = demoCfg.packs;
     // Fake the video counter with a larger, more impressive number
     const fakeVideoCount = 8400 + Math.floor(Math.random() * 600);
-    
+
     return `🎭 *AI Face Swap Bot*
 _Swap your face into any video in seconds!_
 
@@ -62,7 +62,7 @@ _Swap your face into any video in seconds!_
 function getBuyButtons() {
     const Markup = require('telegraf').Markup;
     const p = demoCfg.packs;
-    
+
     return Markup.inlineKeyboard([
         [Markup.button.url('🎁 Get 69 FREE Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')],
         [Markup.button.url('🎯 Buy $0.99 Pack', 'https://t.me/ImMoreThanJustSomeBot?start=buy_micro')],
@@ -76,9 +76,9 @@ async function postStartupVideos(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
         const Markup = require('telegraf').Markup;
-        
+
         // Message 1: Language Selection (BIG AND VISIBLE)
-        await bot.telegram.sendMessage(channelId, 
+        await bot.telegram.sendMessage(channelId,
             `🌍 *Choose Your Language / Elige tu Idioma*\n\n` +
             `Select your preferred language:\n` +
             `Selecciona tu idioma preferido:`,
@@ -108,7 +108,7 @@ async function postStartupVideos(bot) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.webApp('🎨 OPEN FULL STUDIO APP →', miniAppUrl)]
+                    [Markup.button.url('🎨 OPEN FULL STUDIO APP →', 'https://t.me/ImMoreThanJustSomeBot?start=studio')]
                 ]).reply_markup
             }
         );
@@ -172,7 +172,12 @@ async function postStartupVideos(bot) {
 
         console.log('Startup intro messages posted to channel (5 separate blocks).');
     } catch (error) {
-        console.error('Failed to post startup intro:', error.message);
+        console.error('Failed to post startup intro:', {
+            code: error.code,
+            message: error.message,
+            response: error.response,
+            stack: error.stack
+        });
     }
 }
 
@@ -180,7 +185,7 @@ async function postPromoBatch(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
         const validPromos = PROMO_IMAGES.filter(p => p && p.path);
-        
+
         // First send the promo images
         if (validPromos.length > 0) {
             const mediaGroup = validPromos.map((p, i) => ({
@@ -204,13 +209,13 @@ async function postPromoBatch(bot) {
                 }
             }
         }
-        
+
         // Then send the full pricing/info message with buy buttons
         await bot.telegram.sendMessage(channelId, getPromoMessage(), {
             parse_mode: 'Markdown',
             reply_markup: getBuyButtons().reply_markup
         });
-        
+
         console.log('Promo message with pricing posted to channel.');
     } catch (error) {
         console.error('Promo post failed:', error.message);
@@ -224,7 +229,7 @@ async function sendFlashyStudioButton(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     const Markup = require('telegraf').Markup;
     const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
-    
+
     try {
         await bot.telegram.sendMessage(channelId,
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -244,13 +249,18 @@ async function sendFlashyStudioButton(bot) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.webApp('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', miniAppUrl)]
+                    [Markup.button.url('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', 'https://t.me/ImMoreThanJustSomeBot?start=studio')]
                 ]).reply_markup
             }
         );
         console.log('✅ FLASHY STUDIO BUTTON sent as the LAST message!');
     } catch (error) {
-        console.error('Failed to send flashy studio button:', error.message);
+        console.error('Failed to send flashy studio button:', {
+            code: error.code,
+            message: error.message,
+            response: error.response,
+            stack: error.stack
+        });
         // Fallback: try with URL button to bot DM
         try {
             await bot.telegram.sendMessage(channelId,
@@ -272,28 +282,28 @@ async function sendFlashyStudioButton(bot) {
 
 async function startPromoScheduler(bot) {
     // SEQUENTIAL execution - each waits for previous to complete
-    
+
     // Step 1: Promo batch with images and pricing
     await postPromoBatch(bot);
-    
+
     // Step 2: Wait 2 seconds
     await new Promise(r => setTimeout(r, 2000));
-    
+
     // Step 3: Startup intro videos (5 blocks)
     await postStartupVideos(bot);
-    
+
     // Step 4: Wait 2 seconds
     await new Promise(r => setTimeout(r, 2000));
-    
+
     // Step 5: THE BIG FLASHY STUDIO BUTTON - ABSOLUTELY LAST
     await sendFlashyStudioButton(bot);
 
     // Schedule subsequent promo batches every 6 hours
     setInterval(() => postPromoBatch(bot), 6 * 60 * 60 * 1000);
-    
+
     // Start re-engagement system - runs every 2 hours
     setInterval(() => sendReEngagementMessages(bot), 2 * 60 * 60 * 1000);
-    
+
     // Run first re-engagement after 5 minutes
     setTimeout(() => sendReEngagementMessages(bot), 5 * 60 * 1000);
 }
@@ -316,38 +326,38 @@ async function sendReEngagementMessages(bot) {
     const { db } = require('../database');
     const { getCredits } = require('./creditsService');
     const Markup = require('telegraf').Markup;
-    
+
     const now = Date.now();
     const oneDay = 24 * 60 * 60 * 1000;
     const threeDays = 3 * oneDay;
     const sevenDays = 7 * oneDay;
-    
+
     console.log('Running re-engagement check...');
-    
+
     try {
         // Get all users
         const users = db.prepare('SELECT * FROM users').all();
         let sentCount = 0;
         const maxPerRun = 20; // Limit to avoid rate limits
-        
+
         for (const user of users) {
             if (sentCount >= maxPerRun) break;
-            
+
             const userId = user.id;
             const credits = getCredits({ telegramUserId: userId });
             const lastActivity = user.last_activity || user.created_at || 0;
             const timeSinceActivity = now - lastActivity;
             const hasPurchased = user.has_purchased === 1;
-            
+
             let message = null;
             let buttons = null;
-            
+
             // CASE 1: New user who never bought (1-3 days old)
             if (!hasPurchased && timeSinceActivity > oneDay && timeSinceActivity < threeDays) {
                 if (credits >= 60) {
                     message = `👋 *Hey! You have ${credits} credits waiting!*
 
-That's enough for ${Math.floor(credits/60)} face swap video${Math.floor(credits/60) > 1 ? 's' : ''}!
+That's enough for ${Math.floor(credits / 60)} face swap video${Math.floor(credits / 60) > 1 ? 's' : ''}!
 
 🎬 Don't let them go to waste - create something awesome today!`;
                     buttons = Markup.inlineKeyboard([
@@ -367,7 +377,7 @@ That's enough for a FREE face swap video!
                     ]);
                 }
             }
-            
+
             // CASE 2: User hasn't been active for 3-7 days
             else if (timeSinceActivity > threeDays && timeSinceActivity < sevenDays) {
                 message = `🔥 *We miss you!*
@@ -383,7 +393,7 @@ Come back and create more amazing face swap videos!
                     [Markup.button.url('💳 Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')]
                 ]);
             }
-            
+
             // CASE 3: User inactive for 7+ days - win-back offer
             else if (timeSinceActivity > sevenDays && !user.winback_sent) {
                 message = `🎉 *COMEBACK SPECIAL!*
@@ -399,7 +409,7 @@ Use code: *COMEBACK20*
                     [Markup.button.url('💰 Claim Your Bonus', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')],
                     [Markup.button.url('🎬 Create Free Video', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
                 ]);
-                
+
                 // Mark winback as sent (we'd need to add this column)
                 try {
                     db.prepare('UPDATE users SET winback_sent = 1 WHERE id = ?').run(userId);
@@ -407,7 +417,7 @@ Use code: *COMEBACK20*
                     // Column might not exist yet
                 }
             }
-            
+
             // CASE 4: User has credits but hasn't created a video recently
             else if (credits >= 60 && timeSinceActivity > oneDay) {
                 const videoCount = Math.floor(credits / 60);
@@ -420,7 +430,7 @@ That's enough for *${videoCount} video${videoCount > 1 ? 's' : ''}*!
                     [Markup.button.url('▶️ Create Video Now', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
                 ]);
             }
-            
+
             // Send the message if we have one
             if (message && buttons) {
                 try {
@@ -430,7 +440,7 @@ That's enough for *${videoCount} video${videoCount > 1 ? 's' : ''}*!
                     });
                     sentCount++;
                     console.log(`Re-engagement sent to user ${userId}`);
-                    
+
                     // Small delay to avoid rate limits
                     await new Promise(r => setTimeout(r, 500));
                 } catch (e) {
@@ -441,7 +451,7 @@ That's enough for *${videoCount} video${videoCount > 1 ? 's' : ''}*!
                 }
             }
         }
-        
+
         console.log(`Re-engagement complete. Sent ${sentCount} messages.`);
     } catch (error) {
         console.error('Re-engagement system error:', error.message);
@@ -452,7 +462,7 @@ That's enough for *${videoCount} video${videoCount > 1 ? 's' : ''}*!
 async function sendFlashSale(bot, discountPercent = 30, durationHours = 2) {
     const { db } = require('../database');
     const Markup = require('telegraf').Markup;
-    
+
     const message = `⚡ *FLASH SALE - ${discountPercent}% OFF!* ⚡
 
 🔥 For the next *${durationHours} hours only*:
@@ -469,7 +479,7 @@ All credit packs are *${discountPercent}% OFF!*
         [Markup.button.url('🔥 Get Sale Price NOW', 'https://t.me/ImMoreThanJustSomeBot?start=buy_points')],
         [Markup.button.url('🎬 Create Video First', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
     ]);
-    
+
     try {
         // Send to promo channel
         const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
@@ -477,7 +487,7 @@ All credit packs are *${discountPercent}% OFF!*
             parse_mode: 'Markdown',
             reply_markup: buttons.reply_markup
         });
-        
+
         // Send to all users who have purchased before (high value)
         const buyers = db.prepare('SELECT DISTINCT telegram_user_id FROM purchases').all();
         for (const buyer of buyers) {
@@ -491,7 +501,7 @@ All credit packs are *${discountPercent}% OFF!*
                 // Ignore blocked users
             }
         }
-        
+
         console.log(`Flash sale sent to ${buyers.length} previous buyers`);
     } catch (error) {
         console.error('Flash sale send error:', error.message);
