@@ -359,28 +359,36 @@ const {
     startBackgroundRemoval, checkBackgroundRemovalStatus
 } = require('./services/magicService');
 
-// Supported currencies
-const VALID_CURRENCIES = ['USD', 'EUR', 'GBP', 'MXN', 'CAD'];
+// Supported currencies (primary currencies for Mexican Stripe account)
+const SUPPORTED_CURRENCIES = ['usd', 'mxn'];
+const DEFAULT_CURRENCY = 'usd';
 
-// Middleware to validate currency
+/**
+ * Normalizes and validates currency for Stripe Checkout
+ * Uses USD as fallback for unsupported currencies
+ */
+function normalizeCurrency(currency) {
+    const c = (currency || DEFAULT_CURRENCY).toLowerCase();
+    return SUPPORTED_CURRENCIES.includes(c) ? c : DEFAULT_CURRENCY;
+}
+
+// Updated validation middleware
 function validateCurrency(req, res, next) {
-    const currency = req.body.currency || req.query.currency;
-
-    if (!VALID_CURRENCIES.includes(currency)) {
-        logger.warn(`Invalid currency attempt: ${currency}`);
-        return res.status(400).json({ error: 'Unsupported currency' });
-    }
-
+    req.body.currency = normalizeCurrency(req.body.currency);
     next();
 }
 
-// Enhanced transaction logger
-function logTransaction(userId, amount, currency, type) {
-    logger.info(`Transaction: ${type} | User: ${userId} | Amount: ${amount}${currency}`);
-    db.prepare(
-        'INSERT INTO transactions (user_id, amount, currency, type) VALUES (?, ?, ?, ?)'
-    ).run(userId, amount, currency, type);
-}
+// Middleware to validate currency
+// function validateCurrency(req, res, next) {
+//     const currency = req.body.currency || req.query.currency;
+
+//     if (!VALID_CURRENCIES.includes(currency)) {
+//         logger.warn(`Invalid currency attempt: ${currency}`);
+//         return res.status(400).json({ error: 'Unsupported currency' });
+//     }
+
+//     next();
+// }
 
 // Serve Mini App static files
 app.use('/miniapp', express.static(path.join(__dirname, '../miniapp')));
