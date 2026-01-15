@@ -144,6 +144,179 @@ queueService.on('job_failed', async ({ job, error }) => {
     }
 });
 
+bot.command('upload_template', async (ctx) => {
+    const userId = String(ctx.from.id);
+    ctx.session = {
+        mode: 'template_upload',
+        step: 'awaiting_video',
+        userId: userId
+    };
+
+    await ctx.replyWithMarkdown(
+        `📹 *Template Upload*\n\nPlease send your **template video** (MP4 format, max 15MB, up to 30 seconds):`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('❌ Cancel', 'cancel_template_upload')],
+            [Markup.button.callback('ℹ️ Help', 'upload_help')]
+        ])
+    );
+});
+
+bot.action('cancel_template_upload', async (ctx) => {
+    ctx.session = null;
+    await ctx.answerCbQuery('Template upload cancelled');
+    await ctx.editMessageText('Template upload cancelled');
+});
+
+bot.command('upload_help', async (ctx) => {
+    await ctx.replyWithMarkdown(
+        `📝 *Template Upload Guide*\n\n` +
+        `To create face-swap videos, you need to upload:\n` +
+        `1. A *video template* (MP4 format, max 15MB, 5-30 seconds)\n` +
+        `2. A *photo template* (JPEG/PNG, max 10MB, clear front-facing face)\n\n` +
+        `*Requirements:*\n` +
+        `- Video must show a consistent face throughout\n` +
+        `- Photo must be well-lit and high quality\n` +
+        `- Both files must meet size requirements\n\n` +
+        `Start with /upload_template or tap the button below:`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('📤 Start Template Upload', 'upload_template')]
+        ])
+    );
+});
+
+bot.command('start', async (ctx) => {
+    const userId = String(ctx.from.id);
+
+    // Check if user has templates
+    const hasTemplates = db.prepare(
+        'SELECT 1 FROM user_templates WHERE user_id = ? LIMIT 1'
+    ).get(userId);
+
+    if (!hasTemplates) {
+        await ctx.replyWithMarkdown(
+            '👋 *Welcome!*\n\n' +
+            'To use this bot, you *must* upload your own templates:\n\n' +
+            '1. Video template (MP4, max 15MB)\n' +
+            '2. Photo template (JPEG/PNG, max 10MB)\n\n' +
+            'Start with /upload_template or tap below:',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('📤 Upload Templates', 'upload_template')],
+                [Markup.button.callback('ℹ️ Learn More', 'template_help')]
+            ])
+        );
+        return;
+    }
+
+    // User has templates - show normal menu
+    await ctx.replyWithMarkdown(
+        '🎭 *Face Swap Bot*\n\n' +
+        'You have templates uploaded!\n\n' +
+        'Options:',
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🎬 Create Video', 'demo_new')],
+            [Markup.button.callback('🔄 Update Templates', 'upload_template')],
+            [Markup.button.callback('📂 View Templates', 'view_templates')]
+        ])
+    );
+});
+
+bot.action('template_help', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.replyWithMarkdown(
+        '📝 *Template Requirements*\n\n' +
+        '*Video Template*:\n' +
+        '- MP4 format\n' +
+        '- Max 15MB\n' +
+        '- 5-30 seconds\n' +
+        '- Clear, consistent face throughout\n\n' +
+        '*Photo Template*:\n' +
+        '- JPEG or PNG\n' +
+        '- Max 10MB\n' +
+        '- Well-lit, front-facing face\n\n' +
+        'Start with /upload_template'
+    );
+});
+
+bot.on('video', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_video') return;
+
+    try {
+        const video = ctx.message.video;
+        const fileId = video.file_id;
+        const fileSize = video.file_size;
+
+        // Validate video
+        if (fileSize > 15 * 1024 * 1024) {
+            return ctx.reply('Video too large. Maximum size is 15MB.');
+        }
+        if (video.mime_type !== 'video/mp4') {
+            return ctx.reply('Only MP4 videos are supported as templates.');
+        }
+
+        // Store video URL in session
+        const { url } = await getFileLink(ctx, fileId);
+        ctx.session.templateVideo = {
+            url,
+            size: fileSize,
+            duration: video.duration
+        };
+        ctx.session.step = 'awaiting_photo';
+
+        await ctx.replyWithMarkdown(
+            '✅ Video template received! Now please send your **template photo** (JPEG/PNG, max 10MB, clear front-facing face):',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('❌ Cancel', 'cancel_template_upload')]
+            ])
+        );
+    } catch (e) {
+        ctx.reply(`❌ Error processing video: ${e.message}`);
+        ctx.session = null;
+    }
+});
+
+bot.on('photo', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_photo') return;
+
+    try {
+        const photo = ctx.message.photo[ctx.message.photo.length - 1];
+        const fileId = photo.file_id;
+        const fileSize = photo.file_size;
+
+        // Validate photo
+        if (fileSize > 10 * 1024 * 1024) {
+            return ctx.reply('Photo too large. Maximum size is 10MB.');
+        }
+
+        // Get photo URL
+        const { url } = await getFileLink(ctx, fileId);
+
+        // Store template in database
+        db.prepare(
+            'INSERT OR REPLACE INTO user_templates (user_id, template_video_url, template_photo_url, video_size, photo_size, video_duration, last_used) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))'
+        ).run(
+            ctx.session.userId,
+            ctx.session.templateVideo.url,
+            url,
+            ctx.session.templateVideo.size,
+            fileSize,
+            ctx.session.templateVideo.duration
+        );
+
+        // Clear session
+        ctx.session = null;
+
+        await ctx.replyWithMarkdown(
+            '✅ Template upload complete!\n\nYou can now use face-swap commands with your uploaded template.',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🎬 Create Video', 'demo_new')]
+            ])
+        );
+    } catch (e) {
+        ctx.reply(`❌ Error processing photo: ${e.message}`);
+        ctx.session = null;
+    }
+});
+
 bot.on('photo', async (ctx) => {
     if (!ctx.session || !ctx.session.step) return;
     const userId = String(ctx.from.id);
@@ -332,78 +505,17 @@ _Swap your face into any video in seconds!_
     );
 }
 
-bot.command('start', async (ctx) => {
-    const payload = ctx.startPayload;
-    const userId = String(ctx.from.id);
-
-    // Handle Mini App launch
-    if (payload === 'studio' || payload === 'app') {
-        const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
-        try {
-            await ctx.reply(
-                `✨ *Ai Face-Swap Studio*\n\nAccess all our AI services in one place!`,
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        keyboard: [[{ text: '🚀 Open Ai Face-Swap Studio', web_app: { url: webAppUrl } }]],
-                        resize_keyboard: true,
-                        one_time_keyboard: true
-                    }
-                }
-            );
-        } catch (e) {
-            await ctx.reply(`✨ *Ai Face-Swap Studio*\n\nOpen here: ${webAppUrl}`, { parse_mode: 'Markdown' });
-        }
-        return;
-    }
-
-    // Handle deep links for purchases
-    if (payload === 'buy_micro') {
-        await startCheckout(ctx, demoCfg.packs.micro);
-        return;
-    }
-    if (payload === 'buy_starter') {
-        await startCheckout(ctx, demoCfg.packs.starter);
-        return;
-    }
-    if (payload === 'buy_plus') {
-        await startCheckout(ctx, demoCfg.packs.plus);
-        return;
-    }
-    if (payload === 'buy_pro') {
-        await startCheckout(ctx, demoCfg.packs.pro);
-        return;
-    }
-
-    if (payload === 'get_69_credits' || payload === 'get_credits') {
-        const credits = getCredits({ telegramUserId: userId });
-        const userCreditsRecord = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(userId);
-
-        if (userCreditsRecord && userCreditsRecord.stripe_customer_id) {
-            const granted = grantWelcomeCredits({
-                telegramUserId: userId,
-                stripeCustomerId: userCreditsRecord.stripe_customer_id
-            });
-
-            if (granted) {
-                await ctx.replyWithMarkdown(`🎉 *Success!* You've been granted 69 welcome credits (enough for your first video).`);
-            } else if (credits > 0) {
-                await ctx.replyWithMarkdown(`💰 You already have ${credits} credits. Start creating your first video!`);
-            } else {
-                await ctx.replyWithMarkdown(`👋 Welcome back! You've already used your welcome credits.`);
-            }
-        } else {
-            await startWelcomeCreditsCheckout(ctx);
-            return;
-        }
-    }
-
-    if (payload === 'buy_points') {
-        return sendBuyPointsMenu(ctx);
-    }
-
-    // Show main menu with immediate buy options
-    await sendDemoMenuWithBuyButtons(ctx);
+bot.command('help', async (ctx) => {
+    await ctx.replyWithMarkdown(
+        '🆘 *Help Center*\n\n' +
+        '*How to use:*\n' +
+        '1. /upload_template - Add your video and photo\n' +
+        '2. Send /create to make videos\n\n' +
+        '*Requirements:*\n' +
+        '- Your own high-quality templates\n' +
+        '- Video: MP4, max 15MB\n' +
+        '- Photo: JPEG/PNG, max 10MB'
+    );
 });
 
 // New function that shows buy buttons immediately
@@ -536,56 +648,21 @@ bot.command('daily', async (ctx) => {
     }
 });
 
-// Template upload command handler
-bot.command('upload_template', async (ctx) => {
+bot.command('image_to_video', async (ctx) => {
     const userId = String(ctx.from.id);
+
+    // Check if user has templates
+    if (!checkUserHasTemplates(userId)) {
+        return ctx.replyWithMarkdown(getTemplateMissingMessage().text, getTemplateMissingMessage().markup);
+    }
+
     ctx.session = {
-        mode: 'template_upload',
-        step: 'awaiting_video',
-        userId: userId
+        mode: 'image_to_video',
+        step: 'awaiting_image',
+        base_url: ''
     };
 
-    await ctx.replyWithMarkdown(
-        `📹 *Template Upload*\n\nPlease send your **template video** (MP4 format, max 15MB, up to 30 seconds):`,
-        Markup.inlineKeyboard([
-            [Markup.button.callback('❌ Cancel', 'cancel_template_upload')],
-            [Markup.button.callback('ℹ️ Help', 'upload_help')]
-        ])
-    );
-});
-
-bot.action('cancel_template_upload', async (ctx) => {
-    ctx.session = null;
-    await ctx.answerCbQuery('Template upload cancelled');
-    await ctx.editMessageText('Template upload cancelled');
-});
-
-bot.command('upload_help', async (ctx) => {
-    await ctx.replyWithMarkdown(
-        `📝 *Template Upload Guide*\n\n` +
-        `To create face-swap videos, you need to upload:\n` +
-        `1. A *video template* (MP4 format, max 15MB, 5-30 seconds)\n` +
-        `2. A *photo template* (JPEG/PNG, max 10MB, clear front-facing face)\n\n` +
-        `*Requirements:*\n` +
-        `- Video must show a consistent face throughout\n` +
-        `- Photo must be well-lit and high quality\n` +
-        `- Both files must meet size requirements\n\n` +
-        `Start with /upload_template or tap the button below:`,
-        Markup.inlineKeyboard([
-            [Markup.button.callback('📤 Start Template Upload', 'upload_template')]
-        ])
-    );
-});
-
-bot.command('promo', async (ctx) => {
-    try {
-        const { postPromoBatch } = require('./services/promoScheduler');
-        await postPromoBatch(bot);
-        await ctx.reply('✅ Batch promo post manually triggered.');
-    } catch (e) {
-        logger.error('Manual promo trigger failed', { error: e.message });
-        await ctx.reply(`❌ Error: ${e.message}`);
-    }
+    await ctx.reply('🖼️ Please send the image you want to animate:');
 });
 
 // ADMIN COMMAND: Trigger flash sale
@@ -805,20 +882,25 @@ bot.action('demo_new', async (ctx) => {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
 
-        if (!checkUserHasTemplates(userId)) {
-            const { text, markup } = getTemplateMissingMessage();
-            return ctx.replyWithMarkdown(text, markup);
-        }
-
+        // Check if user has templates
         const template = db.prepare(
-            'SELECT template_video_url FROM user_templates WHERE user_id = ? ORDER BY last_used DESC LIMIT 1'
+            'SELECT template_video_url, template_photo_url FROM user_templates WHERE user_id = ? ORDER BY last_used DESC LIMIT 1'
         ).get(userId);
+
+        if (!template) {
+            return ctx.replyWithMarkdown(
+                '❌ You need to upload templates first!\n\nUse /upload_template to upload your video and photo templates.',
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('📤 Upload Templates', 'upload_template')]
+                ])
+            );
+        }
 
         ctx.session = {
             mode: 'demo',
             step: 'awaiting_face',
             base_url: template.template_video_url,
-            price: demoCfg.demoPrices['5']
+            price: 60 // Fixed price for face-swap operation
         };
 
         await ctx.reply('📸 Please send a clear photo of the face you want to use:');
@@ -868,23 +950,6 @@ bot.command('delete_template', async (ctx) => {
     db.prepare('DELETE FROM user_templates WHERE id = ?').run(templateId);
 
     await ctx.reply(`✅ Template #${templateNumber} deleted successfully.`);
-});
-
-bot.command('image_to_video', async (ctx) => {
-    const userId = String(ctx.from.id);
-
-    // Check if user has templates
-    if (!checkUserHasTemplates(userId)) {
-        return ctx.replyWithMarkdown(getTemplateMissingMessage().text, getTemplateMissingMessage().markup);
-    }
-
-    ctx.session = {
-        mode: 'image_to_video',
-        step: 'awaiting_image',
-        base_url: ''
-    };
-
-    await ctx.reply('🖼️ Please send the image you want to animate:');
 });
 
 // Graceful Stop

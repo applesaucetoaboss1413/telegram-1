@@ -18,6 +18,22 @@ if (!fs.existsSync(dbPath)) {
 const db = new Database(path.join(dbPath, 'faceswap.db'));
 
 // Initialize Schema - including new monetization tables
+const createUserTemplatesTable = `
+CREATE TABLE IF NOT EXISTS user_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    template_video_url TEXT NOT NULL,
+    template_photo_url TEXT NOT NULL,
+    video_size INTEGER NOT NULL,
+    photo_size INTEGER NOT NULL,
+    video_duration INTEGER,
+    photo_width INTEGER,
+    photo_height INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+)`;
+
 db.exec(`
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -97,21 +113,7 @@ db.exec(`
         created_at INTEGER
     );
 
-    -- NEW: User templates for storing user-provided templates
-    CREATE TABLE IF NOT EXISTS user_templates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        template_video_url TEXT NOT NULL,
-        template_photo_url TEXT NOT NULL,
-        video_size INTEGER NOT NULL,
-        photo_size INTEGER NOT NULL,
-        video_duration INTEGER,
-        photo_width INTEGER,
-        photo_height INTEGER,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_used TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    );
+    ${createUserTemplatesTable}
 
     -- Create indexes for performance
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
