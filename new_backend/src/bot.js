@@ -186,6 +186,37 @@ bot.command('upload_help', async (ctx) => {
 
 bot.command('start', async (ctx) => {
     const userId = String(ctx.from.id);
+    const payload = ctx.message?.text?.split(' ')[1]; // Get deep link payload
+
+    // Handle deep link payloads
+    if (payload) {
+        logger.info('Deep link triggered', { userId, payload });
+        switch (payload) {
+            case 'studio':
+                return ctx.replyWithMarkdown(
+                    '✨ *Opening Face-Swap Studio*\n\nTap below to launch:',
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('🚀 Open Studio', 'open_studio')]
+                    ])
+                );
+            case 'get_credits':
+                return ctx.replyWithMarkdown(
+                    '🎁 *Free Credits*\n\nGet started with free credits:',
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('🎁 Claim Free Credits', 'daily')]
+                    ])
+                );
+            case 'buy_points':
+                return sendBuyPointsMenu(ctx);
+            case 'create':
+                return ctx.replyWithMarkdown(
+                    '🎬 *Create Video*\n\nStart creating now:',
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('🎬 Create Video', 'demo_new')]
+                    ])
+                );
+        }
+    }
 
     // Check if user has templates
     const hasTemplates = db.prepare(
