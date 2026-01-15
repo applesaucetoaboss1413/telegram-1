@@ -426,6 +426,31 @@ bot.on('video', async (ctx) => {
     }
 });
 
+bot.on('video', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'demo' || ctx.session.step !== 'awaiting_base_video') return;
+
+    try {
+        const video = ctx.message.video;
+        const fileId = video.file_id;
+        const fileSize = video.file_size;
+
+        // Validate video duration matches selected duration
+        if (video.duration > ctx.session.duration) {
+            return ctx.reply(`❌ Video too long. Maximum duration is ${ctx.session.duration} seconds.`);
+        }
+
+        // Get video URL
+        const { url } = await getFileLink(ctx, fileId);
+        ctx.session.base_url = url;
+        ctx.session.step = 'awaiting_face';
+
+        await ctx.reply('✅ Video received. Now please send a clear photo of the face you want to use:');
+    } catch (e) {
+        ctx.reply(`❌ Error processing video: ${e.message}`);
+        ctx.session = null;
+    }
+});
+
 // Template check helper function
 const checkUserHasTemplates = (userId) => {
     const template = db.prepare(
@@ -653,7 +678,12 @@ bot.command('image_to_video', async (ctx) => {
 
     // Check if user has templates
     if (!checkUserHasTemplates(userId)) {
-        return ctx.replyWithMarkdown(getTemplateMissingMessage().text, getTemplateMissingMessage().markup);
+        return ctx.replyWithMarkdown(
+            '❌ You need to upload templates first!\n\nUse /upload_template to upload your video and photo templates.',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('📤 Upload Templates', 'upload_template')]
+            ])
+        );
     }
 
     ctx.session = {
@@ -898,14 +928,43 @@ bot.action('demo_new', async (ctx) => {
 
         ctx.session = {
             mode: 'demo',
-            step: 'awaiting_face',
-            base_url: template.template_video_url,
-            price: 60 // Fixed price for face-swap operation
+            step: 'awaiting_base_video',
+            duration: 5,
+            price: 60 // Fixed price for 5s video
         };
-
-        await ctx.reply('📸 Please send a clear photo of the face you want to use:');
+        await ctx.reply(`📹 Send your own 5-second video.\n\n⚠️ Make sure it's already trimmed to 5 seconds!`);
     } catch (e) {
         logger.error('demo_new action failed', { error: e.message, userId: ctx.from.id });
+    }
+});
+
+bot.action('demo_len_10', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        ctx.session = {
+            mode: 'demo',
+            step: 'awaiting_base_video',
+            duration: 10,
+            price: 90 // Fixed price for 10s video
+        };
+        await ctx.reply(`📹 Send your own 10-second video.\n\n⚠️ Make sure it's already trimmed to 10 seconds!`);
+    } catch (e) {
+        logger.error('demo_len_10 action failed', { error: e.message });
+    }
+});
+
+bot.action('demo_len_15', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        ctx.session = {
+            mode: 'demo',
+            step: 'awaiting_base_video',
+            duration: 15,
+            price: 125 // Fixed price for 15s video
+        };
+        await ctx.reply(`📹 Send your own 15-second video.\n\n⚠️ Make sure it's already trimmed to 15 seconds!`);
+    } catch (e) {
+        logger.error('demo_len_15 action failed', { error: e.message });
     }
 });
 
