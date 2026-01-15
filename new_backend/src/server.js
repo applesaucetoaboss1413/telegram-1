@@ -8,41 +8,38 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const HealthMonitor = require('./health');
 const winston = require('winston');
 const https = require('https');
+const axios = require('axios'); // Add axios library
 
 // MXN exchange rate helper (same as in bot.js)
 const SAFE_RATES = { MXN: 18.0 };
+
+// Add dynamic exchange rate fetching
+const EXCHANGE_RATE_CACHE = {};
+const EXCHANGE_RATE_TTL = 3600000; // 1 hour cache
+
+async function fetchExchangeRates() {
+    try {
+        const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD');
+        Object.assign(EXCHANGE_RATE_CACHE, response.data.rates);
+        EXCHANGE_RATE_CACHE.lastUpdated = Date.now();
+        return EXCHANGE_RATE_CACHE;
+    } catch (error) {
+        logger.error('Failed to fetch exchange rates:', error);
+        return EXCHANGE_RATE_CACHE;
+    }
+}
+
+async function getExchangeRates() {
+    if (!EXCHANGE_RATE_CACHE.lastUpdated ||
+        Date.now() - EXCHANGE_RATE_CACHE.lastUpdated > EXCHANGE_RATE_TTL) {
+        await fetchExchangeRates();
+    }
+    return EXCHANGE_RATE_CACHE;
+}
+
 async function fetchUsdRate(toCurrency) {
-    return new Promise((resolve) => {
-        try {
-            const symbol = String(toCurrency || '').toUpperCase();
-            if (symbol === 'USD') return resolve(1);
-            
-            const req = https.request({ 
-                hostname: 'api.exchangerate-api.com', 
-                path: '/v4/latest/USD', 
-                method: 'GET',
-                timeout: 4000 
-            }, res => {
-                let buf = ''; 
-                res.on('data', c => buf += c); 
-                res.on('end', () => {
-                    try { 
-                        const j = JSON.parse(buf); 
-                        const rate = j && j.rates && j.rates[symbol]; 
-                        if (typeof rate === 'number') resolve(rate);
-                        else resolve(SAFE_RATES[symbol] || 1);
-                    } catch (_) { 
-                        resolve(SAFE_RATES[symbol] || 1); 
-                    }
-                });
-            });
-            req.on('error', () => resolve(SAFE_RATES[symbol] || 1));
-            req.on('timeout', () => { req.destroy(); resolve(SAFE_RATES[symbol] || 1); });
-            req.end();
-        } catch (_) { 
-            resolve(SAFE_RATES[toCurrency.toUpperCase()] || 1); 
-        }
-    });
+    const exchangeRates = await getExchangeRates();
+    return exchangeRates[toCurrency.toUpperCase()] || SAFE_RATES[toCurrency.toUpperCase()] || 1;
 }
 
 // Configure logging
@@ -67,18 +64,18 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     const sig = req.headers['stripe-signature'];
     let event;
 
-    logger.info('Webhook received', { 
+    logger.info('Webhook received', {
         signature: sig ? 'present' : 'missing',
-        bodySize: req.body.length 
+        bodySize: req.body.length
     });
 
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
         logger.info('Webhook signature verified', { eventType: event.type });
     } catch (err) {
-        logger.error('Webhook signature verification failed', { 
+        logger.error('Webhook signature verification failed', {
             error: err.message,
-            signature: sig 
+            signature: sig
         });
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
@@ -93,7 +90,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
         const packType = session.metadata && session.metadata.pack_type;
         const amount = session.amount_total || 0;
 
-        logger.info('Processing checkout session completed', { 
+        logger.info('Processing checkout session completed', {
             userId,
             sessionId: session.id,
             amount,
@@ -106,11 +103,11 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
         if (userId) {
             // Track the purchase event
-            trackEvent(userId, 'checkout_completed', { 
-                amount, 
-                packType, 
+            trackEvent(userId, 'checkout_completed', {
+                amount,
+                packType,
                 mode: session.mode,
-                isWelcomeCredits 
+                isWelcomeCredits
             });
 
             // Handle 69 welcome credits flow (setup mode - no charge)
@@ -118,14 +115,14 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
                 try {
                     const stripeCustomerId = session.customer || session.setup_intent || `setup_${session.id}`;
                     const granted = grantWelcomeCredits({ telegramUserId: userId, stripeCustomerId });
-                    
+
                     if (granted) {
                         logger.info('Welcome credits granted via setup mode', { userId, credits: creditsFromMetadata });
                         trackEvent(userId, 'welcome_credits_granted', { credits: creditsFromMetadata });
-                        
+
                         try {
-                            await bot.telegram.sendMessage(userId, 
-`🎉 *Welcome Bonus Activated!*
+                            await bot.telegram.sendMessage(userId,
+                                `🎉 *Welcome Bonus Activated!*
 
 ✅ ${creditsFromMetadata} FREE credits added!
 ✅ Enough for your first video + extras
@@ -151,7 +148,7 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
 
             // Handle paid checkout (points/credits purchase)
             let pointsToAdd = pointsFromMetadata;
-            
+
             if (!pointsToAdd) {
                 // Fallback logic if metadata is missing
                 if (amount >= 1499) pointsToAdd = demoCfg.packs.pro.points;
@@ -160,27 +157,27 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
                 else if (amount >= 99) pointsToAdd = demoCfg.packs.micro.points;
                 else pointsToAdd = 80; // Minimum fallback
             }
-            
+
             try {
                 // Add points to user account
                 updateUserPoints(userId, pointsToAdd);
                 addTransaction(userId, pointsToAdd, 'purchase_stripe');
-                
+
                 // Also grant as credits for the new system
                 grantCredits({ telegramUserId: userId, amount: pointsToAdd });
-                
+
                 // Record the purchase
-                recordPurchase({ 
-                    telegramUserId: userId, 
-                    amount, 
+                recordPurchase({
+                    telegramUserId: userId,
+                    amount,
                     packType: packType || 'unknown',
-                    stripeSessionId: session.id 
+                    stripeSessionId: session.id
                 });
-                
-                trackEvent(userId, 'purchase_completed', { 
-                    amount, 
-                    points: pointsToAdd, 
-                    packType 
+
+                trackEvent(userId, 'purchase_completed', {
+                    amount,
+                    points: pointsToAdd,
+                    packType
                 });
 
                 // Grant welcome credits for paid purchases too (if first time)
@@ -201,18 +198,18 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
                 if (user && !user.has_purchased && user.referred_by) {
                     const referrerId = user.referred_by;
                     const rewardPoints = demoCfg.referralReward || 60;
-                    
+
                     updateUserPoints(referrerId, rewardPoints);
                     addTransaction(referrerId, rewardPoints, 'referral_reward');
                     grantCredits({ telegramUserId: referrerId, amount: rewardPoints });
                     markPurchased(userId);
-                    
+
                     logger.info(`referral reward – referrer=${referrerId} got ${rewardPoints} pts`);
                     trackEvent(referrerId, 'referral_reward_received', { amount: rewardPoints, referredUser: userId });
-                    
+
                     try {
-                        await bot.telegram.sendMessage(referrerId, 
-`🎉 *Referral Bonus!*
+                        await bot.telegram.sendMessage(referrerId,
+                            `🎉 *Referral Bonus!*
 
 Your friend just made their first purchase!
 You earned *${rewardPoints} credits* (enough for a free video!)
@@ -272,7 +269,7 @@ app.get('/health', async (req, res) => {
     try {
         const healthStatus = await healthMonitor.runAllChecks();
         const statusCode = healthStatus.overall === 'healthy' ? 200 : 503;
-        
+
         logger.info('Health check performed', { status: healthStatus.overall });
         res.status(statusCode).json(healthStatus);
     } catch (error) {
@@ -305,12 +302,12 @@ app.get('/stats', (req, res) => {
     try {
         const { db } = require('./database');
         const { getTotalVideosCreated, getTotalPayingUsers } = require('./services/creditsService');
-        
+
         const totalVideos = getTotalVideosCreated();
         const payingUsers = getTotalPayingUsers();
         const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get()?.count || 0;
         const totalRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases').get()?.total || 0;
-        
+
         res.json({
             totalVideos,
             payingUsers,
@@ -327,21 +324,21 @@ app.get('/stats', (req, res) => {
 // Admin Endpoint
 app.post('/admin/grant', (req, res) => {
     const { secret, userId, amount } = req.body;
-    
+
     logger.info('Admin grant request received', { userId, amount, hasSecret: !!secret });
-    
+
     if (secret !== process.env.ADMIN_SECRET) {
         logger.warn('Invalid admin secret provided', { userId });
         return res.status(403).json({ error: 'Forbidden' });
     }
-    
+
     try {
         updateUserPoints(userId, amount);
         addTransaction(userId, amount, 'admin_grant');
         grantCredits({ telegramUserId: userId, amount });
-        
+
         logger.info('Admin grant successful', { userId, amount });
-        
+
         res.json({ success: true });
     } catch (error) {
         logger.error('Admin grant failed', { userId, amount, error: error.message });
@@ -362,11 +359,34 @@ const {
     startBackgroundRemoval, checkBackgroundRemovalStatus
 } = require('./services/magicService');
 
+// Supported currencies
+const VALID_CURRENCIES = ['USD', 'EUR', 'GBP', 'MXN', 'CAD'];
+
+// Middleware to validate currency
+function validateCurrency(req, res, next) {
+    const currency = req.body.currency || req.query.currency;
+
+    if (!VALID_CURRENCIES.includes(currency)) {
+        logger.warn(`Invalid currency attempt: ${currency}`);
+        return res.status(400).json({ error: 'Unsupported currency' });
+    }
+
+    next();
+}
+
+// Enhanced transaction logger
+function logTransaction(userId, amount, currency, type) {
+    logger.info(`Transaction: ${type} | User: ${userId} | Amount: ${amount}${currency}`);
+    db.prepare(
+        'INSERT INTO transactions (user_id, amount, currency, type) VALUES (?, ?, ?, ?)'
+    ).run(userId, amount, currency, type);
+}
+
 // Serve Mini App static files
 app.use('/miniapp', express.static(path.join(__dirname, '../miniapp')));
 
 // Multer for file uploads
-const upload = multer({ 
+const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
@@ -384,7 +404,7 @@ const SERVICE_COSTS = {
 app.get('/api/miniapp/credits', (req, res) => {
     const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    
+
     try {
         const credits = getCredits({ telegramUserId: userId });
         res.json({ credits });
@@ -398,7 +418,7 @@ app.get('/api/miniapp/credits', (req, res) => {
 app.get('/api/miniapp/creations', (req, res) => {
     const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    
+
     try {
         const { db } = require('./database');
         const creations = db.prepare(`
@@ -419,10 +439,10 @@ app.post('/api/miniapp/upload', upload.single('file'), async (req, res) => {
     try {
         const file = req.file;
         if (!file) return res.status(400).json({ error: 'No file uploaded' });
-        
-        const resourceType = file.mimetype.startsWith('video/') ? 'video' : 
-                            file.mimetype.startsWith('audio/') ? 'video' : 'image';
-        
+
+        const resourceType = file.mimetype.startsWith('video/') ? 'video' :
+            file.mimetype.startsWith('audio/') ? 'video' : 'image';
+
         const result = await uploadFromBuffer(file.buffer, resourceType);
         res.json({ url: result });
     } catch (e) {
@@ -432,24 +452,24 @@ app.post('/api/miniapp/upload', upload.single('file'), async (req, res) => {
 });
 
 // Mini App: Process service
-app.post('/api/miniapp/process', async (req, res) => {
+app.post('/api/miniapp/process', validateCurrency, async (req, res) => {
     const { userId, service, files, inputs } = req.body;
-    
+
     if (!userId || !service) {
         return res.status(400).json({ error: 'userId and service required' });
     }
-    
+
     try {
         // Check credits
         const credits = getCredits({ telegramUserId: userId });
         const cost = SERVICE_COSTS[service]?.base || 50;
-        
+
         if (credits < cost) {
             return res.status(402).json({ error: 'Insufficient credits', required: cost, available: credits });
         }
-        
+
         let taskId;
-        
+
         switch (service) {
             case 'faceswap':
                 if (!files.face || !files.video) {
@@ -457,28 +477,28 @@ app.post('/api/miniapp/process', async (req, res) => {
                 }
                 taskId = await startFaceSwap(files.face, files.video);
                 break;
-                
+
             case 'avatar':
                 if (!files.photo) {
                     return res.status(400).json({ error: 'Photo required' });
                 }
                 taskId = await startTalkingAvatar(files.photo, files.audio, inputs?.text);
                 break;
-                
+
             case 'img2vid':
                 if (!files.image) {
                     return res.status(400).json({ error: 'Image required' });
                 }
                 taskId = await startImage2Video(files.image, inputs?.prompt || 'subtle motion');
                 break;
-                
+
             case 'enhance':
                 if (!files.video) {
                     return res.status(400).json({ error: 'Video required' });
                 }
                 taskId = await startVideoEnhancement(files.video, '4k');
                 break;
-                
+
             case 'bgremove':
                 if (!files.image) {
                     return res.status(400).json({ error: 'Image required' });
@@ -492,20 +512,20 @@ app.post('/api/miniapp/process', async (req, res) => {
                 }
                 taskId = bgResult.id;
                 break;
-                
+
             default:
                 return res.status(400).json({ error: 'Invalid service' });
         }
-        
+
         // Deduct credits
         deductCredits({ telegramUserId: userId, amount: cost });
-        
+
         // Store task for tracking
         storeTask(userId, service, taskId, cost);
-        
+
         logger.info('Mini app task started', { userId, service, taskId, cost });
         res.json({ taskId, cost });
-        
+
     } catch (e) {
         logger.error('Mini app process error', { error: e.message, service });
         res.status(500).json({ error: e.message });
@@ -515,14 +535,14 @@ app.post('/api/miniapp/process', async (req, res) => {
 // Mini App: Check status
 app.get('/api/miniapp/status', async (req, res) => {
     const { taskId, service } = req.query;
-    
+
     if (!taskId || !service) {
         return res.status(400).json({ error: 'taskId and service required' });
     }
-    
+
     try {
         let result;
-        
+
         switch (service) {
             case 'faceswap':
                 result = await checkFaceSwapTaskStatus(taskId);
@@ -542,7 +562,7 @@ app.get('/api/miniapp/status', async (req, res) => {
             default:
                 return res.status(400).json({ error: 'Invalid service' });
         }
-        
+
         // Save creation if completed
         if (result.status === 'completed' && result.result_url) {
             const task = getTask(taskId);
@@ -550,9 +570,9 @@ app.get('/api/miniapp/status', async (req, res) => {
                 saveCreation(task.user_id, service, result.result_url);
             }
         }
-        
+
         res.json(result);
-        
+
     } catch (e) {
         logger.error('Mini app status error', { error: e.message, taskId });
         res.status(500).json({ error: e.message });
@@ -560,59 +580,65 @@ app.get('/api/miniapp/status', async (req, res) => {
 });
 
 // Mini App: Create checkout
-app.post('/api/miniapp/checkout', async (req, res) => {
+app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
     const { userId, packType, currency } = req.body;
-    
+
     if (!userId || !packType) {
         return res.status(400).json({ error: 'userId and packType required' });
     }
-    
+
     const pack = demoCfg.packs[packType];
     if (!pack) {
         return res.status(400).json({ error: 'Invalid pack type' });
     }
-    
-    // Supported currencies
-    const SUPPORTED_CURRENCIES = ['usd', 'mxn', 'eur', 'gbp', 'cad'];
-    const curr = (currency || 'usd').toLowerCase();
-    
-    if (!SUPPORTED_CURRENCIES.includes(curr)) {
-        return res.status(400).json({ error: 'Unsupported currency' });
-    }
-    
+
     try {
         // Get live exchange rate
-        const rate = await fetchUsdRate(curr);
-        
+        const exchangeRates = await getExchangeRates();
+        const rate = exchangeRates[currency.toUpperCase()] || SAFE_RATES[currency.toUpperCase()] || 1;
+
         // Convert USD cents to target currency cents
         // pack.price_cents is in USD cents (e.g., 99 = $0.99)
         // We need to convert to target currency cents
+        const calculatePrice = (priceCents, currency, exchangeRates) => {
+            if (currency === 'USD') return priceCents;
+
+            const rate = exchangeRates[currency] || 1;
+            // Convert price to dollars, apply exchange rate with 3% spread, then back to cents
+            return Math.round((priceCents / 100) * rate * 1.03 * 100);
+        };
+
+        const logConversion = (priceCents, currency, convertedAmount) => {
+            logger.info(`Currency conversion: ${priceCents}USD -> ${convertedAmount}${currency}`);
+        };
+
         const usdAmount = pack.price_cents / 100; // Convert to dollars first
         let amountInCurrency;
-        
-        if (curr === 'usd') {
+
+        if (currency === 'USD') {
             amountInCurrency = pack.price_cents;
         } else {
             // Apply exchange rate and 3% spread, then convert to minor units
-            const convertedAmount = usdAmount * rate * 1.03;
-            amountInCurrency = Math.round(convertedAmount * 100);
+            const convertedAmount = calculatePrice(pack.price_cents, currency, exchangeRates);
+            amountInCurrency = convertedAmount;
+            logConversion(pack.price_cents, currency, convertedAmount);
         }
-        
-        logger.info('Mini app checkout', { 
-            userId, 
-            packType, 
-            currency: curr, 
-            rate, 
+
+        logger.info('Mini app checkout', {
+            userId,
+            packType,
+            currency,
+            rate,
             usdCents: pack.price_cents,
             targetCents: amountInCurrency,
             targetAmount: (amountInCurrency / 100).toFixed(2)
         });
-        
+
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{
                 price_data: {
-                    currency: curr,
+                    currency,
                     product_data: { name: pack.label },
                     unit_amount: amountInCurrency,
                 },
@@ -626,13 +652,13 @@ app.post('/api/miniapp/checkout', async (req, res) => {
                 points: String(pack.points),
                 pack_type: packType,
                 source: 'miniapp',
-                currency: curr,
+                currency,
                 usd_equivalent: String(pack.price_cents)
             }
         });
-        
+
         res.json({ url: session.url });
-        
+
     } catch (e) {
         logger.error('Mini app checkout error', { error: e.message, stack: e.stack });
         res.status(500).json({ error: e.message });
@@ -653,7 +679,7 @@ function getTask(taskId) {
 function saveCreation(userId, type, resultUrl) {
     try {
         const { db } = require('./database');
-        
+
         // Create table if not exists
         db.exec(`
             CREATE TABLE IF NOT EXISTS miniapp_creations (
@@ -664,12 +690,12 @@ function saveCreation(userId, type, resultUrl) {
                 created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
             )
         `);
-        
+
         db.prepare(`
             INSERT INTO miniapp_creations (user_id, type, result_url, created_at)
             VALUES (?, ?, ?, ?)
         `).run(userId, type, resultUrl, Date.now());
-        
+
     } catch (e) {
         logger.error('Save creation error', { error: e.message });
     }
