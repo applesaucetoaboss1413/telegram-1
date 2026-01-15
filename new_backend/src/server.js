@@ -593,61 +593,31 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
     }
 
     try {
-        // Get live exchange rate
-        const exchangeRates = await getExchangeRates();
-        const rate = exchangeRates[currency.toUpperCase()] || SAFE_RATES[currency.toUpperCase()] || 1;
+        // Fetch live exchange rate
+        const rate = await fetchUsdRate(currency); // Dynamic rate from API
 
-        // Convert USD cents to target currency cents
-        // pack.price_cents is in USD cents (e.g., 99 = $0.99)
-        // We need to convert to target currency cents
-        const calculatePrice = (priceCents, currency, exchangeRates) => {
-            if (currency === 'USD') return priceCents;
+        // Convert: cents → dollars → foreign currency → cents
+        const usdAmount = pack.price_cents / 100; // $0.99 from 99 cents
 
-            const rate = exchangeRates[currency] || 1;
-            // Convert price to dollars, apply exchange rate with 3% spread, then back to cents
-            return Math.round((priceCents / 100) * rate * 1.03 * 100);
-        };
-
-        const logConversion = (priceCents, currency, convertedAmount) => {
-            logger.info(`Currency conversion: ${priceCents}USD -> ${convertedAmount}${currency}`);
-        };
-
-        const usdAmount = pack.price_cents / 100; // Convert to dollars first
         let amountInCurrency;
-
-        if (currency === 'USD') {
-            amountInCurrency = pack.price_cents;
+        if (currency === 'usd') {
+            amountInCurrency = pack.price_cents; // Keep as cents: 99
         } else {
-            // Apply exchange rate and 3% spread, then convert to minor units
-            const convertedAmount = calculatePrice(pack.price_cents, currency, exchangeRates);
-            amountInCurrency = convertedAmount;
-            logConversion(pack.price_cents, currency, convertedAmount);
+            // Apply exchange rate & 3% spread, then convert back to cents
+            const convertedAmount = usdAmount * rate * 1.03;
+            amountInCurrency = Math.round(convertedAmount * 100); // Now in cents
         }
 
-        logger.info('Mini app checkout', {
-            userId,
-            packType,
-            currency,
-            rate,
-            usdCents: pack.price_cents,
-            targetCents: amountInCurrency,
-            targetAmount: (amountInCurrency / 100).toFixed(2)
-        });
-        logger.info('Exchange rate details', {
-            currency,
-            rate,
-            usdAmount: pack.price_cents / 100,
-            convertedAmount: amountInCurrency / 100,
-            spreadApplied: currency !== 'USD' ? '3%' : '0%'
-        });
+        console.log(`💰 Conversion: $${usdAmount} USD → ${currency.toUpperCase()} ${amountInCurrency / 100} (${rate}x + 3% spread)`);
 
+        // Send to Stripe
         const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
+            currency: currency,
             line_items: [{
                 price_data: {
-                    currency,
-                    product_data: { name: pack.label },
-                    unit_amount: amountInCurrency,
+                    currency: currency,
+                    product_data: { name: `${amountInCurrency / 100} credits` },
+                    unit_amount: amountInCurrency, // Amount in cents
                 },
                 quantity: 1,
             }],

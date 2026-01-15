@@ -1,15 +1,37 @@
 require('dotenv').config();
 
-// Validate required environment variables
+// VALIDATE REQUIRED ENVIRONMENT VARIABLES
 const requiredEnvVars = [
+    'TELEGRAM_BOT_TOKEN',
+    'STRIPE_SECRET_KEY',
+    'DATABASE_URL',
+    'ADMIN_TELEGRAM_ID'
+];
+
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+    console.error('❌ FATAL: Missing required environment variables:');
+    missingVars.forEach(varName => {
+        console.error(`   - ${varName}`);
+    });
+    console.error('\n📋 Copy .env.example to .env and fill in your values:');
+    console.error('   cp .env.example .env');
+    process.exit(1);
+}
+
+console.log('✅ All required environment variables present');
+
+// Validate required environment variables
+const requiredEnvVars2 = [
     'TELEGRAM_BOT_TOKEN',
     'STRIPE_SECRET_KEY',
     'DATABASE_URL'
 ];
 
-const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-if (missingVars.length > 0) {
-    console.error(`FATAL: Missing required environment variables: ${missingVars.join(', ')}`);
+const missingVars2 = requiredEnvVars2.filter(varName => !process.env[varName]);
+if (missingVars2.length > 0) {
+    console.error(`FATAL: Missing required environment variables: ${missingVars2.join(', ')}`);
     process.exit(1);
 }
 

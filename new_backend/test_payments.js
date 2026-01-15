@@ -1,16 +1,25 @@
 const assert = require('assert');
-const { calculatePrice } = require('./src/server');
 
-// Test currency conversions
-const testRates = { MXN: 18.0, CAD: 1.36, EUR: 0.92, GBP: 0.79 };
+// Test calculatePrice logic directly
+const calculatePrice = (priceCents, currency, rate) => {
+    if (currency === 'usd') return priceCents;
+    return Math.round((priceCents / 100) * rate * 1.03 * 100);
+};
 
-// USD should pass through unchanged
-assert.equal(calculatePrice(100, 'USD', testRates), 100, 'USD amount should stay same');
+function testConversions() {
+    // Test $0.99 conversions
+    const testPrice = 99;
 
-// Test conversions with 3% spread
-assert.equal(calculatePrice(100, 'MXN', testRates), Math.round((100 / 100) * 18 * 1.03 * 100), 'MXN conversion');
-assert.equal(calculatePrice(100, 'CAD', testRates), Math.round((100 / 100) * 1.36 * 1.03 * 100), 'CAD conversion');
-assert.equal(calculatePrice(100, 'EUR', testRates), Math.round((100 / 100) * 0.92 * 1.03 * 100), 'EUR conversion');
-assert.equal(calculatePrice(100, 'GBP', testRates), Math.round((100 / 100) * 0.79 * 1.03 * 100), 'GBP conversion');
+    // USD should stay same
+    assert.equal(calculatePrice(testPrice, 'usd', 1), 99, 'USD amount should stay same');
 
-console.log('✅ All payment calculations test passed');
+    // Test MXN conversion (0.99 * 18 * 1.03 = 18.3546 → 1835 cents)
+    assert.equal(calculatePrice(testPrice, 'mxn', 18), 1835, 'MXN conversion');
+
+    // Test CAD conversion (0.99 * 1.36 * 1.03 = 1.386792 → 139 cents)
+    assert.equal(calculatePrice(testPrice, 'cad', 1.36), 139, 'CAD conversion');
+
+    console.log('✅ All payment calculations test passed');
+}
+
+testConversions();

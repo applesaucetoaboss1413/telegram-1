@@ -39,8 +39,8 @@ try {
             video_duration INTEGER,
             photo_width INTEGER,
             photo_height INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_used TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_used DATETIME,
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
 
@@ -120,7 +120,10 @@ try {
     `);
     logger.info('Database schema initialized successfully');
 } catch (error) {
-    logger.error('Failed to initialize database schema', { error: error.message, sql: error.sql });
+    logger.error('Failed to initialize database schema', {
+        error: error.message,
+        sql: error.sql
+    });
     throw error;
 }
 
