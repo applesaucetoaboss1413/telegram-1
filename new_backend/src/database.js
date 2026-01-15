@@ -17,110 +17,112 @@ if (!fs.existsSync(dbPath)) {
 
 const db = new Database(path.join(dbPath, 'faceswap.db'));
 
-// Initialize Schema - including new monetization tables
-const createUserTemplatesTable = `
-CREATE TABLE IF NOT EXISTS user_templates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    template_video_url TEXT NOT NULL,
-    template_photo_url TEXT NOT NULL,
-    video_size INTEGER NOT NULL,
-    photo_size INTEGER NOT NULL,
-    video_duration INTEGER,
-    photo_width INTEGER,
-    photo_height INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_used TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-)`;
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            points INTEGER DEFAULT 0,
+            created_at INTEGER,
+            is_premium INTEGER DEFAULT 0,
+            referred_by TEXT,
+            has_purchased INTEGER DEFAULT 0,
+            language TEXT DEFAULT 'en'
+        );
 
-db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        points INTEGER DEFAULT 0,
-        created_at INTEGER,
-        is_premium INTEGER DEFAULT 0,
-        referred_by TEXT,
-        has_purchased INTEGER DEFAULT 0,
-        language TEXT DEFAULT 'en'
-    );
+        CREATE TABLE IF NOT EXISTS user_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            template_video_url TEXT NOT NULL,
+            template_photo_url TEXT NOT NULL,
+            video_size INTEGER NOT NULL,
+            photo_size INTEGER NOT NULL,
+            video_duration INTEGER,
+            photo_width INTEGER,
+            photo_height INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
 
-    CREATE TABLE IF NOT EXISTS jobs (
-        request_id TEXT PRIMARY KEY,
-        user_id TEXT,
-        chat_id TEXT,
-        type TEXT,
-        status TEXT,
-        created_at INTEGER,
-        result_url TEXT,
-        error_message TEXT,
-        meta TEXT
-    );
+        CREATE TABLE IF NOT EXISTS jobs (
+            request_id TEXT PRIMARY KEY,
+            user_id TEXT,
+            chat_id TEXT,
+            type TEXT,
+            status TEXT,
+            created_at INTEGER,
+            result_url TEXT,
+            error_message TEXT,
+            meta TEXT
+        );
 
-    CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT,
-        amount INTEGER,
-        reason TEXT,
-        created_at INTEGER
-    );
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            amount INTEGER,
+            reason TEXT,
+            created_at INTEGER
+        );
 
-    CREATE TABLE IF NOT EXISTS user_credits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_user_id TEXT,
-        stripe_customer_id TEXT,
-        credits INTEGER DEFAULT 0,
-        welcome_granted INTEGER DEFAULT 0,
-        created_at INTEGER,
-        updated_at INTEGER,
-        UNIQUE(telegram_user_id, stripe_customer_id)
-    );
+        CREATE TABLE IF NOT EXISTS user_credits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id TEXT,
+            stripe_customer_id TEXT,
+            credits INTEGER DEFAULT 0,
+            welcome_granted INTEGER DEFAULT 0,
+            created_at INTEGER,
+            updated_at INTEGER,
+            UNIQUE(telegram_user_id, stripe_customer_id)
+        );
 
-    -- NEW: Daily claims for engagement
-    CREATE TABLE IF NOT EXISTS daily_claims (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_user_id TEXT UNIQUE,
-        last_claim INTEGER,
-        streak INTEGER DEFAULT 0
-    );
+        -- NEW: Daily claims for engagement
+        CREATE TABLE IF NOT EXISTS daily_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id TEXT UNIQUE,
+            last_claim INTEGER,
+            streak INTEGER DEFAULT 0
+        );
 
-    -- NEW: Purchase history for tracking first purchase discounts
-    CREATE TABLE IF NOT EXISTS purchases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_user_id TEXT,
-        amount_cents INTEGER,
-        pack_type TEXT,
-        stripe_session_id TEXT,
-        created_at INTEGER
-    );
+        -- NEW: Purchase history for tracking first purchase discounts
+        CREATE TABLE IF NOT EXISTS purchases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id TEXT,
+            amount_cents INTEGER,
+            pack_type TEXT,
+            stripe_session_id TEXT,
+            created_at INTEGER
+        );
 
-    -- NEW: Promotional credits with expiry
-    CREATE TABLE IF NOT EXISTS promo_credits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_user_id TEXT,
-        credits INTEGER,
-        source TEXT,
-        expires_at INTEGER,
-        created_at INTEGER
-    );
+        -- NEW: Promotional credits with expiry
+        CREATE TABLE IF NOT EXISTS promo_credits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id TEXT,
+            credits INTEGER,
+            source TEXT,
+            expires_at INTEGER,
+            created_at INTEGER
+        );
 
-    -- NEW: Analytics events for conversion tracking
-    CREATE TABLE IF NOT EXISTS analytics_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_user_id TEXT,
-        event_type TEXT,
-        event_data TEXT,
-        created_at INTEGER
-    );
+        -- NEW: Analytics events for conversion tracking
+        CREATE TABLE IF NOT EXISTS analytics_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id TEXT,
+            event_type TEXT,
+            event_data TEXT,
+            created_at INTEGER
+        );
 
-    ${createUserTemplatesTable}
-
-    -- Create indexes for performance
-    CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-    CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
-    CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(telegram_user_id);
-    CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
-`);
+        -- Create indexes for performance
+        CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(telegram_user_id);
+        CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
+    `);
+    logger.info('Database schema initialized successfully');
+} catch (error) {
+    logger.error('Failed to initialize database schema', { error: error.message, sql: error.sql });
+    throw error;
+}
 
 // Add language column if it doesn't exist (migration for existing databases)
 try {

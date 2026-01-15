@@ -11,7 +11,7 @@ const https = require('https');
 const axios = require('axios'); // Add axios library
 
 // MXN exchange rate helper (same as in bot.js)
-const SAFE_RATES = { MXN: 18.0 };
+const SAFE_RATES = { MXN: 18.0, CAD: 1.36 };
 
 // Add dynamic exchange rate fetching
 const EXCHANGE_RATE_CACHE = {};
@@ -632,6 +632,13 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
             usdCents: pack.price_cents,
             targetCents: amountInCurrency,
             targetAmount: (amountInCurrency / 100).toFixed(2)
+        });
+        logger.info('Exchange rate details', {
+            currency,
+            rate,
+            usdAmount: pack.price_cents / 100,
+            convertedAmount: amountInCurrency / 100,
+            spreadApplied: currency !== 'USD' ? '3%' : '0%'
         });
 
         const session = await stripe.checkout.sessions.create({

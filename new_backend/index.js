@@ -1,4 +1,22 @@
 require('dotenv').config();
+
+// Validate required environment variables
+const requiredEnvVars = [
+    'TELEGRAM_BOT_TOKEN',
+    'STRIPE_SECRET_KEY',
+    'DATABASE_URL'
+];
+
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+if (missingVars.length > 0) {
+    console.error(`FATAL: Missing required environment variables: ${missingVars.join(', ')}`);
+    process.exit(1);
+}
+
+if (!process.env.ADMIN_TELEGRAM_ID) {
+    console.warn('WARNING: ADMIN_TELEGRAM_ID not set - admin notifications disabled');
+}
+
 const { bot } = require('./src/bot');
 const { startPromoScheduler } = require('./src/services/promoScheduler');
 const app = require('./src/server');
@@ -33,17 +51,17 @@ async function start() {
         });
 
         // Start Bot
-        const token = process.env.BOT_TOKEN;
+        const token = process.env.TELEGRAM_BOT_TOKEN;
         if (token) {
             try {
                 const tail = token.slice(-4);
-                logger.info(`Using BOT_TOKEN (ends with ****${tail})`);
+                logger.info(`Using TELEGRAM_BOT_TOKEN (ends with ****${tail})`);
             } catch (_) { }
             try {
                 const me = await bot.telegram.getMe();
                 logger.info('Telegram bot identity', { username: me && me.username, id: me && me.id });
             } catch (e) {
-                logger.error(`ERROR: BOT_TOKEN invalid or Telegram unreachable: ${e.message}`);
+                logger.error(`ERROR: TELEGRAM_BOT_TOKEN invalid or Telegram unreachable: ${e.message}`);
             }
             if (PUBLIC_URL && typeof PUBLIC_URL === 'string' && PUBLIC_URL.trim().length > 0) {
                 let base = PUBLIC_URL.trim().replace(/[,\s]+$/g, '');
@@ -93,7 +111,7 @@ async function start() {
                 try { global.__BOT_RUNNING = 'polling'; } catch (_) { }
             }
         } else {
-            logger.warn('BOT_TOKEN missing, bot not started');
+            logger.warn('TELEGRAM_BOT_TOKEN missing, bot not started');
         }
 
         // Start Automated Promo Scheduler
@@ -103,7 +121,7 @@ async function start() {
         const adminId = process.env.ADMIN_TELEGRAM_ID;
         if (adminId) {
             try {
-                await bot.telegram.sendMessage(adminId, 
+                await bot.telegram.sendMessage(adminId,
                     `✅ *Bot Deployed Successfully!*\n\n` +
                     `🤖 Bot is online and ready\n` +
                     `📱 Mini app configured\n` +
@@ -111,7 +129,7 @@ async function start() {
                     `Use commands below to test:`,
                     { parse_mode: 'Markdown' }
                 );
-                
+
                 // Trigger /start command for admin
                 setTimeout(async () => {
                     try {
@@ -120,7 +138,7 @@ async function start() {
                         logger.error('Failed to send /start to admin', { error: e.message });
                     }
                 }, 1000);
-                
+
                 // Trigger /studio command for admin
                 setTimeout(async () => {
                     try {
@@ -129,7 +147,7 @@ async function start() {
                         logger.error('Failed to send /studio to admin', { error: e.message });
                     }
                 }, 2000);
-                
+
             } catch (e) {
                 logger.error('Failed to send admin notification', { error: e.message });
             }
