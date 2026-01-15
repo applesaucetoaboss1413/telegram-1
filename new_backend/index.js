@@ -1,5 +1,12 @@
 require('dotenv').config();
 
+console.log('ENV VARIABLES:', {
+    TELEGRAM_BOT_TOKEN: !!process.env.TELEGRAM_BOT_TOKEN,
+    BOT_TOKEN: !!process.env.BOT_TOKEN,
+    STRIPE_SECRET_KEY: !!process.env.STRIPE_SECRET_KEY,
+    DATABASE_URL: !!process.env.DATABASE_URL
+});
+
 // VALIDATE REQUIRED ENVIRONMENT VARIABLES
 const requiredEnvVars = [
     'TELEGRAM_BOT_TOKEN',

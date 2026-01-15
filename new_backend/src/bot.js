@@ -15,7 +15,7 @@ const demoCfg = require('./services/a2eConfig');
 const { t } = require('./config/translations');
 const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
 const fs = require('fs');
 
