@@ -108,7 +108,7 @@ async function postStartupVideos(bot) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.url('🎨 OPEN FULL STUDIO APP →', 'https://t.me/ImMoreThanJustSomeBot?start=studio')]
+                    [Markup.button.url('🎨 OPEN FULL STUDIO APP →', miniAppUrl)]
                 ]).reply_markup
             }
         );
@@ -165,7 +165,7 @@ async function postStartupVideos(bot) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.url('🎬 Start Creating', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
+                    [Markup.button.url('🎬 Create Now', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
                 ]).reply_markup
             }
         );
@@ -249,7 +249,7 @@ async function sendFlashyStudioButton(bot) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.url('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', 'https://t.me/ImMoreThanJustSomeBot?start=studio')]
+                    [Markup.button.url('🎨✨ OPEN AI FACE-SWAP STUDIO ✨🎨', miniAppUrl)]
                 ]).reply_markup
             }
         );

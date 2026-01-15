@@ -26,7 +26,12 @@ const grantWelcomeCredits = ({ telegramUserId, stripeCustomerId }) => {
                 INSERT INTO user_credits (telegram_user_id, stripe_customer_id, credits, welcome_granted, created_at, updated_at)
                 VALUES (?, ?, 69, 1, ?, ?)
             `).run(tId, stripeCustomerId, now, now);
-            logger.info('Welcome credits granted', { telegramUserId: tId, stripeCustomerId, amount: 69 });
+            logger.info('Welcome credits granted - new record', {
+                telegramUserId: tId,
+                stripeCustomerId,
+                amount: 69,
+                newRecord: true
+            });
             return true;
         }
 
@@ -34,17 +39,32 @@ const grantWelcomeCredits = ({ telegramUserId, stripeCustomerId }) => {
             // Update existing record to grant credits
             db.prepare(`
                 UPDATE user_credits 
-                SET credits = 69, welcome_granted = 1, updated_at = ?
+                SET credits = credits + 69, welcome_granted = 1, updated_at = ?
                 WHERE id = ?
             `).run(now, record.id);
-            logger.info('Welcome credits granted to existing user', { telegramUserId: tId, stripeCustomerId, amount: 69 });
+            logger.info('Welcome credits granted - existing record', {
+                telegramUserId: tId,
+                stripeCustomerId,
+                amount: 69,
+                previousCredits: record.credits,
+                newRecord: false
+            });
             return true;
         }
 
-        logger.info('Welcome credits already granted', { telegramUserId: tId, stripeCustomerId });
+        logger.info('Welcome credits already granted - no action taken', {
+            telegramUserId: tId,
+            stripeCustomerId,
+            currentCredits: record.credits
+        });
         return false;
     } catch (error) {
-        logger.error('Error granting welcome credits', { error: error.message, telegramUserId, stripeCustomerId });
+        logger.error('Error granting welcome credits', {
+            error: error.message,
+            telegramUserId,
+            stripeCustomerId,
+            stack: error.stack
+        });
         return false;
     }
 };
@@ -179,10 +199,10 @@ const claimDailyCredits = ({ telegramUserId }) => {
         const tId = String(telegramUserId);
         const now = Date.now();
         const dailyAmount = Number(process.env.DAILY_FREE_CREDITS || 10);
-        
+
         // Get or create daily claims record
         let claim = db.prepare('SELECT * FROM daily_claims WHERE telegram_user_id = ?').get(tId);
-        
+
         if (!claim) {
             // First claim ever - grant credits
             db.prepare('INSERT INTO daily_claims (telegram_user_id, last_claim, streak) VALUES (?, ?, 1)').run(tId, now);
@@ -190,32 +210,32 @@ const claimDailyCredits = ({ telegramUserId }) => {
             logger.info('Daily credits claimed (first time)', { telegramUserId: tId, amount: dailyAmount });
             return { granted: true, amount: dailyAmount, streak: 1, nextClaimTime: now + 24 * 60 * 60 * 1000 };
         }
-        
+
         const lastClaim = claim.last_claim;
         const timeSinceClaim = now - lastClaim;
         const oneDayMs = 24 * 60 * 60 * 1000;
-        
+
         if (timeSinceClaim < oneDayMs) {
             // Too soon - can't claim yet
             const nextClaimTime = lastClaim + oneDayMs;
             const hoursLeft = Math.ceil((nextClaimTime - now) / (60 * 60 * 1000));
             return { granted: false, amount: 0, streak: claim.streak, nextClaimTime, hoursLeft };
         }
-        
+
         // Can claim! Check streak
         const twoDaysMs = 2 * oneDayMs;
         let newStreak = timeSinceClaim < twoDaysMs ? (claim.streak || 0) + 1 : 1;
-        
+
         // Streak bonus: +2 credits per day of streak (max +20)
         const streakBonus = Math.min(newStreak * 2, 20);
         const totalAmount = dailyAmount + streakBonus;
-        
+
         db.prepare('UPDATE daily_claims SET last_claim = ?, streak = ? WHERE telegram_user_id = ?').run(now, newStreak, tId);
         grantCredits({ telegramUserId: tId, amount: totalAmount });
-        
+
         logger.info('Daily credits claimed', { telegramUserId: tId, amount: totalAmount, streak: newStreak, streakBonus });
         return { granted: true, amount: totalAmount, streak: newStreak, streakBonus, nextClaimTime: now + oneDayMs };
-        
+
     } catch (error) {
         logger.error('Error claiming daily credits', { error: error.message, telegramUserId });
         return { granted: false, amount: 0, error: error.message };

@@ -216,19 +216,27 @@ bot.command('start', async (ctx) => {
                     // Immediately grant 69 free credits
                     db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1 WHERE telegram_user_id = ?').run(userId);
                     logger.info('69 free credits granted', { userId });
-                    return ctx.replyWithMarkdown('🎉 *69 Free Credits Granted!*\n\nYou now have 69 free credits to get started!');
-                } else {
-                    logger.info('User not eligible for 69 free credits', {
-                        userId,
-                        hasStripeCustomer: !!stripeCustomer,
-                        hasWelcomeCredits: !!hasWelcomeCredits
-                    });
-                    // Not eligible - show daily credits option
+
+                    // Get updated balance
+                    const credits = db.prepare('SELECT credits FROM user_credits WHERE telegram_user_id = ?').get(userId).credits;
+
                     return ctx.replyWithMarkdown(
-                        '🎁 *Free Credits*\n\nGet started with free credits:',
-                        Markup.inlineKeyboard([
-                            [Markup.button.callback('🎁 Claim Daily Credits', 'daily')]
-                        ])
+                        `🎉 *69 Free Credits Granted!*\n\n` +
+                        `💰 *New Balance:* ${credits} credits\n` +
+                        `🎬 Enough for ~${Math.floor(credits / 60)} face swap videos!\n\n` +
+                        `Use /start create to begin`
+                    );
+                } else if (hasWelcomeCredits) {
+                    return ctx.replyWithMarkdown(
+                        `🎁 *Offer Already Claimed*\n\n` +
+                        `You've already received your 69 free welcome credits!\n` +
+                        `Check your balance with /credits`
+                    );
+                } else {
+                    return ctx.replyWithMarkdown(
+                        `🎁 *Eligibility Required*\n\n` +
+                        `The 69 free credits offer is for new Stripe subscribers only.\n` +
+                        `[Connect your Stripe account](${process.env.STRIPE_CONNECT_URL || 'https://stripe.com/connect'}) to qualify`
                     );
                 }
             case 'buy_points':
@@ -1069,6 +1077,222 @@ bot.command('delete_template', async (ctx) => {
     await ctx.reply(`✅ Template #${templateNumber} deleted successfully.`);
 });
 
+bot.action('create_5s', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+
+        // Check if user has templates
+        if (!checkUserHasTemplates(userId)) {
+            const { text, markup } = getTemplateMissingMessage();
+            return ctx.replyWithMarkdown(text, markup);
+        }
+
+        ctx.session = {
+            mode: 'create_video',
+            step: 'awaiting_base_video',
+            duration: 5,
+            price: 60
+        };
+        await ctx.reply(`📹 Please send a 5-second video to face swap:`);
+    } catch (e) {
+        logger.error('create_5s action failed', { error: e.message });
+    }
+});
+
+bot.action('create_10s', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+
+        if (!checkUserHasTemplates(userId)) {
+            const { text, markup } = getTemplateMissingMessage();
+            return ctx.replyWithMarkdown(text, markup);
+        }
+
+        ctx.session = {
+            mode: 'create_video',
+            step: 'awaiting_base_video',
+            duration: 10,
+            price: 90
+        };
+        await ctx.reply(`📹 Please send a 10-second video to face swap:`);
+    } catch (e) {
+        logger.error('create_10s action failed', { error: e.message });
+    }
+});
+
+bot.action('create_20s', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+
+        if (!checkUserHasTemplates(userId)) {
+            const { text, markup } = getTemplateMissingMessage();
+            return ctx.replyWithMarkdown(text, markup);
+        }
+
+        ctx.session = {
+            mode: 'create_video',
+            step: 'awaiting_base_video',
+            duration: 20,
+            price: 120
+        };
+        await ctx.reply(`📹 Please send a 20-second video to face swap:`);
+    } catch (e) {
+        logger.error('create_20s action failed', { error: e.message });
+    }
+});
+
+bot.on('video', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'create_video' || ctx.session.step !== 'awaiting_base_video') return;
+
+    try {
+        const video = ctx.message.video;
+
+        // Validate video duration matches selected duration
+        if (video.duration > ctx.session.duration) {
+            return ctx.reply(`❌ Video too long. Maximum duration is ${ctx.session.duration} seconds.`);
+        }
+
+        // Get video URL
+        const { url } = await getFileLink(ctx, video.file_id);
+        ctx.session.base_url = url;
+        ctx.session.step = 'awaiting_face';
+
+        await ctx.reply('✅ Video received. Now please send a clear photo of the face you want to use:');
+    } catch (e) {
+        ctx.reply(`❌ Error processing video: ${e.message}`);
+        ctx.session = null;
+    }
+});
+
+bot.on('photo', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'create_video' || ctx.session.step !== 'awaiting_face') return;
+
+    try {
+        // Get largest photo
+        const photo = ctx.message.photo.sort((a, b) => b.file_size - a.file_size)[0];
+        const { url } = await getFileLink(ctx, photo.file_id);
+        ctx.session.face_url = url;
+
+        // Start video creation
+        await handleVideoCreation(ctx);
+    } catch (e) {
+        ctx.reply(`❌ Error processing photo: ${e.message}`);
+        ctx.session = null;
+    }
+});
+
+// Video creation handler - called after receiving both video and photo
+async function handleVideoCreation(ctx) {
+    try {
+        const { base_url, face_url, duration } = ctx.session;
+        const userId = String(ctx.from.id);
+
+        // Get user's template
+        const template = db.prepare(
+            'SELECT template_video_url, template_photo_url FROM user_templates WHERE user_id = ? ORDER BY last_used DESC LIMIT 1'
+        ).get(userId);
+
+        if (!template) {
+            return ctx.reply('❌ Templates not found. Please upload templates first.');
+        }
+
+        // Call video creation API
+        await ctx.reply('⏳ Creating your video... This may take a few minutes.');
+
+        const taskId = await startImage2Video({
+            base_video_url: base_url,
+            face_image_url: face_url,
+            template_video_url: template.template_video_url,
+            template_photo_url: template.template_photo_url,
+            duration: duration
+        });
+
+        // Store task in database
+        db.prepare(
+            'INSERT INTO user_tasks (user_id, task_id, type, status, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).run(userId, taskId, 'video_creation', 'processing', Date.now());
+
+        // Start polling for result
+        pollTaskStatus(ctx, taskId);
+        ctx.session = null;
+    } catch (e) {
+        logger.error('Video creation failed', { error: e.message });
+        ctx.reply('❌ Failed to create video. Please try again later.');
+    }
+})
+
+// Poll task status until completion
+async function pollTaskStatus(ctx, taskId) {
+    try {
+        const status = await checkImage2VideoStatus(taskId);
+
+        if (status.status === 'completed') {
+            await ctx.replyWithVideo(status.result_url);
+            db.prepare(
+                'UPDATE user_tasks SET status = ?, completed_at = ? WHERE task_id = ?'
+            ).run('completed', Date.now(), taskId);
+        }
+        else if (status.status === 'failed') {
+            await ctx.reply(`❌ Video creation failed: ${status.error || 'Unknown error'}`);
+            db.prepare(
+                'UPDATE user_tasks SET status = ?, error = ? WHERE task_id = ?'
+            ).run('failed', status.error, taskId);
+        }
+        else {
+            // Still processing - check again in 15 seconds
+            setTimeout(() => pollTaskStatus(ctx, taskId), 15000);
+        }
+    } catch (e) {
+        logger.error('Task status check failed', { error: e.message });
+    }
+}
+
+// Stripe checkout helper function
+async function createStripeCheckoutSession({ userId, packType, currency }) {
+    try {
+        const pack = demoCfg.packs[packType];
+        if (!pack) throw new Error('Invalid pack type');
+
+        const session = await stripe.checkout.sessions.create({
+            mode: 'payment',
+            payment_method_types: ['card'],
+            line_items: [{
+                price_data: {
+                    currency,
+                    product_data: { name: `${pack.label} - ${pack.points} credits` },
+                    unit_amount: pack.price_cents
+                },
+                quantity: 1
+            }],
+            success_url: process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp?success=true` : 'https://telegramalam.onrender.com/miniapp/?success=true',
+            cancel_url: process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp?cancel=true` : 'https://telegramalam.onrender.com/miniapp/?cancel=true',
+            client_reference_id: userId,
+            metadata: {
+                pack_type: packType,
+                points: pack.points,
+                source: 'telegram_bot'
+            }
+        });
+
+        logger.info('Stripe checkout session created', {
+            userId,
+            packType,
+            sessionId: session.id
+        });
+        return session;
+    } catch (e) {
+        logger.error('Stripe session creation failed', {
+            error: e.message,
+            userId,
+            packType
+        });
+        throw e;
+    }
+}
+
 // Graceful Stop
 let stopped = false;
 async function safeStop(signal) {
@@ -1096,3 +1320,47 @@ process.once('SIGINT', () => safeStop('SIGINT'));
 process.once('SIGTERM', () => safeStop('SIGTERM'));
 
 module.exports = { bot };
+
+bot.action('buy_pack_micro', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const session = await createStripeCheckoutSession({
+            userId: String(ctx.from.id),
+            packType: 'micro',
+            currency: 'usd'
+        });
+        await ctx.reply('Redirecting to payment...', {
+            reply_markup: {
+                inline_keyboard: [[{
+                    text: '💳 Pay Now',
+                    url: session.url
+                }]]
+            }
+        });
+    } catch (e) {
+        logger.error('Micro pack checkout failed', { error: e.message });
+        await ctx.reply('❌ Payment processing error. Please try again later.');
+    }
+});
+
+bot.action('buy_pack_starter', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const session = await createStripeCheckoutSession({
+            userId: String(ctx.from.id),
+            packType: 'starter',
+            currency: 'usd'
+        });
+        await ctx.reply('Redirecting to payment...', {
+            reply_markup: {
+                inline_keyboard: [[{
+                    text: '💳 Pay Now',
+                    url: session.url
+                }]]
+            }
+        });
+    } catch (e) {
+        logger.error('Starter pack checkout failed', { error: e.message });
+        await ctx.reply('❌ Payment processing error. Please try again later.');
+    }
+});
