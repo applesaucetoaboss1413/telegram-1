@@ -4,25 +4,6 @@ const cfg = {
     videoBase: process.env.A2E_VIDEO_BASE || 'https://video.a2e.ai/api/v1',
     apiBase: process.env.A2E_API_BASE || 'https://api.a2e.ai/api/v1',
     
-    // Demo pricing (in points) - optimized for conversions
-    demoPrices: {
-        '5': Number(process.env.DEMO_PRICE_05 || 60),
-        '10': Number(process.env.DEMO_PRICE_10 || 90),
-        '15': Number(process.env.DEMO_PRICE_15 || 125)
-    },
-    
-    maxDurations: {
-        '5': Number(process.env.DEMO_MAX_05 || 5),
-        '10': Number(process.env.DEMO_MAX_10 || 10),
-        '15': Number(process.env.DEMO_MAX_15 || 15)
-    },
-    
-    templates: {
-        '5': process.env.DEMO_EXAMPLE_05_URL || '',
-        '10': process.env.DEMO_EXAMPLE_10_URL || '',
-        '15': process.env.DEMO_EXAMPLE_15_URL || ''
-    },
-    
     // MONETIZATION PACKS - Optimized with micro-purchase entry point
     packs: {
         // NEW: $0.99 micro-purchase for low-friction first payment
@@ -73,18 +54,12 @@ const cfg = {
 // Calculate derived display values
 const pricePerPoint = cfg.packs.starter.price_cents / 100 / cfg.packs.starter.points;
 
-cfg.demoCosts = {
-    '5': { points: cfg.demoPrices['5'], usd: (cfg.demoPrices['5'] * pricePerPoint).toFixed(2) },
-    '10': { points: cfg.demoPrices['10'], usd: (cfg.demoPrices['10'] * pricePerPoint).toFixed(2) },
-    '15': { points: cfg.demoPrices['15'], usd: (cfg.demoPrices['15'] * pricePerPoint).toFixed(2) }
-};
-
 for (const key in cfg.packs) {
     cfg.packs[key].priceDisplay = `$${(cfg.packs[key].price_cents / 100).toFixed(2)}`;
     // Approx 10s demos
-    cfg.packs[key].approxDemos = Math.floor(cfg.packs[key].points / cfg.demoPrices['10']);
+    cfg.packs[key].approxDemos = Math.floor(cfg.packs[key].points / 400);
     // Approx 5s demos (most common)
-    cfg.packs[key].approx5sDemos = Math.floor(cfg.packs[key].points / cfg.demoPrices['5']);
+    cfg.packs[key].approx5sDemos = Math.floor(cfg.packs[key].points / 80);
 }
 
 module.exports = cfg;

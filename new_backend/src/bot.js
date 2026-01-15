@@ -33,7 +33,7 @@ bot.use(async (ctx, next) => {
         const t = ctx.updateType;
         const uid = ctx.from && ctx.from.id;
         logger.info('update', { type: t, user: uid });
-    } catch (_) {}
+    } catch (_) { }
     return next();
 });
 
@@ -106,8 +106,8 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
     // Let's check:
     const ext = path.extname(new URL(url).pathname).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-       // Warn or try to fix? Telegram usually provides extensions.
-       logger.warn('Telegram URL missing standard image extension', { url });
+        // Warn or try to fix? Telegram usually provides extensions.
+        logger.warn('Telegram URL missing standard image extension', { url });
     }
 
     return { url, buffer };
@@ -163,12 +163,12 @@ bot.on('photo', async (ctx) => {
             }
             updateUserPoints(userId, -price);
             addTransaction(userId, -price, 'demo_start');
-            
+
             await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
             try {
                 const requestId = await startFaceSwap(faceUrl, baseUrl);
-                const code = `DEMO-${String(ctx.session.duration).padStart(2, '0')}-${ctx.session.base_url === demoCfg.templates[String(ctx.session.duration)] ? 'TEMPLATE' : 'USER'}`;
-                createJob(requestId, userId, String(ctx.chat.id), 'demo', { service: 'faceswap', price_points: price, duration_seconds: ctx.session.duration, code });
+                const code = `DEMO-USER`;
+                createJob(requestId, userId, String(ctx.chat.id), 'demo', { service: 'faceswap', price_points: price, code });
             } catch (e) {
                 updateUserPoints(userId, price);
                 addTransaction(userId, price, 'refund_api_error');
@@ -178,8 +178,97 @@ bot.on('photo', async (ctx) => {
         } catch (e) {
             ctx.reply(`❌ ${e.message}`);
         }
+    } else if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_photo') return;
+
+    try {
+        // Validate photo
+        if (fileSize > 10 * 1024 * 1024) {
+            return ctx.reply('Photo too large. Maximum size is 10MB.');
+        }
+
+        // Get photo URL
+        const { url } = await getFileLink(ctx, fileId);
+
+        // Store template in database
+        db.prepare(
+            'INSERT OR REPLACE INTO user_templates (user_id, template_video_url, template_photo_url, video_size, photo_size, video_duration, last_used) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))'
+        ).run(
+            ctx.session.userId,
+            ctx.session.templateVideo.url,
+            url,
+            ctx.session.templateVideo.size,
+            fileSize,
+            ctx.session.templateVideo.duration
+        );
+
+        // Clear session
+        ctx.session = null;
+
+        await ctx.replyWithMarkdown(
+            '✅ Template upload complete!\n\nYou can now use face-swap commands with your uploaded template.',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🎬 Create Video', 'demo_new')]
+            ])
+        );
+    } catch (e) {
+        ctx.reply(`❌ Error processing photo: ${e.message}`);
+        ctx.session = null;
     }
 });
+
+bot.on('video', async (ctx) => {
+    if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_video') return;
+
+    try {
+        const video = ctx.message.video;
+        const fileId = video.file_id;
+        const fileSize = video.file_size;
+
+        // Validate video
+        if (fileSize > 15 * 1024 * 1024) {
+            return ctx.reply('Video too large. Maximum size is 15MB.');
+        }
+        if (video.mime_type !== 'video/mp4') {
+            return ctx.reply('Only MP4 videos are supported as templates.');
+        }
+
+        // Store video URL in session
+        const { url } = await getFileLink(ctx, fileId);
+        ctx.session.templateVideo = {
+            url,
+            size: fileSize,
+            duration: video.duration
+        };
+        ctx.session.step = 'awaiting_photo';
+
+        await ctx.replyWithMarkdown(
+            '✅ Video template received! Now please send your **template photo** (JPEG/PNG, max 10MB, clear front-facing face):',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('❌ Cancel', 'cancel_template_upload')]
+            ])
+        );
+    } catch (e) {
+        ctx.reply(`❌ Error processing video: ${e.message}`);
+        ctx.session = null;
+    }
+});
+
+// Template check helper function
+const checkUserHasTemplates = (userId) => {
+    const template = db.prepare(
+        'SELECT id FROM user_templates WHERE user_id = ? LIMIT 1'
+    ).get(userId);
+    return !!template;
+};
+
+const getTemplateMissingMessage = () => {
+    return {
+        text: '❌ You need to upload templates first!\n\nUse /upload_template to upload your video and photo templates.',
+        markup: Markup.inlineKeyboard([
+            [Markup.button.callback('📤 Upload Templates', 'upload_template')]
+        ])
+    };
+};
 
 // Bot Logic
 /**
@@ -191,7 +280,7 @@ async function sendDemoMenu(ctx) {
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
     const credits = getCredits({ telegramUserId: userId });
-    
+
     if (ctx.session) ctx.session.step = null;
 
     if (ctx.chat && (ctx.chat.type === 'private' || ctx.chat.type === 'channel' || ctx.chat.type === 'supergroup')) {
@@ -207,20 +296,16 @@ _Swap your face into any video in seconds!_
 
 *How it works:*
 1️⃣ Get credits (free welcome bonus available!)
-2️⃣ Choose video length (5s, 10s, or 15s)
-3️⃣ Send video + face photo
+2️⃣ Send your video template (MP4 format)
+3️⃣ Send face photo
 4️⃣ Get your AI face-swapped video!`;
         await ctx.replyWithMarkdown(msg);
-
-        // NO TEMPLATE VIDEOS - REMOVED AS REQUESTED
     }
-    
-    const approx5s = Math.floor(user.points / demoCfg.demoPrices['5']);
-    
+
     // Get the proper mini app URL
     const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
-    
-    // Credit messaging - OPTIMIZED FOR CONVERSIONS
+
+    // Credit messaging
     let creditMsg = '';
     let buttons = [
         [Markup.button.webApp('🎨✨ OPEN FULL STUDIO APP ✨🎨', miniAppUrl)],
@@ -231,18 +316,18 @@ _Swap your face into any video in seconds!_
     ];
 
     if (credits > 0) {
-        creditMsg = `\n\n💰 *Your Balance:* ${credits} credits (~${Math.floor(credits/60)} videos)`;
+        creditMsg = `\n\n💰 *Your Balance:* ${credits} credits (~${Math.floor(credits / 60)} videos)`;
         if (credits < 60) {
             creditMsg += `\n⚠️ _Not enough for a video - top up below!_`;
         }
     } else if (user.points > 0) {
-        creditMsg = `\n\n💰 *Your Points:* ${user.points} (~${approx5s} videos)`;
+        creditMsg = `\n\n💰 *Your Points:* ${user.points} (~${Math.floor(user.points / 60)} videos)`;
     } else {
         creditMsg = `\n\n🎁 *New User Bonus:* Get 69 FREE credits - enough for your first video!`;
     }
 
     await ctx.replyWithMarkdown(
-        `👋 Welcome! You have ${user.points} points (~${approx5s} 5s demos).${creditMsg}`,
+        `👋 Welcome! You have ${user.points} points (~${Math.floor(user.points / 60)} videos).${creditMsg}`,
         Markup.inlineKeyboard(buttons)
     );
 }
@@ -250,7 +335,7 @@ _Swap your face into any video in seconds!_
 bot.command('start', async (ctx) => {
     const payload = ctx.startPayload;
     const userId = String(ctx.from.id);
-    
+
     // Handle Mini App launch
     if (payload === 'studio' || payload === 'app') {
         const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
@@ -271,7 +356,7 @@ bot.command('start', async (ctx) => {
         }
         return;
     }
-    
+
     // Handle deep links for purchases
     if (payload === 'buy_micro') {
         await startCheckout(ctx, demoCfg.packs.micro);
@@ -289,50 +374,21 @@ bot.command('start', async (ctx) => {
         await startCheckout(ctx, demoCfg.packs.pro);
         return;
     }
-    
-    // Handle deep links for demo creation
-    if (payload === 'demo_5') {
-        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 5, price: demoCfg.demoPrices['5'] };
-        await ctx.reply(`📹 Send your video (5 seconds or less).\n\n⚠️ Make sure it's already trimmed to 5 seconds!`);
-        return;
-    }
-    if (payload === 'demo_10') {
-        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 10, price: demoCfg.demoPrices['10'] };
-        await ctx.reply(`📹 Send your video (10 seconds or less).\n\n⚠️ Make sure it's already trimmed to 10 seconds!`);
-        return;
-    }
-    if (payload === 'demo_15') {
-        ctx.session = { mode: 'demo', step: 'awaiting_base_video', duration: 15, price: demoCfg.demoPrices['15'] };
-        await ctx.reply(`📹 Send your video (15 seconds or less).\n\n⚠️ Make sure it's already trimmed to 15 seconds!`);
-        return;
-    }
-    if (payload === 'create') {
-        // Show demo options
-        await ctx.reply(
-            '📏 Choose video length:',
-            Markup.inlineKeyboard([
-                [Markup.button.callback(`5 seconds – ${demoCfg.demoPrices['5']} credits`, 'demo_len_5')],
-                [Markup.button.callback(`10 seconds – ${demoCfg.demoPrices['10']} credits`, 'demo_len_10')],
-                [Markup.button.callback(`15 seconds – ${demoCfg.demoPrices['15']} credits`, 'demo_len_15')],
-            ])
-        );
-        return;
-    }
-    
+
     if (payload === 'get_69_credits' || payload === 'get_credits') {
         const credits = getCredits({ telegramUserId: userId });
         const userCreditsRecord = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(userId);
-        
+
         if (userCreditsRecord && userCreditsRecord.stripe_customer_id) {
-            const granted = grantWelcomeCredits({ 
-                telegramUserId: userId, 
-                stripeCustomerId: userCreditsRecord.stripe_customer_id 
+            const granted = grantWelcomeCredits({
+                telegramUserId: userId,
+                stripeCustomerId: userCreditsRecord.stripe_customer_id
             });
-            
+
             if (granted) {
-                await ctx.replyWithMarkdown(`🎉 *Success!* You've been granted 69 welcome credits (enough for your first 5-second video).`);
+                await ctx.replyWithMarkdown(`🎉 *Success!* You've been granted 69 welcome credits (enough for your first video).`);
             } else if (credits > 0) {
-                await ctx.replyWithMarkdown(`💰 You already have ${credits} credits. Start creating your first demo!`);
+                await ctx.replyWithMarkdown(`💰 You already have ${credits} credits. Start creating your first video!`);
             } else {
                 await ctx.replyWithMarkdown(`👋 Welcome back! You've already used your welcome credits.`);
             }
@@ -345,7 +401,7 @@ bot.command('start', async (ctx) => {
     if (payload === 'buy_points') {
         return sendBuyPointsMenu(ctx);
     }
-    
+
     // Show main menu with immediate buy options
     await sendDemoMenuWithBuyButtons(ctx);
 });
@@ -358,7 +414,7 @@ async function sendDemoMenuWithBuyButtons(ctx) {
     const totalVideos = getTotalVideosCreated();
     const lang = getUserLanguage(userId);
     const p = demoCfg.packs;
-    
+
     if (ctx.session) ctx.session.step = null;
 
     // Main message with all info - using translations
@@ -419,7 +475,7 @@ ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 👇 *TAP TO OPEN FULL STUDIO* 👇`;
 
             const studioUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
-            await ctx.replyWithMarkdown(promoText, 
+            await ctx.replyWithMarkdown(promoText,
                 Markup.inlineKeyboard([
                     [Markup.button.webApp('🚀 OPEN FULL STUDIO APP 🚀', studioUrl)]
                 ])
@@ -435,25 +491,25 @@ async function sendBuyPointsMenu(ctx) {
     const firstPurchase = isFirstPurchase({ telegramUserId: userId });
     const p = demoCfg.packs;
     const approx5s = (pts) => Math.max(1, Math.floor(pts / demoCfg.demoPrices['5']));
-    
+
     // Convert USD prices to MXN for display
     const rate = await fetchUsdRate('mxn');
     const microMxn = ((p.micro.price_cents / 100) * rate).toFixed(2);
     const starterMxn = ((p.starter.price_cents / 100) * rate).toFixed(2);
     const plusMxn = ((p.plus.price_cents / 100) * rate).toFixed(2);
     const proMxn = ((p.pro.price_cents / 100) * rate).toFixed(2);
-    
+
     let header = '💳 *Elige tu paquete de créditos:*\n\n';
     if (firstPurchase) {
         header = `🎁 *¡OFERTA ESPECIAL!*\n\nComienza con solo MX$${microMxn}:\n\n`;
     }
-    
+
     const text = `${header}` +
         `🎯 *Try It* - ${p.micro.points} credits (~${approx5s(p.micro.points)} videos)\n   └ *MX$${microMxn}*\n\n` +
         `⭐ *Starter* - ${p.starter.points} credits (~${approx5s(p.starter.points)} videos)\n   └ *MX$${starterMxn}*\n\n` +
         `🔥 *Plus* - ${p.plus.points} credits (~${approx5s(p.plus.points)} videos)\n   └ *MX$${plusMxn}* (¡Mejor valor!)\n\n` +
         `💎 *Pro* - ${p.pro.points} credits (~${approx5s(p.pro.points)} videos)\n   └ *MX$${proMxn}*`;
-    
+
     return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
         [Markup.button.callback(`🎯 MX$${microMxn} - ${p.micro.points} credits`, 'buy_pack_micro')],
         [Markup.button.callback(`⭐ MX$${starterMxn} - ${p.starter.points} credits`, 'buy_pack_starter')],
@@ -466,7 +522,7 @@ async function sendBuyPointsMenu(ctx) {
 bot.command('daily', async (ctx) => {
     const userId = String(ctx.from.id);
     const result = claimDailyCredits({ telegramUserId: userId });
-    
+
     if (result.granted) {
         let msg = `🎁 *Daily Credits Claimed!*\n\n+${result.amount} credits added`;
         if (result.streak > 1) {
@@ -480,7 +536,46 @@ bot.command('daily', async (ctx) => {
     }
 });
 
+// Template upload command handler
+bot.command('upload_template', async (ctx) => {
+    const userId = String(ctx.from.id);
+    ctx.session = {
+        mode: 'template_upload',
+        step: 'awaiting_video',
+        userId: userId
+    };
 
+    await ctx.replyWithMarkdown(
+        `📹 *Template Upload*\n\nPlease send your **template video** (MP4 format, max 15MB, up to 30 seconds):`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('❌ Cancel', 'cancel_template_upload')],
+            [Markup.button.callback('ℹ️ Help', 'upload_help')]
+        ])
+    );
+});
+
+bot.action('cancel_template_upload', async (ctx) => {
+    ctx.session = null;
+    await ctx.answerCbQuery('Template upload cancelled');
+    await ctx.editMessageText('Template upload cancelled');
+});
+
+bot.command('upload_help', async (ctx) => {
+    await ctx.replyWithMarkdown(
+        `📝 *Template Upload Guide*\n\n` +
+        `To create face-swap videos, you need to upload:\n` +
+        `1. A *video template* (MP4 format, max 15MB, 5-30 seconds)\n` +
+        `2. A *photo template* (JPEG/PNG, max 10MB, clear front-facing face)\n\n` +
+        `*Requirements:*\n` +
+        `- Video must show a consistent face throughout\n` +
+        `- Photo must be well-lit and high quality\n` +
+        `- Both files must meet size requirements\n\n` +
+        `Start with /upload_template or tap the button below:`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('📤 Start Template Upload', 'upload_template')]
+        ])
+    );
+});
 
 bot.command('promo', async (ctx) => {
     try {
@@ -497,11 +592,11 @@ bot.command('promo', async (ctx) => {
 bot.command('flashsale', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
-    
+
     if (!adminIds.includes(userId)) {
         return ctx.reply('❌ Admin only command.');
     }
-    
+
     try {
         const { sendFlashSale } = require('./services/promoScheduler');
         await sendFlashSale(bot, 30, 2); // 30% off for 2 hours
@@ -516,11 +611,11 @@ bot.command('flashsale', async (ctx) => {
 bot.command('reengage', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
-    
+
     if (!adminIds.includes(userId)) {
         return ctx.reply('❌ Admin only command.');
     }
-    
+
     try {
         const { sendReEngagementMessages } = require('./services/promoScheduler');
         await ctx.reply('⏳ Sending re-engagement messages...');
@@ -536,22 +631,22 @@ bot.command('reengage', async (ctx) => {
 bot.command('stats', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
-    
+
     if (!adminIds.includes(userId)) {
         return ctx.reply('❌ Admin only command.');
     }
-    
+
     try {
         const totalVideos = getTotalVideosCreated();
         const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get()?.count || 0;
         const totalRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases').get()?.total || 0;
         const buyers = db.prepare('SELECT COUNT(DISTINCT telegram_user_id) as count FROM purchases').get()?.count || 0;
-        const todayStart = new Date().setHours(0,0,0,0);
+        const todayStart = new Date().setHours(0, 0, 0, 0);
         const todayUsers = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at > ?').get(todayStart)?.count || 0;
         const todayRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases WHERE created_at > ?').get(todayStart)?.total || 0;
-        
+
         const conversionRate = totalUsers > 0 ? ((buyers / totalUsers) * 100).toFixed(2) : 0;
-        
+
         await ctx.reply(`📊 *BOT STATS*
 
 👥 *Users:* ${totalUsers.toLocaleString()}
@@ -573,23 +668,23 @@ bot.command('stats', async (ctx) => {
 bot.command('broadcast', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
-    
+
     if (!adminIds.includes(userId)) {
         return ctx.reply('❌ Admin only command.');
     }
-    
+
     const message = ctx.message.text.replace('/broadcast', '').trim();
     if (!message) {
         return ctx.reply('Usage: /broadcast Your message here');
     }
-    
+
     try {
         const users = db.prepare('SELECT id FROM users').all();
         let sent = 0;
         let failed = 0;
-        
+
         await ctx.reply(`⏳ Broadcasting to ${users.length} users...`);
-        
+
         for (const user of users) {
             try {
                 await bot.telegram.sendMessage(user.id, message, { parse_mode: 'Markdown' });
@@ -599,7 +694,7 @@ bot.command('broadcast', async (ctx) => {
                 failed++;
             }
         }
-        
+
         await ctx.reply(`✅ Broadcast complete!\nSent: ${sent}\nFailed: ${failed}`);
     } catch (e) {
         logger.error('Broadcast failed', { error: e.message });
@@ -690,7 +785,7 @@ bot.on('channel_post', async (ctx) => {
             const username = await getBotUsername();
             if (!username) return;
             const url = `https://t.me/${username}?start=promo`;
-            
+
             await ctx.reply(
                 '👋 Please use this bot in private messages to access all features.',
                 {
@@ -705,662 +800,91 @@ bot.on('channel_post', async (ctx) => {
     }
 });
 
-
-
-bot.action('buy_points', async (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply(
-        'Choose a credit pack:',
-        Markup.inlineKeyboard([
-            [Markup.button.callback(`${demoCfg.packs.starter.label} – ${demoCfg.packs.starter.points} pts`, 'buy_pack_starter')],
-            [Markup.button.callback(`${demoCfg.packs.plus.label} – ${demoCfg.packs.plus.points} pts`, 'buy_pack_plus')],
-            [Markup.button.callback(`${demoCfg.packs.pro.label} – ${demoCfg.packs.pro.points} pts`, 'buy_pack_pro')],
-        ])
-    );
-});
-
-bot.action('buy_points_menu', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        await sendBuyPointsMenu(ctx);
-    } catch (e) {
-        logger.error('buy_points_menu action failed', { error: e.message });
-    }
-});
-
-// Currency conversion helpers
-const https = require('https');
-const SUPPORTED_CURRENCIES = ['usd', 'mxn', 'eur', 'gbp', 'cad'];
-const CURRENCY_SYMBOLS = { usd: '$', mxn: 'MX$', eur: '€', gbp: '£', cad: 'C$' };
-const SAFE_RATES = { MXN: 18.0, EUR: 0.92, GBP: 0.79, CAD: 1.36 };
-
-async function fetchUsdRate(toCurrency) {
-    return new Promise((resolve) => {
-        try {
-            const symbol = String(toCurrency || '').toUpperCase();
-            if (symbol === 'USD') return resolve(1);
-            
-            const req = https.request({ 
-                hostname: 'api.exchangerate-api.com', 
-                path: '/v4/latest/USD', 
-                method: 'GET',
-                timeout: 4000 
-            }, res => {
-                let buf = ''; 
-                res.on('data', c => buf += c); 
-                res.on('end', () => {
-                    try { 
-                        const j = JSON.parse(buf); 
-                        const rate = j && j.rates && j.rates[symbol]; 
-                        if (typeof rate === 'number') resolve(rate);
-                        else resolve(SAFE_RATES[symbol] || 1);
-                    } catch (_) { 
-                        resolve(SAFE_RATES[symbol] || 1); 
-                    }
-                });
-            });
-            req.on('error', () => resolve(SAFE_RATES[symbol] || 1));
-            req.on('timeout', () => { req.destroy(); resolve(SAFE_RATES[symbol] || 1); });
-            req.end();
-        } catch (_) { 
-            resolve(SAFE_RATES[toCurrency.toUpperCase()] || 1); 
-        }
-    });
-}
-
-function toMinorUnits(usdAmount, currency, rate) {
-    let val = Number(usdAmount) * Number(rate || 1);
-    if (currency.toLowerCase() !== 'usd') {
-        val = val * 1.03; // 3% spread for FX safety
-    }
-    return Math.round(val * 100);
-}
-
-// Currency selection action handlers
-bot.action('cancel_payment', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        await ctx.deleteMessage().catch(() => {});
-        await ctx.reply('Payment cancelled.');
-    } catch (e) {
-        logger.error('Cancel payment failed', { error: e.message });
-    }
-});
-
-bot.action(/pay:(\w+):(.+)/, async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const currency = ctx.match[1].toLowerCase();
-        const packKey = ctx.match[2];
-        const pack = demoCfg.packs[packKey];
-        
-        if (!pack) return ctx.reply('Invalid pack');
-        if (!SUPPORTED_CURRENCIES.includes(currency)) return ctx.reply('Unsupported currency');
-        
-        const username = await getBotUsername();
-        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/FaceSwapVideoAiBot';
-        const userId = String(ctx.from.id);
-        
-        // Get exchange rate and convert
-        const rate = await fetchUsdRate(currency);
-        const amountInCurrency = toMinorUnits(pack.price_cents / 100, currency, rate);
-        const displayAmount = (amountInCurrency / 100).toFixed(2);
-        const symbol = CURRENCY_SYMBOLS[currency] || currency.toUpperCase();
-        
-        trackEvent(userId, 'checkout_started', { pack: packKey, currency, amount: amountInCurrency });
-
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [{
-                price_data: {
-                    currency: currency,
-                    product_data: { name: pack.label },
-                    unit_amount: amountInCurrency,
-                },
-                quantity: 1,
-            }],
-            mode: 'payment',
-            success_url: process.env.STRIPE_SUCCESS_URL || `${botUrl}?start=success`,
-            cancel_url: process.env.STRIPE_CANCEL_URL || `${botUrl}?start=cancel`,
-            client_reference_id: userId,
-            metadata: {
-                points: String(pack.points),
-                pack_type: packKey,
-                currency: currency,
-                usd_equivalent: String(pack.price_cents)
-            }
-        });
-        
-        await ctx.reply(
-            `💳 *${pack.label}*\n\n${pack.points} credits for *${symbol}${displayAmount}*\n\nTap below to complete your purchase:`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]],
-                },
-            }
-        );
-    } catch (e) {
-        logger.error('Payment checkout failed', { error: e.message, userId: ctx.from?.id });
-        ctx.reply('❌ Payment system error. Please try again later.');
-    }
-});
-
-async function startCheckout(ctx, pack, packKey) {
-    // Show currency selection
-    try {
-        const usdPrice = (pack.price_cents / 100).toFixed(2);
-        
-        await ctx.reply(
-            `💰 *${pack.label}*\n${pack.points} credits for $${usdPrice} USD\n\n🌍 *Select your currency:*`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.callback('🇺🇸 USD', `pay:usd:${packKey}`), Markup.button.callback('🇲🇽 MXN', `pay:mxn:${packKey}`)],
-                    [Markup.button.callback('🇪🇺 EUR', `pay:eur:${packKey}`), Markup.button.callback('🇬🇧 GBP', `pay:gbp:${packKey}`)],
-                    [Markup.button.callback('🇨🇦 CAD', `pay:cad:${packKey}`)],
-                    [Markup.button.callback('❌ Cancel', 'cancel_payment')]
-                ]).reply_markup
-            }
-        );
-    } catch (e) {
-        logger.error('startCheckout failed', { error: e.message, pack: pack.label, userId: ctx.from.id });
-        ctx.reply('❌ Payment system error. Please try again later.');
-    }
-}
-
-async function startWelcomeCreditsCheckout(ctx) {
-    try {
-        const username = await getBotUsername();
-        const botUrl = username ? `https://t.me/${username}` : 'https://t.me/ImMoreThanJustSomeBot';
-
-        const session = await stripe.checkout.sessions.create({
-            mode: 'setup',
-            payment_method_types: ['card'],
-            success_url: `${botUrl}?start=credits_success`,
-            cancel_url: `${botUrl}?start=credits_cancel`,
-            client_reference_id: String(ctx.from.id),
-            metadata: {
-                credits: '69',
-                type: 'welcome_credits',
-                telegram_user_id: String(ctx.from.id)
-            }
-        });
-        
-        await ctx.reply(
-            `🎁 *Get 69 FREE Credits!*\n\nVerify your card to unlock your welcome bonus.\n\n✅ You will NOT be charged\n✅ 69 credits = 1 free video + extras\n✅ ⚠️ *Limited time offer!*\n\n_We verify cards to prevent abuse_`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '🎁 Verify & Get 69 Free Credits', url: session.url }]],
-                },
-            }
-        );
-    } catch (e) {
-        logger.error('startWelcomeCreditsCheckout failed', { error: e.message, userId: ctx.from.id });
-        ctx.reply('❌ Registration system error. Please try again later.');
-    }
-}
-
-bot.action('buy_pack_micro', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.micro, 'micro');
-});
-bot.action('buy_pack_starter', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.starter, 'starter');
-});
-bot.action('buy_pack_plus', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.plus, 'plus');
-});
-bot.action('buy_pack_pro', async (ctx) => {
-    await ctx.answerCbQuery();
-    await startCheckout(ctx, demoCfg.packs.pro, 'pro');
-});
-
-bot.action('help', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        await ctx.reply('Create short demo videos. Buy points, choose length, select base video, send one clear face photo, and receive your demo. Keep uploads within the chosen time limit.');
-    } catch (e) {
-        logger.error('help action failed', { error: e.message });
-    }
-});
-bot.action('claim_daily', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const userId = String(ctx.from.id);
-        const lang = getUserLanguage(userId);
-        const result = claimDailyCredits({ telegramUserId: userId });
-        
-        if (result.granted) {
-            let msg = t(lang, 'dailyClaimed', { amount: result.amount });
-            if (result.streak > 1) {
-                msg += t(lang, 'dailyStreak', { streak: result.streak, bonus: result.streakBonus || 0 });
-            }
-            msg += t(lang, 'dailyComeBack');
-            await ctx.replyWithMarkdown(msg);
-        } else {
-            const hours = result.hoursLeft || 24;
-            await ctx.reply(t(lang, 'dailyAlready', { hours, streak: result.streak || 0 }));
-        }
-    } catch (e) {
-        logger.error('claim_daily action failed', { error: e.message });
-        await ctx.reply('❌ Error claiming daily credits. Please try again later.');
-    }
-});
-
-// Language change handlers
-bot.action('change_language', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const userId = String(ctx.from.id);
-        const lang = getUserLanguage(userId);
-        
-        await ctx.reply(t(lang, 'chooseLanguage'), Markup.inlineKeyboard([
-            [Markup.button.callback('🇺🇸 English', 'set_lang_en')],
-            [Markup.button.callback('🇪🇸 Español', 'set_lang_es')]
-        ]));
-    } catch (e) {
-        logger.error('change_language action failed', { error: e.message });
-    }
-});
-
-bot.action('set_lang_en', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const userId = String(ctx.from.id);
-        setUserLanguage(userId, 'en');
-        await ctx.reply(t('en', 'languageChanged'));
-        await sendDemoMenuWithBuyButtons(ctx);
-    } catch (e) {
-        logger.error('set_lang_en action failed', { error: e.message });
-    }
-});
-
-bot.action('set_lang_es', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const userId = String(ctx.from.id);
-        setUserLanguage(userId, 'es');
-        await ctx.reply(t('es', 'languageChanged'));
-        await sendDemoMenuWithBuyButtons(ctx);
-    } catch (e) {
-        logger.error('set_lang_es action failed', { error: e.message });
-    }
-});
-
-bot.action('demo_list', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        await ctx.reply('No stored demos yet.');
-    } catch (e) {
-        logger.error('demo_list action failed', { error: e.message });
-    }
-});
-
 bot.action('demo_new', async (ctx) => {
     try {
         await ctx.answerCbQuery();
-        const uid = String(ctx.from.id);
-        const u = getUser(uid);
-        ctx.session = { mode: 'demo', step: 'choose_length' };
-        await ctx.reply(
-            'Choose demo length:',
-            Markup.inlineKeyboard([
-                [Markup.button.callback(`5 seconds – ${demoCfg.demoPrices['5']} points`, 'demo_len_5')],
-                [Markup.button.callback(`10 seconds – ${demoCfg.demoPrices['10']} points`, 'demo_len_10')],
-                [Markup.button.callback(`15 seconds – ${demoCfg.demoPrices['15']} points`, 'demo_len_15')],
-            ])
-        );
+        const userId = String(ctx.from.id);
+
+        if (!checkUserHasTemplates(userId)) {
+            const { text, markup } = getTemplateMissingMessage();
+            return ctx.replyWithMarkdown(text, markup);
+        }
+
+        const template = db.prepare(
+            'SELECT template_video_url FROM user_templates WHERE user_id = ? ORDER BY last_used DESC LIMIT 1'
+        ).get(userId);
+
+        ctx.session = {
+            mode: 'demo',
+            step: 'awaiting_face',
+            base_url: template.template_video_url,
+            price: demoCfg.demoPrices['5']
+        };
+
+        await ctx.reply('📸 Please send a clear photo of the face you want to use:');
     } catch (e) {
         logger.error('demo_new action failed', { error: e.message, userId: ctx.from.id });
     }
 });
 
-bot.action('demo_len_5', async (ctx) => { 
-    try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 5, price: demoCfg.demoPrices['5'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
-    } catch (e) {
-        logger.error('demo_len_5 action failed', { error: e.message });
-    }
-});
-bot.action('demo_len_10', async (ctx) => { 
-    try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 10, price: demoCfg.demoPrices['10'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
-    } catch (e) {
-        logger.error('demo_len_10 action failed', { error: e.message });
-    }
-});
-bot.action('demo_len_15', async (ctx) => { 
-    try {
-        await ctx.answerCbQuery(); 
-        ctx.session = { mode: 'demo', step: 'choose_base', duration: 15, price: demoCfg.demoPrices['15'] }; 
-        await ctx.reply('Choose base video:', Markup.inlineKeyboard([[Markup.button.callback('Use example demo', 'demo_base_template')],[Markup.button.callback('Use my own video', 'demo_base_user')]])); 
-    } catch (e) {
-        logger.error('demo_len_15 action failed', { error: e.message });
-    }
-});
-
-bot.action('demo_base_template', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        
-        // Show template selection without videos
-        const c5 = demoCfg.demoCosts['5'];
-        const c10 = demoCfg.demoCosts['10'];
-        const c15 = demoCfg.demoCosts['15'];
-        
-        const kb = Markup.inlineKeyboard([
-            [Markup.button.callback(`Use 5s template (${c5.points} pts)`, 'demo_tmpl_5')],
-            [Markup.button.callback(`Use 10s template (${c10.points} pts)`, 'demo_tmpl_10')],
-            [Markup.button.callback(`Use 15s template (${c15.points} pts)`, 'demo_tmpl_15')],
-        ]);
-        await ctx.reply('Pick a template length:', kb);
-    } catch (e) {
-        logger.error('demo_base_template action failed', { error: e.message });
-    }
-});
-
-bot.action('demo_base_user', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const d = ctx.session && ctx.session.duration;
-        ctx.session.step = 'awaiting_base_video';
-        await ctx.reply(`Send a video that is ${d} seconds or less.`);
-    } catch (e) {
-        logger.error('demo_base_user action failed', { error: e.message });
-    }
-});
-
-bot.action('demo_tmpl_5', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const url = demoCfg.templates['5'];
-        if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_05_URL missing');
-        
-        ctx.session.mode = 'demo';
-        ctx.session.duration = 5;
-        ctx.session.price = demoCfg.demoPrices['5'];
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-        
-        logger.info('demo_tmpl_5_selected', { url });
-        await ctx.reply('Now send one clear photo of the face you want to use.');
-    } catch (e) {
-        logger.error('demo_tmpl_5 action failed', { error: e.message });
-    }
-});
-bot.action('demo_tmpl_10', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const url = demoCfg.templates['10'];
-        if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_10_URL missing');
-        
-        ctx.session.mode = 'demo';
-        ctx.session.duration = 10;
-        ctx.session.price = demoCfg.demoPrices['10'];
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-        
-        logger.info('demo_tmpl_10_selected', { url });
-        await ctx.reply('Now send one clear photo of the face you want to use.');
-    } catch (e) {
-        logger.error('demo_tmpl_10 action failed', { error: e.message });
-    }
-});
-bot.action('demo_tmpl_15', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        const url = demoCfg.templates['15'];
-        if (!url) return ctx.reply('Template not configured: DEMO_EXAMPLE_15_URL missing');
-        
-        ctx.session.mode = 'demo';
-        ctx.session.duration = 15;
-        ctx.session.price = demoCfg.demoPrices['15'];
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-        
-        logger.info('demo_tmpl_15_selected', { url });
-        await ctx.reply('Now send one clear photo of the face you want to use.');
-    } catch (e) {
-        logger.error('demo_tmpl_15 action failed', { error: e.message });
-    }
-});
-bot.action('mode_video', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'video', step: 'awaiting_swap_photo' };
-        await ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
-    } catch (e) {
-        logger.error('mode_video action failed', { error: e.message });
-    }
-});
-
-bot.action('mode_image', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'image', step: 'awaiting_swap_photo' };
-        await ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
-    } catch (e) {
-        logger.error('mode_image action failed', { error: e.message });
-    }
-});
-
-bot.action('mode_faceswap_preview', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'faceswap_preview', step: 'awaiting_swap_photo' };
-        await ctx.reply('Step 1: Send the **Source Face** photo (the face you want to use).');
-    } catch (e) {
-        logger.error('mode_faceswap_preview action failed', { error: e.message });
-    }
-});
-
-bot.action('mode_image2video', async (ctx) => {
-    try {
-        await ctx.answerCbQuery();
-        ctx.session = { mode: 'image2video', step: 'awaiting_photo' };
-        await ctx.reply('Step 1: Send the image to animate.');
-    } catch (e) {
-        logger.error('mode_image2video action failed', { error: e.message });
-    }
-});
-
-bot.on('photo', async (ctx) => {
-    if (!ctx.session || ctx.session.step) return;
-
+bot.command('view_templates', async (ctx) => {
     const userId = String(ctx.from.id);
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const fileId = photo.file_id;
-    const fileSize = photo.file_size;
-    try { logger.info('photo_meta', { user: userId, fileId, fileSize }); } catch (_) {}
+    const templates = db.prepare(
+        'SELECT * FROM user_templates WHERE user_id = ? ORDER BY last_used DESC'
+    ).all(userId);
 
-    if (ctx.session.step === 'awaiting_swap_photo') {
-        try {
-            await ctx.reply('🔍 Verifying photo...');
-            const { url } = await validatePhoto(ctx, fileId, fileSize);
-            const uploaded = await uploadFromUrl(url, 'image');
-            ctx.session.swapUrl = uploaded;
-            ctx.session.step = 'awaiting_target';
-            
-            const type = ctx.session.mode === 'video' ? 'VIDEO' : 'PHOTO';
-            ctx.reply(`✅ Source received. Now send the **Target ${type}** (the one to replace).`);
-        } catch (e) {
-            ctx.reply(`❌ ${e.message}`);
-        }
-        return;
+    if (!templates || templates.length === 0) {
+        return ctx.replyWithMarkdown(
+            '❌ No templates found. Use /upload_template to upload your first template pair.'
+        );
     }
 
-    if (ctx.session.step === 'awaiting_target' && ctx.session.mode === 'image') {
-        try {
-            await ctx.reply('🔍 Verifying target photo...');
-            const { url } = await validatePhoto(ctx, fileId, fileSize);
-            const uploaded = await uploadFromUrl(url, 'image');
-            await handleSwapRequest(ctx, userId, ctx.session.swapUrl, uploaded, 'image');
-            ctx.session = null;
-        } catch (e) {
-            ctx.reply(`❌ ${e.message}`);
-        }
-    }
+    const templateList = templates.map((t, i) => {
+        return `${i + 1}. Video: ${Math.round(t.video_size / 1024 / 1024)}MB, ${t.video_duration}s | Photo: ${Math.round(t.photo_size / 1024)}KB`;
+    }).join('\n');
 
-    if (ctx.session.step === 'awaiting_photo' && ctx.session.mode === 'image2video') {
-        try {
-            await ctx.reply('🔍 Verifying image...');
-            const { url } = await validatePhoto(ctx, fileId, fileSize);
-            const uploaded = await uploadFromUrl(url, 'image');
-            ctx.session.imageUrl = uploaded;
-            ctx.session.step = 'awaiting_prompt';
-            ctx.reply('✅ Image received. Now send the prompt to guide the video.');
-        } catch (e) {
-            ctx.reply(`❌ ${e.message}`);
-        }
-    }
+    await ctx.replyWithMarkdown(
+        `📂 *Your Templates*\n\n${templateList}\n\nUse /delete_template [number] to remove a template.`
+    );
 });
 
-bot.on('video', async (ctx) => {
-    if (!ctx.session || !ctx.session.step) return;
-
+bot.command('delete_template', async (ctx) => {
     const userId = String(ctx.from.id);
-    const fileId = ctx.message.video.file_id;
+    const templateNumber = Number(ctx.message.text.split(' ')[1]);
 
-    if (ctx.session.step === 'awaiting_target' && ctx.session.mode === 'video') {
-        const url = await getFileLink(ctx, fileId);
-        const uploaded = await uploadFromUrl(url, 'video');
-        await handleSwapRequest(ctx, userId, ctx.session.swapUrl, uploaded, 'video');
-        ctx.session = null;
+    if (isNaN(templateNumber) || templateNumber < 1) {
+        return ctx.reply('Please specify a valid template number. Use /view_templates to see your templates.');
     }
 
-    if (ctx.session.step === 'awaiting_target' && ctx.session.mode === 'faceswap_preview') {
-        const url = await getFileLink(ctx, fileId);
-        const uploaded = await uploadFromUrl(url, 'video');
-        await handlePreviewRequest(ctx, userId, ctx.session.swapUrl, uploaded);
-        ctx.session = null;
+    const templates = db.prepare(
+        'SELECT id FROM user_templates WHERE user_id = ? ORDER BY last_used DESC'
+    ).all(userId);
+
+    if (!templates || templateNumber > templates.length) {
+        return ctx.reply('Invalid template number. Use /view_templates to see your templates.');
     }
-    if (ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_base_video') {
-        const duration = ctx.message.video.duration || 0;
-        const max = ctx.session.duration || 0;
-        if (duration > max) {
-            return ctx.reply(`This demo is limited to ${max} seconds. Please crop your video to ${max} seconds or less and send it again.`);
-        }
-        const url = await getFileLink(ctx, fileId);
-        const uploaded = await uploadFromUrl(url, 'video');
-        ctx.session.base_url = uploaded;
-        ctx.session.step = 'awaiting_face';
-        ctx.reply('Now send one clear photo of the face you want to use.');
-    }
+
+    const templateId = templates[templateNumber - 1].id;
+    db.prepare('DELETE FROM user_templates WHERE id = ?').run(templateId);
+
+    await ctx.reply(`✅ Template #${templateNumber} deleted successfully.`);
 });
 
-async function handleSwapRequest(ctx, userId, swapUrl, targetUrl, type) {
-    const user = getUser(userId);
-    
-    // Check credits for video jobs
-    if (type === 'video') {
-        const credits = getCredits({ telegramUserId: userId });
-        const creditCost = 60;
-
-        if (credits < creditCost) {
-            return ctx.reply(`❌ You are out of credits for video face-swaps. 
-
-Each 5-second video costs ${creditCost} credits. Your current balance is ${credits} credits.
-
-Please buy a credit pack to continue!`, 
-            Markup.inlineKeyboard([
-                // Telegram deep link for 69 credits offer
-                [Markup.button.url('Buy Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')]
-            ]));
-        }
-
-        // Spend credits atomically
-        const success = spendCredits({ telegramUserId: userId, amount: creditCost });
-        if (!success) {
-            return ctx.reply('❌ Transaction failed. Please try again or contact support.');
-        }
-    }
-
-    const cost = type === 'video' ? 15 : 9;
-
-    if (user.points < cost) {
-        return ctx.reply(`❌ Not enough points. You need ${cost}, but have ${user.points}.`);
-    }
-
-    // Deduct points
-    updateUserPoints(userId, -cost);
-    addTransaction(userId, -cost, 'faceswap_start');
-
-    await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
-
-    try {
-        const requestId = await startFaceSwap(swapUrl, targetUrl);
-        createJob(requestId, userId, String(ctx.chat.id), type);
-        // Queue service will pick it up automatically next poll
-    } catch (e) {
-        // Refund on immediate error
-        if (type === 'video') {
-            // Refund credits for video jobs
-            const tId = String(userId);
-            const now = Date.now();
-            db.prepare('UPDATE user_credits SET credits = credits + 60, updated_at = ? WHERE telegram_user_id = ?').run(now, tId);
-            logger.info('Credits refunded due to error', { telegramUserId: userId, amount: 60 });
-        }
-        updateUserPoints(userId, cost);
-        addTransaction(userId, cost, 'refund_api_error');
-        ctx.reply(`❌ Error starting job: ${e.message}. Points refunded.`);
-    }
-}
-
-async function handlePreviewRequest(ctx, userId, swapUrl, targetUrl) {
-    const user = getUser(userId);
-    const cost = 9;
-    if (user.points < cost) {
-        return ctx.reply(`❌ Not enough points. You need ${cost}, but have ${user.points}.`);
-    }
-    updateUserPoints(userId, -cost);
-    addTransaction(userId, -cost, 'faceswap_preview_start');
-    await ctx.reply('⏳ Processing preview...');
-    try {
-        const requestId = await startFaceSwapPreview(swapUrl, targetUrl);
-        createJob(requestId, userId, String(ctx.chat.id), 'preview', { service: 'faceswap_preview' });
-    } catch (e) {
-        updateUserPoints(userId, cost);
-        addTransaction(userId, cost, 'refund_api_error');
-        ctx.reply(`❌ Error starting preview: ${e.message}. Points refunded.`);
-    }
-}
-
-bot.on('text', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'image2video' || ctx.session.step !== 'awaiting_prompt') return;
+bot.command('image_to_video', async (ctx) => {
     const userId = String(ctx.from.id);
-    const prompt = ctx.message.text || '';
-    const user = getUser(userId);
-    const cost = 15;
-    if (user.points < cost) {
-        return ctx.reply(`❌ Not enough points. You need ${cost}, but have ${user.points}.`);
+
+    // Check if user has templates
+    if (!checkUserHasTemplates(userId)) {
+        return ctx.replyWithMarkdown(getTemplateMissingMessage().text, getTemplateMissingMessage().markup);
     }
-    updateUserPoints(userId, -cost);
-    addTransaction(userId, -cost, 'image2video_start');
-    await ctx.reply('⏳ Processing... We’re checking your video. This can take up to 120 seconds…');
-    try {
-        const url = await runImage2VideoFlow(ctx.session.imageUrl, prompt, (m) => {
-            try { if (m) ctx.reply(m); } catch (_) {}
-        }, 120000);
-        await ctx.reply('✅ Video Ready!');
-        await ctx.reply(url);
-        ctx.session = null;
-    } catch (e) {
-        updateUserPoints(userId, cost);
-        addTransaction(userId, cost, 'refund_api_error');
-        const msg = e.message && /unexpected.*provider/i.test(e.message)
-            ? '❌ The video provider returned an unexpected error. Your request did not complete; please try again in a few minutes.'
-            : `❌ ${e.message}. Points refunded.`;
-        ctx.reply(msg);
-        ctx.session = null;
-    }
+
+    ctx.session = {
+        mode: 'image_to_video',
+        step: 'awaiting_image',
+        base_url: ''
+    };
+
+    await ctx.reply('🖼️ Please send the image you want to animate:');
 });
 
 // Graceful Stop

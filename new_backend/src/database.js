@@ -97,6 +97,22 @@ db.exec(`
         created_at INTEGER
     );
 
+    -- NEW: User templates for storing user-provided templates
+    CREATE TABLE IF NOT EXISTS user_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        template_video_url TEXT NOT NULL,
+        template_photo_url TEXT NOT NULL,
+        video_size INTEGER NOT NULL,
+        photo_size INTEGER NOT NULL,
+        video_duration INTEGER,
+        photo_width INTEGER,
+        photo_height INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_used TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    );
+
     -- Create indexes for performance
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
     CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
@@ -164,10 +180,10 @@ const getUser = (id) => {
         db.prepare('INSERT INTO users (id, points, created_at) VALUES (?, 0, ?)').run(id, now);
         return { id, points: 0, created_at: now, is_premium: 0, referred_by: null, has_purchased: 0 };
     }
-    
+
     // Update last activity
     db.prepare('UPDATE users SET last_activity = ? WHERE id = ?').run(Date.now(), id);
-    
+
     return user;
 };
 
