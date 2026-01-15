@@ -194,25 +194,53 @@ bot.command('start', async (ctx) => {
         switch (payload) {
             case 'studio':
                 return ctx.replyWithMarkdown(
-                    '✨ *Opening Face-Swap Studio*\n\nTap below to launch:',
-                    Markup.inlineKeyboard([
-                        [Markup.button.callback('🚀 Open Studio', 'open_studio')]
-                    ])
+                    '✨ *AI Face-Swap Studio*\n\nOpening studio...',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [[{
+                                text: '🚀 Open Studio',
+                                web_app: { url: process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/' }
+                            }]]
+                        }
+                    }
                 );
             case 'get_credits':
-                return ctx.replyWithMarkdown(
-                    '🎁 *Free Credits*\n\nGet started with free credits:',
-                    Markup.inlineKeyboard([
-                        [Markup.button.callback('🎁 Claim Free Credits', 'daily')]
-                    ])
-                );
+                // Check if user is eligible for welcome credits (Stripe subscriber who hasn't claimed yet)
+                logger.info('Checking 69 free credits eligibility', { userId });
+                const stripeCustomer = db.prepare('SELECT stripe_customer_id FROM user_credits WHERE telegram_user_id = ? AND stripe_customer_id IS NOT NULL').get(userId);
+                const hasWelcomeCredits = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ? AND welcome_granted = 1').get(userId);
+
+                if (stripeCustomer && !hasWelcomeCredits) {
+                    logger.info('User eligible for 69 free credits', { userId, stripeCustomerId: stripeCustomer.stripe_customer_id });
+                    // Immediately grant 69 free credits
+                    db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1 WHERE telegram_user_id = ?').run(userId);
+                    logger.info('69 free credits granted', { userId });
+                    return ctx.replyWithMarkdown('🎉 *69 Free Credits Granted!*\n\nYou now have 69 free credits to get started!');
+                } else {
+                    logger.info('User not eligible for 69 free credits', {
+                        userId,
+                        hasStripeCustomer: !!stripeCustomer,
+                        hasWelcomeCredits: !!hasWelcomeCredits
+                    });
+                    // Not eligible - show daily credits option
+                    return ctx.replyWithMarkdown(
+                        '🎁 *Free Credits*\n\nGet started with free credits:',
+                        Markup.inlineKeyboard([
+                            [Markup.button.callback('🎁 Claim Daily Credits', 'daily')]
+                        ])
+                    );
+                }
             case 'buy_points':
                 return sendBuyPointsMenu(ctx);
             case 'create':
                 return ctx.replyWithMarkdown(
-                    '🎬 *Create Video*\n\nStart creating now:',
+                    '🎬 *Create Video*\n\nChoose video duration:',
                     Markup.inlineKeyboard([
-                        [Markup.button.callback('🎬 Create Video', 'demo_new')]
+                        [Markup.button.callback('5 Second Video', 'create_5s')],
+                        [Markup.button.callback('10 Second Video', 'create_10s')],
+                        [Markup.button.callback('20 Second Video', 'create_20s')],
+                        [Markup.button.callback('✨ Go to Studio for More Options', 'open_studio')]
                     ])
                 );
         }
@@ -853,13 +881,12 @@ bot.command('studio', async (ctx) => {
     try {
         const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(
-            `✨ *Ai Face-Swap Studio*\n\nAll our AI services in one beautiful app:\n\n🎭 Face Swap Video\n🗣️ Talking Avatar\n🎬 Image to Video\n✨ 4K Enhancement\n🖼️ Background Removal\n\nTap the button below to open!`,
+            '✨ *Ai Face-Swap Studio*\n\nTap below to open the full studio:',
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    keyboard: [[{ text: '🚀 Open Ai Face-Swap Studio', web_app: { url: webAppUrl } }]],
-                    resize_keyboard: true,
-                    one_time_keyboard: true
+                    keyboard: [[{ text: '🚀 Open Studio', web_app: { url: webAppUrl } }]],
+                    resize_keyboard: true
                 }
             }
         );
@@ -867,7 +894,7 @@ bot.command('studio', async (ctx) => {
         logger.error('studio command failed', { error: e.message });
         const fallbackUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(
-            `✨ *Ai Face-Swap Studio*\n\nOpen the app here:\n${fallbackUrl}`,
+            '✨ *Ai Face-Swap Studio*\n\nOpen the app here:\n' + fallbackUrl,
             { parse_mode: 'Markdown' }
         );
     }
@@ -879,7 +906,7 @@ bot.action('open_studio', async (ctx) => {
         await ctx.answerCbQuery();
         const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
         await ctx.reply(
-            `✨ *Ai Face-Swap Studio*\n\nTap the button to open:`,
+            '✨ *Ai Face-Swap Studio*\n\nTap the button to open:',
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
