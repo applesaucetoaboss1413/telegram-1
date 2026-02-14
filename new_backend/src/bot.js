@@ -62,20 +62,14 @@ const isValidChannelTarget = (targetId) => {
 const getFileLink = async (ctx, fileId) => {
     const link = await ctx.telegram.getFileLink(fileId);
     let url = link.href;
-    // MagicAPI requires valid extension. If Telegram URL lacks it (rare), or has query params, ensure it's clean.
-    // Usually Telegram URLs are like: https://api.telegram.org/file/bot<token>/.../file.jpg
-    // We can append a dummy query param if needed, but it's better to trust Telegram unless proven otherwise.
-    // However, we can check if it ends with a known image extension.
     return url;
 };
 
 const validatePhoto = async (ctx, fileId, fileSize) => {
-    // 1. Check Size (10MB = 10 * 1024 * 1024 bytes)
     if (fileSize > 10 * 1024 * 1024) {
         throw new Error('Image too large. Maximum size is 10MB.');
     }
 
-    // 2. Download buffer for validation
     const url = await getFileLink(ctx, fileId);
     let buffer;
     try {
@@ -84,7 +78,6 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
         throw new Error('Failed to download image for validation.');
     }
 
-    // 3. Face Detection
     try {
         const faces = await detectFaces(buffer);
         if (faces.length === 0) {
@@ -92,21 +85,11 @@ const validatePhoto = async (ctx, fileId, fileSize) => {
         }
     } catch (e) {
         logger.error('Face detection internal error:', e);
-        // If detection fails technically, maybe allow it but warn? Or fail safe?
-        // User requested "Implement proper photo reception...".
-        // Let's fail if we can't detect faces, as that's the point of the bot.
         throw new Error('Could not verify face in image. Please try another photo.');
     }
 
-    // 4. Ensure URL has extension for MagicAPI
-    // If url doesn't end with .jpg/.png/.jpeg, we might need to rely on the fact that Telegram sends Content-Type.
-    // But MagicAPI validates the URL string itself.
-    // If it's missing, we can append a dummy one if the URL allows it, or just pass it.
-    // Telegram file links usually have extensions. If not, we might be in trouble.
-    // Let's check:
     const ext = path.extname(new URL(url).pathname).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-        // Warn or try to fix? Telegram usually provides extensions.
         logger.warn('Telegram URL missing standard image extension', { url });
     }
 
@@ -186,9 +169,8 @@ bot.command('upload_help', async (ctx) => {
 
 bot.command('start', async (ctx) => {
     const userId = String(ctx.from.id);
-    const payload = ctx.message?.text?.split(' ')[1]; // Get deep link payload
+    const payload = ctx.message?.text?.split(' ')[1];
 
-    // Handle deep link payloads
     if (payload) {
         logger.info('Deep link triggered', { userId, payload });
         switch (payload) {
@@ -206,20 +188,15 @@ bot.command('start', async (ctx) => {
                     }
                 );
             case 'get_credits':
-                // Check if user is eligible for welcome credits (Stripe subscriber who hasn't claimed yet)
                 logger.info('Checking 69 free credits eligibility', { userId });
                 const stripeCustomer = db.prepare('SELECT stripe_customer_id FROM user_credits WHERE telegram_user_id = ? AND stripe_customer_id IS NOT NULL').get(userId);
                 const hasWelcomeCredits = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ? AND welcome_granted = 1').get(userId);
 
                 if (stripeCustomer && !hasWelcomeCredits) {
                     logger.info('User eligible for 69 free credits', { userId, stripeCustomerId: stripeCustomer.stripe_customer_id });
-                    // Immediately grant 69 free credits
                     db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1 WHERE telegram_user_id = ?').run(userId);
                     logger.info('69 free credits granted', { userId });
-
-                    // Get updated balance
                     const credits = db.prepare('SELECT credits FROM user_credits WHERE telegram_user_id = ?').get(userId).credits;
-
                     return ctx.replyWithMarkdown(
                         `🎉 *69 Free Credits Granted!*\n\n` +
                         `💰 *New Balance:* ${credits} credits\n` +
@@ -254,7 +231,6 @@ bot.command('start', async (ctx) => {
         }
     }
 
-    // Check if user has templates
     const hasTemplates = db.prepare(
         'SELECT 1 FROM user_templates WHERE user_id = ? LIMIT 1'
     ).get(userId);
@@ -274,7 +250,6 @@ bot.command('start', async (ctx) => {
         return;
     }
 
-    // User has templates - show normal menu
     await ctx.replyWithMarkdown(
         '🎭 *Face Swap Bot*\n\n' +
         'You have templates uploaded!\n\n' +
@@ -304,94 +279,99 @@ bot.action('template_help', async (ctx) => {
     );
 });
 
+// ─── UNIFIED video handler ────────────────────────────────────────────────────
 bot.on('video', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_video') return;
+    if (!ctx.session) return;
+
+    const video = ctx.message.video;
+    const fileId = video.file_id;
+    const fileSize = video.file_size;
 
     try {
-        const video = ctx.message.video;
-        const fileId = video.file_id;
-        const fileSize = video.file_size;
-
-        // Validate video
-        if (fileSize > 15 * 1024 * 1024) {
-            return ctx.reply('Video too large. Maximum size is 15MB.');
+        // Template upload flow
+        if (ctx.session.mode === 'template_upload' && ctx.session.step === 'awaiting_video') {
+            if (fileSize > 15 * 1024 * 1024) {
+                return ctx.reply('Video too large. Maximum size is 15MB.');
+            }
+            if (video.mime_type !== 'video/mp4') {
+                return ctx.reply('Only MP4 videos are supported as templates.');
+            }
+            const url = await getFileLink(ctx, fileId);
+            ctx.session.templateVideo = { url, size: fileSize, duration: video.duration };
+            ctx.session.step = 'awaiting_photo';
+            await ctx.replyWithMarkdown(
+                '✅ Video template received! Now please send your **template photo** (JPEG/PNG, max 10MB, clear front-facing face):',
+                Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', 'cancel_template_upload')]])
+            );
+            return;
         }
-        if (video.mime_type !== 'video/mp4') {
-            return ctx.reply('Only MP4 videos are supported as templates.');
+
+        // Demo flow - awaiting base video
+        if (ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_base_video') {
+            if (video.duration > ctx.session.duration) {
+                return ctx.reply(`❌ Video too long. Maximum duration is ${ctx.session.duration} seconds.`);
+            }
+            const url = await getFileLink(ctx, fileId);
+            ctx.session.base_url = url;
+            ctx.session.step = 'awaiting_face';
+            await ctx.reply('✅ Video received. Now please send a clear photo of the face you want to use:');
+            return;
         }
 
-        // Store video URL in session
-        const { url } = await getFileLink(ctx, fileId);
-        ctx.session.templateVideo = {
-            url,
-            size: fileSize,
-            duration: video.duration
-        };
-        ctx.session.step = 'awaiting_photo';
+        // Create video flow - awaiting base video
+        if (ctx.session.mode === 'create_video' && ctx.session.step === 'awaiting_base_video') {
+            if (video.duration > ctx.session.duration) {
+                return ctx.reply(`❌ Video too long. Maximum duration is ${ctx.session.duration} seconds.`);
+            }
+            const url = await getFileLink(ctx, video.file_id);
+            ctx.session.base_url = url;
+            ctx.session.step = 'awaiting_face';
+            await ctx.reply('✅ Video received. Now please send a clear photo of the face you want to use:');
+            return;
+        }
 
-        await ctx.replyWithMarkdown(
-            '✅ Video template received! Now please send your **template photo** (JPEG/PNG, max 10MB, clear front-facing face):',
-            Markup.inlineKeyboard([
-                [Markup.button.callback('❌ Cancel', 'cancel_template_upload')]
-            ])
-        );
     } catch (e) {
         ctx.reply(`❌ Error processing video: ${e.message}`);
         ctx.session = null;
     }
 });
 
+// ─── UNIFIED photo handler ────────────────────────────────────────────────────
 bot.on('photo', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_photo') return;
+    if (!ctx.session) return;
 
-    try {
-        const photo = ctx.message.photo[ctx.message.photo.length - 1];
-        const fileId = photo.file_id;
-        const fileSize = photo.file_size;
-
-        // Validate photo
-        if (fileSize > 10 * 1024 * 1024) {
-            return ctx.reply('Photo too large. Maximum size is 10MB.');
-        }
-
-        // Get photo URL
-        const { url } = await getFileLink(ctx, fileId);
-
-        // Store template in database
-        db.prepare(
-            'INSERT OR REPLACE INTO user_templates (user_id, template_video_url, template_photo_url, video_size, photo_size, video_duration, last_used) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))'
-        ).run(
-            ctx.session.userId,
-            ctx.session.templateVideo.url,
-            url,
-            ctx.session.templateVideo.size,
-            fileSize,
-            ctx.session.templateVideo.duration
-        );
-
-        // Clear session
-        ctx.session = null;
-
-        await ctx.replyWithMarkdown(
-            '✅ Template upload complete!\n\nYou can now use face-swap commands with your uploaded template.',
-            Markup.inlineKeyboard([
-                [Markup.button.callback('🎬 Create Video', 'demo_new')]
-            ])
-        );
-    } catch (e) {
-        ctx.reply(`❌ Error processing photo: ${e.message}`);
-        ctx.session = null;
-    }
-});
-
-bot.on('photo', async (ctx) => {
-    if (!ctx.session || !ctx.session.step) return;
     const userId = String(ctx.from.id);
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = photo.file_id;
     const fileSize = photo.file_size;
-    if (ctx.session && ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_face') {
-        try {
+
+    try {
+        // Template upload flow
+        if (ctx.session.mode === 'template_upload' && ctx.session.step === 'awaiting_photo') {
+            if (fileSize > 10 * 1024 * 1024) {
+                return ctx.reply('Photo too large. Maximum size is 10MB.');
+            }
+            const url = await getFileLink(ctx, fileId);
+            db.prepare(
+                'INSERT OR REPLACE INTO user_templates (user_id, template_video_url, template_photo_url, video_size, photo_size, video_duration, last_used) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))'
+            ).run(
+                ctx.session.userId,
+                ctx.session.templateVideo.url,
+                url,
+                ctx.session.templateVideo.size,
+                fileSize,
+                ctx.session.templateVideo.duration
+            );
+            ctx.session = null;
+            await ctx.replyWithMarkdown(
+                '✅ Template upload complete!\n\nYou can now use face-swap commands with your uploaded template.',
+                Markup.inlineKeyboard([[Markup.button.callback('🎬 Create Video', 'demo_new')]])
+            );
+            return;
+        }
+
+        // Demo flow - awaiting face photo
+        if (ctx.session.mode === 'demo' && ctx.session.step === 'awaiting_face') {
             await ctx.reply('🔍 Verifying photo...');
             const { url } = await validatePhoto(ctx, fileId, fileSize);
             const faceUrl = await uploadFromUrl(url, 'image');
@@ -403,7 +383,6 @@ bot.on('photo', async (ctx) => {
             }
             updateUserPoints(userId, -price);
             addTransaction(userId, -price, 'demo_start');
-
             await ctx.reply('Processing your demo… this usually takes up to 120 seconds.');
             try {
                 const requestId = await startFaceSwap(faceUrl, baseUrl);
@@ -415,105 +394,20 @@ bot.on('photo', async (ctx) => {
                 ctx.reply(`❌ Error starting demo: ${e.message}. Points refunded.`);
             }
             ctx.session = null;
-        } catch (e) {
-            ctx.reply(`❌ ${e.message}`);
-        }
-    } else if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_photo') return;
-
-    try {
-        // Validate photo
-        if (fileSize > 10 * 1024 * 1024) {
-            return ctx.reply('Photo too large. Maximum size is 10MB.');
+            return;
         }
 
-        // Get photo URL
-        const { url } = await getFileLink(ctx, fileId);
+        // Create video flow - awaiting face photo
+        if (ctx.session.mode === 'create_video' && ctx.session.step === 'awaiting_face') {
+            const sortedPhotos = ctx.message.photo.sort((a, b) => b.file_size - a.file_size);
+            const { url } = await getFileLink(ctx, sortedPhotos[0].file_id);
+            ctx.session.face_url = url;
+            await handleVideoCreation(ctx);
+            return;
+        }
 
-        // Store template in database
-        db.prepare(
-            'INSERT OR REPLACE INTO user_templates (user_id, template_video_url, template_photo_url, video_size, photo_size, video_duration, last_used) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))'
-        ).run(
-            ctx.session.userId,
-            ctx.session.templateVideo.url,
-            url,
-            ctx.session.templateVideo.size,
-            fileSize,
-            ctx.session.templateVideo.duration
-        );
-
-        // Clear session
-        ctx.session = null;
-
-        await ctx.replyWithMarkdown(
-            '✅ Template upload complete!\n\nYou can now use face-swap commands with your uploaded template.',
-            Markup.inlineKeyboard([
-                [Markup.button.callback('🎬 Create Video', 'demo_new')]
-            ])
-        );
     } catch (e) {
-        ctx.reply(`❌ Error processing photo: ${e.message}`);
-        ctx.session = null;
-    }
-});
-
-bot.on('video', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'template_upload' || ctx.session.step !== 'awaiting_video') return;
-
-    try {
-        const video = ctx.message.video;
-        const fileId = video.file_id;
-        const fileSize = video.file_size;
-
-        // Validate video
-        if (fileSize > 15 * 1024 * 1024) {
-            return ctx.reply('Video too large. Maximum size is 15MB.');
-        }
-        if (video.mime_type !== 'video/mp4') {
-            return ctx.reply('Only MP4 videos are supported as templates.');
-        }
-
-        // Store video URL in session
-        const { url } = await getFileLink(ctx, fileId);
-        ctx.session.templateVideo = {
-            url,
-            size: fileSize,
-            duration: video.duration
-        };
-        ctx.session.step = 'awaiting_photo';
-
-        await ctx.replyWithMarkdown(
-            '✅ Video template received! Now please send your **template photo** (JPEG/PNG, max 10MB, clear front-facing face):',
-            Markup.inlineKeyboard([
-                [Markup.button.callback('❌ Cancel', 'cancel_template_upload')]
-            ])
-        );
-    } catch (e) {
-        ctx.reply(`❌ Error processing video: ${e.message}`);
-        ctx.session = null;
-    }
-});
-
-bot.on('video', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'demo' || ctx.session.step !== 'awaiting_base_video') return;
-
-    try {
-        const video = ctx.message.video;
-        const fileId = video.file_id;
-        const fileSize = video.file_size;
-
-        // Validate video duration matches selected duration
-        if (video.duration > ctx.session.duration) {
-            return ctx.reply(`❌ Video too long. Maximum duration is ${ctx.session.duration} seconds.`);
-        }
-
-        // Get video URL
-        const { url } = await getFileLink(ctx, fileId);
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-
-        await ctx.reply('✅ Video received. Now please send a clear photo of the face you want to use:');
-    } catch (e) {
-        ctx.reply(`❌ Error processing video: ${e.message}`);
+        ctx.reply(`❌ ${e.message}`);
         ctx.session = null;
     }
 });
@@ -535,12 +429,6 @@ const getTemplateMissingMessage = () => {
     };
 };
 
-// Bot Logic
-/**
- * Sends the main demo menu and introduction to the user.
- * Works for both private chats and channel posts.
- * Note: Bot must be channel admin with 'Can post messages' permission to reply in channels.
- */
 async function sendDemoMenu(ctx) {
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
@@ -567,10 +455,8 @@ _Swap your face into any video in seconds!_
         await ctx.replyWithMarkdown(msg);
     }
 
-    // Get the proper mini app URL
     const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
 
-    // Credit messaging
     let creditMsg = '';
     let buttons = [
         [Markup.button.webApp('🎨✨ OPEN FULL STUDIO APP ✨🎨', miniAppUrl)],
@@ -610,7 +496,6 @@ bot.command('help', async (ctx) => {
     );
 });
 
-// New function that shows buy buttons immediately
 async function sendDemoMenuWithBuyButtons(ctx) {
     const userId = ctx.from ? String(ctx.from.id) : String(ctx.chat.id);
     const user = getUser(userId);
@@ -621,7 +506,6 @@ async function sendDemoMenuWithBuyButtons(ctx) {
 
     if (ctx.session) ctx.session.step = null;
 
-    // Main message with all info - using translations
     const msg = `${t(lang, 'title')}
 ${t(lang, 'subtitle')}
 
@@ -645,7 +529,6 @@ ${t(lang, 'videoPricing')}
 
 ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
-    // Immediate buy buttons with translations - Language button prominent at top
     let buttons = [
         [Markup.button.callback('🌐 English / Español', 'change_language')],
         [Markup.button.callback(t(lang, 'btnGetFreeCredits'), 'get_free_credits')],
@@ -658,7 +541,6 @@ ${t(lang, 'yourBalance', { credits: credits > 0 ? credits : user.points })}`;
 
     await ctx.replyWithMarkdown(msg, Markup.inlineKeyboard(buttons));
 
-    // SEND FLASHY STUDIO PROMO AS LAST MESSAGE - RIGHT IN THEIR FACE
     setTimeout(async () => {
         try {
             const promoText = `
@@ -696,7 +578,6 @@ async function sendBuyPointsMenu(ctx) {
     const p = demoCfg.packs;
     const approx5s = (pts) => Math.max(1, Math.floor(pts / demoCfg.demoPrices['5']));
 
-    // Convert USD prices to MXN for display
     const rate = await fetchUsdRate('mxn');
     const microMxn = ((p.micro.price_cents / 100) * rate).toFixed(2);
     const starterMxn = ((p.starter.price_cents / 100) * rate).toFixed(2);
@@ -722,7 +603,6 @@ async function sendBuyPointsMenu(ctx) {
     ]));
 }
 
-// Daily credits command
 bot.command('daily', async (ctx) => {
     const userId = String(ctx.from.id);
     const result = claimDailyCredits({ telegramUserId: userId });
@@ -743,7 +623,6 @@ bot.command('daily', async (ctx) => {
 bot.command('image_to_video', async (ctx) => {
     const userId = String(ctx.from.id);
 
-    // Check if user has templates
     if (!checkUserHasTemplates(userId)) {
         return ctx.replyWithMarkdown(
             '❌ You need to upload templates first!\n\nUse /upload_template to upload your video and photo templates.',
@@ -762,7 +641,6 @@ bot.command('image_to_video', async (ctx) => {
     await ctx.reply('🖼️ Please send the image you want to animate:');
 });
 
-// ADMIN COMMAND: Trigger flash sale
 bot.command('flashsale', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
@@ -773,7 +651,7 @@ bot.command('flashsale', async (ctx) => {
 
     try {
         const { sendFlashSale } = require('./services/promoScheduler');
-        await sendFlashSale(bot, 30, 2); // 30% off for 2 hours
+        await sendFlashSale(bot, 30, 2);
         await ctx.reply('✅ Flash sale sent to channel and all previous buyers!');
     } catch (e) {
         logger.error('Flash sale trigger failed', { error: e.message });
@@ -781,7 +659,6 @@ bot.command('flashsale', async (ctx) => {
     }
 });
 
-// ADMIN COMMAND: Send re-engagement messages now
 bot.command('reengage', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
@@ -801,7 +678,6 @@ bot.command('reengage', async (ctx) => {
     }
 });
 
-// ADMIN COMMAND: View stats
 bot.command('stats', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
@@ -818,7 +694,6 @@ bot.command('stats', async (ctx) => {
         const todayStart = new Date().setHours(0, 0, 0, 0);
         const todayUsers = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at > ?').get(todayStart)?.count || 0;
         const todayRevenue = db.prepare('SELECT SUM(amount_cents) as total FROM purchases WHERE created_at > ?').get(todayStart)?.total || 0;
-
         const conversionRate = totalUsers > 0 ? ((buyers / totalUsers) * 100).toFixed(2) : 0;
 
         await ctx.reply(`📊 *BOT STATS*
@@ -838,7 +713,6 @@ bot.command('stats', async (ctx) => {
     }
 });
 
-// ADMIN COMMAND: Broadcast message to all users
 bot.command('broadcast', async (ctx) => {
     const adminIds = (process.env.ADMIN_IDS || '1087968824,8063916626').split(',').map(s => s.trim());
     const userId = String(ctx.from.id);
@@ -863,7 +737,7 @@ bot.command('broadcast', async (ctx) => {
             try {
                 await bot.telegram.sendMessage(user.id, message, { parse_mode: 'Markdown' });
                 sent++;
-                await new Promise(r => setTimeout(r, 100)); // Rate limit
+                await new Promise(r => setTimeout(r, 100));
             } catch (e) {
                 failed++;
             }
@@ -884,7 +758,6 @@ bot.command('chatid', async (ctx) => {
     }
 });
 
-// Mini App Studio command
 bot.command('studio', async (ctx) => {
     try {
         const webAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
@@ -908,7 +781,6 @@ bot.command('studio', async (ctx) => {
     }
 });
 
-// Mini App button action
 bot.action('open_studio', async (ctx) => {
     try {
         await ctx.answerCbQuery();
@@ -938,18 +810,6 @@ async function getBotUsername() {
     return cachedBotUsername;
 }
 
-/**
- * Dual handling approach for /start command:
- * 1. DM handler (bot.command('start')): Standard entry point for private chats.
- * 2. Channel handler (bot.on('channel_post')): Allows the bot to respond to /start in the promo channel.
- * 
- * Bot Permissions Required for Channel Handling:
- * - Must be an Administrator in @FaceSwapVideoAi.
- * - Must have 'Can post messages' permission.
- * - 'Can edit messages' is recommended for pinning.
- * 
- * Deep Link Format: https://t.me/<YourBotUsername>?start=promo
- */
 bot.on('channel_post', async (ctx) => {
     const text = ctx.channelPost?.text;
     if (text && text.trim() === '/start') {
@@ -978,7 +838,6 @@ bot.action('demo_new', async (ctx) => {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
 
-        // Check if user has templates
         const template = db.prepare(
             'SELECT template_video_url, template_photo_url FROM user_templates WHERE user_id = ? ORDER BY last_used DESC LIMIT 1'
         ).get(userId);
@@ -996,7 +855,7 @@ bot.action('demo_new', async (ctx) => {
             mode: 'demo',
             step: 'awaiting_base_video',
             duration: 5,
-            price: 60 // Fixed price for 5s video
+            price: 60
         };
         await ctx.reply(`📹 Send your own 5-second video.\n\n⚠️ Make sure it's already trimmed to 5 seconds!`);
     } catch (e) {
@@ -1011,7 +870,7 @@ bot.action('demo_len_10', async (ctx) => {
             mode: 'demo',
             step: 'awaiting_base_video',
             duration: 10,
-            price: 90 // Fixed price for 10s video
+            price: 90
         };
         await ctx.reply(`📹 Send your own 10-second video.\n\n⚠️ Make sure it's already trimmed to 10 seconds!`);
     } catch (e) {
@@ -1026,7 +885,7 @@ bot.action('demo_len_15', async (ctx) => {
             mode: 'demo',
             step: 'awaiting_base_video',
             duration: 15,
-            price: 125 // Fixed price for 15s video
+            price: 125
         };
         await ctx.reply(`📹 Send your own 15-second video.\n\n⚠️ Make sure it's already trimmed to 15 seconds!`);
     } catch (e) {
@@ -1082,7 +941,6 @@ bot.action('create_5s', async (ctx) => {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
 
-        // Check if user has templates
         if (!checkUserHasTemplates(userId)) {
             const { text, markup } = getTemplateMissingMessage();
             return ctx.replyWithMarkdown(text, markup);
@@ -1144,53 +1002,12 @@ bot.action('create_20s', async (ctx) => {
     }
 });
 
-bot.on('video', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'create_video' || ctx.session.step !== 'awaiting_base_video') return;
-
-    try {
-        const video = ctx.message.video;
-
-        // Validate video duration matches selected duration
-        if (video.duration > ctx.session.duration) {
-            return ctx.reply(`❌ Video too long. Maximum duration is ${ctx.session.duration} seconds.`);
-        }
-
-        // Get video URL
-        const { url } = await getFileLink(ctx, video.file_id);
-        ctx.session.base_url = url;
-        ctx.session.step = 'awaiting_face';
-
-        await ctx.reply('✅ Video received. Now please send a clear photo of the face you want to use:');
-    } catch (e) {
-        ctx.reply(`❌ Error processing video: ${e.message}`);
-        ctx.session = null;
-    }
-});
-
-bot.on('photo', async (ctx) => {
-    if (!ctx.session || ctx.session.mode !== 'create_video' || ctx.session.step !== 'awaiting_face') return;
-
-    try {
-        // Get largest photo
-        const photo = ctx.message.photo.sort((a, b) => b.file_size - a.file_size)[0];
-        const { url } = await getFileLink(ctx, photo.file_id);
-        ctx.session.face_url = url;
-
-        // Start video creation
-        await handleVideoCreation(ctx);
-    } catch (e) {
-        ctx.reply(`❌ Error processing photo: ${e.message}`);
-        ctx.session = null;
-    }
-});
-
 // Video creation handler - called after receiving both video and photo
 async function handleVideoCreation(ctx) {
     try {
         const { base_url, face_url, duration } = ctx.session;
         const userId = String(ctx.from.id);
 
-        // Get user's template
         const template = db.prepare(
             'SELECT template_video_url, template_photo_url FROM user_templates WHERE user_id = ? ORDER BY last_used DESC LIMIT 1'
         ).get(userId);
@@ -1199,7 +1016,6 @@ async function handleVideoCreation(ctx) {
             return ctx.reply('❌ Templates not found. Please upload templates first.');
         }
 
-        // Call video creation API
         await ctx.reply('⏳ Creating your video... This may take a few minutes.');
 
         const taskId = await startImage2Video({
@@ -1210,19 +1026,17 @@ async function handleVideoCreation(ctx) {
             duration: duration
         });
 
-        // Store task in database
         db.prepare(
             'INSERT INTO user_tasks (user_id, task_id, type, status, created_at) VALUES (?, ?, ?, ?, ?)'
         ).run(userId, taskId, 'video_creation', 'processing', Date.now());
 
-        // Start polling for result
         pollTaskStatus(ctx, taskId);
         ctx.session = null;
     } catch (e) {
         logger.error('Video creation failed', { error: e.message });
         ctx.reply('❌ Failed to create video. Please try again later.');
     }
-})
+}
 
 // Poll task status until completion
 async function pollTaskStatus(ctx, taskId) {
@@ -1234,15 +1048,12 @@ async function pollTaskStatus(ctx, taskId) {
             db.prepare(
                 'UPDATE user_tasks SET status = ?, completed_at = ? WHERE task_id = ?'
             ).run('completed', Date.now(), taskId);
-        }
-        else if (status.status === 'failed') {
+        } else if (status.status === 'failed') {
             await ctx.reply(`❌ Video creation failed: ${status.error || 'Unknown error'}`);
             db.prepare(
                 'UPDATE user_tasks SET status = ?, error = ? WHERE task_id = ?'
             ).run('failed', status.error, taskId);
-        }
-        else {
-            // Still processing - check again in 15 seconds
+        } else {
             setTimeout(() => pollTaskStatus(ctx, taskId), 15000);
         }
     } catch (e) {
@@ -1277,49 +1088,13 @@ async function createStripeCheckoutSession({ userId, packType, currency }) {
             }
         });
 
-        logger.info('Stripe checkout session created', {
-            userId,
-            packType,
-            sessionId: session.id
-        });
+        logger.info('Stripe checkout session created', { userId, packType, sessionId: session.id });
         return session;
     } catch (e) {
-        logger.error('Stripe session creation failed', {
-            error: e.message,
-            userId,
-            packType
-        });
+        logger.error('Stripe session creation failed', { error: e.message, userId, packType });
         throw e;
     }
 }
-
-// Graceful Stop
-let stopped = false;
-async function safeStop(signal) {
-    if (stopped) return;
-    stopped = true;
-    console.log(`[Shutdown] safeStop called (${signal})`);
-    try {
-        if (bot && typeof bot.stop === 'function') {
-            await bot.stop(signal);
-            console.log('[Shutdown] Bot stopped successfully.');
-        } else {
-            console.log('[Shutdown] Bot instance not active or already stopped.');
-        }
-    } catch (err) {
-        // Log as warning if it's already stopped, otherwise error
-        if (err.message && err.message.includes('Bot is not running')) {
-            console.warn('[Shutdown] Bot was already not running.');
-        } else {
-            console.error('[Shutdown] safeStop encountered an error:', err.message);
-        }
-    }
-}
-
-process.once('SIGINT', () => safeStop('SIGINT'));
-process.once('SIGTERM', () => safeStop('SIGTERM'));
-
-module.exports = { bot };
 
 bot.action('buy_pack_micro', async (ctx) => {
     try {
@@ -1331,10 +1106,7 @@ bot.action('buy_pack_micro', async (ctx) => {
         });
         await ctx.reply('Redirecting to payment...', {
             reply_markup: {
-                inline_keyboard: [[{
-                    text: '💳 Pay Now',
-                    url: session.url
-                }]]
+                inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]]
             }
         });
     } catch (e) {
@@ -1353,10 +1125,7 @@ bot.action('buy_pack_starter', async (ctx) => {
         });
         await ctx.reply('Redirecting to payment...', {
             reply_markup: {
-                inline_keyboard: [[{
-                    text: '💳 Pay Now',
-                    url: session.url
-                }]]
+                inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]]
             }
         });
     } catch (e) {
@@ -1364,3 +1133,68 @@ bot.action('buy_pack_starter', async (ctx) => {
         await ctx.reply('❌ Payment processing error. Please try again later.');
     }
 });
+
+bot.action('buy_pack_plus', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const session = await createStripeCheckoutSession({
+            userId: String(ctx.from.id),
+            packType: 'plus',
+            currency: 'usd'
+        });
+        await ctx.reply('Redirecting to payment...', {
+            reply_markup: {
+                inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]]
+            }
+        });
+    } catch (e) {
+        logger.error('Plus pack checkout failed', { error: e.message });
+        await ctx.reply('❌ Payment processing error. Please try again later.');
+    }
+});
+
+bot.action('buy_pack_pro', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const session = await createStripeCheckoutSession({
+            userId: String(ctx.from.id),
+            packType: 'pro',
+            currency: 'usd'
+        });
+        await ctx.reply('Redirecting to payment...', {
+            reply_markup: {
+                inline_keyboard: [[{ text: '💳 Pay Now', url: session.url }]]
+            }
+        });
+    } catch (e) {
+        logger.error('Pro pack checkout failed', { error: e.message });
+        await ctx.reply('❌ Payment processing error. Please try again later.');
+    }
+});
+
+// Graceful Stop
+let stopped = false;
+async function safeStop(signal) {
+    if (stopped) return;
+    stopped = true;
+    console.log(`[Shutdown] safeStop called (${signal})`);
+    try {
+        if (bot && typeof bot.stop === 'function') {
+            await bot.stop(signal);
+            console.log('[Shutdown] Bot stopped successfully.');
+        } else {
+            console.log('[Shutdown] Bot instance not active or already stopped.');
+        }
+    } catch (err) {
+        if (err.message && err.message.includes('Bot is not running')) {
+            console.warn('[Shutdown] Bot was already not running.');
+        } else {
+            console.error('[Shutdown] safeStop encountered an error:', err.message);
+        }
+    }
+}
+
+process.once('SIGINT', () => safeStop('SIGINT'));
+process.once('SIGTERM', () => safeStop('SIGTERM'));
+
+module.exports = { bot };
