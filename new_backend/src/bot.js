@@ -1083,7 +1083,8 @@ async function createStripeCheckoutSession({ userId, packType, currency }) {
             client_reference_id: userId,
             metadata: {
                 pack_type: packType,
-                points: pack.points,
+                points: String(pack.points),
+                credits: String(pack.points), // Add credits field for consistency
                 source: 'telegram_bot'
             }
         });

@@ -147,15 +147,26 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
             }
 
             // Handle paid checkout (points/credits purchase)
-            let pointsToAdd = pointsFromMetadata;
+            let pointsToAdd = pointsFromMetadata || creditsFromMetadata;
 
             if (!pointsToAdd) {
                 // Fallback logic if metadata is missing
-                if (amount >= 1499) pointsToAdd = demoCfg.packs.pro.points;
-                else if (amount >= 899) pointsToAdd = demoCfg.packs.plus.points;
-                else if (amount >= 499) pointsToAdd = demoCfg.packs.starter.points;
-                else if (amount >= 99) pointsToAdd = demoCfg.packs.micro.points;
-                else pointsToAdd = 80; // Minimum fallback
+                // Check currency to handle non-USD amounts correctly
+                const currency = (session.currency || 'usd').toLowerCase();
+                if (currency === 'usd') {
+                    if (amount >= 1499) pointsToAdd = demoCfg.packs.pro.points;
+                    else if (amount >= 899) pointsToAdd = demoCfg.packs.plus.points;
+                    else if (amount >= 499) pointsToAdd = demoCfg.packs.starter.points;
+                    else if (amount >= 99) pointsToAdd = demoCfg.packs.micro.points;
+                    else pointsToAdd = 80;
+                } else {
+                    // For non-USD, try to match by pack_type metadata first
+                    if (packType && demoCfg.packs[packType]) {
+                        pointsToAdd = demoCfg.packs[packType].points;
+                    } else {
+                        pointsToAdd = 80; // Safe fallback
+                    }
+                }
             }
 
             try {
@@ -635,6 +646,7 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
             client_reference_id: userId,
             metadata: {
                 points: String(pack.points),
+                credits: String(pack.points), // Add credits field for consistency
                 pack_type: packType,
                 source: 'miniapp',
                 currency,
