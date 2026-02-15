@@ -22,7 +22,10 @@ const fs = require('fs');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
 // Middleware
-bot.use(session());
+bot.use(session({
+    property: 'session',
+    getSessionKey: (ctx) => ctx.from && ctx.chat && `${ctx.from.id}:${ctx.chat.id}`
+}));
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
     format: winston.format.json(),
@@ -230,6 +233,9 @@ bot.command('start', async (ctx) => {
                 );
         }
     }
+
+    // Initialize session if it doesn't exist
+    if (!ctx.session) ctx.session = {};
 
     const hasTemplates = db.prepare(
         'SELECT 1 FROM user_templates WHERE user_id = ? LIMIT 1'
@@ -1103,7 +1109,7 @@ bot.action('buy_pack_micro', async (ctx) => {
         const session = await createStripeCheckoutSession({
             userId: String(ctx.from.id),
             packType: 'micro',
-            currency: 'usd'
+            currency: 'mxn' // Use MXN as requested
         });
         await ctx.reply('Redirecting to payment...', {
             reply_markup: {
@@ -1122,7 +1128,7 @@ bot.action('buy_pack_starter', async (ctx) => {
         const session = await createStripeCheckoutSession({
             userId: String(ctx.from.id),
             packType: 'starter',
-            currency: 'usd'
+            currency: 'mxn' // Use MXN as requested
         });
         await ctx.reply('Redirecting to payment...', {
             reply_markup: {
@@ -1141,7 +1147,7 @@ bot.action('buy_pack_plus', async (ctx) => {
         const session = await createStripeCheckoutSession({
             userId: String(ctx.from.id),
             packType: 'plus',
-            currency: 'usd'
+            currency: 'mxn' // Use MXN as requested
         });
         await ctx.reply('Redirecting to payment...', {
             reply_markup: {
@@ -1160,7 +1166,7 @@ bot.action('buy_pack_pro', async (ctx) => {
         const session = await createStripeCheckoutSession({
             userId: String(ctx.from.id),
             packType: 'pro',
-            currency: 'usd'
+            currency: 'mxn' // Use MXN as requested
         });
         await ctx.reply('Redirecting to payment...', {
             reply_markup: {

@@ -146,37 +146,11 @@ async function start() {
         // Start Automated Promo Scheduler
         startPromoScheduler(bot);
 
-        // Send admin startup notifications with /start and /studio commands
+        // Send admin startup notification
         const adminId = process.env.ADMIN_TELEGRAM_ID;
         if (adminId) {
             try {
-                await bot.telegram.sendMessage(adminId,
-                    `✅ *Bot Deployed Successfully!*\n\n` +
-                    `🤖 Bot is online and ready\n` +
-                    `📱 Mini app configured\n` +
-                    `💳 Payments active\n\n` +
-                    `Use commands below to test:`,
-                    { parse_mode: 'Markdown' }
-                );
-
-                // Trigger /start command for admin
-                setTimeout(async () => {
-                    try {
-                        await bot.telegram.sendMessage(adminId, '/start');
-                    } catch (e) {
-                        logger.error('Failed to send /start to admin', { error: e.message });
-                    }
-                }, 1000);
-
-                // Trigger /studio command for admin
-                setTimeout(async () => {
-                    try {
-                        await bot.telegram.sendMessage(adminId, '/studio');
-                    } catch (e) {
-                        logger.error('Failed to send /studio to admin', { error: e.message });
-                    }
-                }, 2000);
-
+                await bot.telegram.sendMessage(adminId, `✅ *Bot Deployed Successfully!*`, { parse_mode: 'Markdown' });
             } catch (e) {
                 logger.error('Failed to send admin notification', { error: e.message });
             }
