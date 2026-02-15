@@ -194,14 +194,22 @@ bot.command('start', async (ctx) => {
                 logger.info('Checking 69 free credits eligibility', { userId });
                 const stripeCustomer = db.prepare('SELECT stripe_customer_id FROM user_credits WHERE telegram_user_id = ? AND stripe_customer_id IS NOT NULL').get(userId);
                 const hasWelcomeCredits = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ? AND welcome_granted = 1').get(userId);
-
-                if (stripeCustomer && !hasWelcomeCredits) {
-                    logger.info('User eligible for 69 free credits', { userId, stripeCustomerId: stripeCustomer.stripe_customer_id });
-                    db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1 WHERE telegram_user_id = ?').run(userId);
+                if (!hasWelcomeCredits) {
+                    logger.info('User eligible for 69 free credits', { userId });
+                    // Ensure user_credits record exists
+                    const existing = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ?').get(userId);
+                    if (!existing) {
+                        db.prepare('INSERT INTO user_credits (telegram_user_id, credits, welcome_granted, created_at, updated_at) VALUES (?, 69, 1, ?, ?)').run(userId, Date.now(), Date.now());
+                    } else {
+                        db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1, updated_at = ? WHERE telegram_user_id = ?').run(Date.now(), userId);
+                    }
+                    // Also update points in users table for consistency
+                    db.prepare('UPDATE users SET points = points + 69 WHERE id = ?').run(userId);
+                    
                     logger.info('69 free credits granted', { userId });
-                    const credits = db.prepare('SELECT credits FROM user_credits WHERE telegram_user_id = ?').get(userId).credits;
+                    const credits = db.prepare('SELECT SUM(credits) as total FROM user_credits WHERE telegram_user_id = ?').get(userId).total;
                     return ctx.replyWithMarkdown(
-                        `🎉 *69 Free Credits Granted!*\n\n` +
+                        `🎉 *69 Free Credits Granted!*`\n\n` +
                         `💰 *New Balance:* ${credits} credits\n` +
                         `🎬 Enough for ~${Math.floor(credits / 60)} face swap videos!\n\n` +
                         `Use /start create to begin`
@@ -1088,9 +1096,10 @@ async function createStripeCheckoutSession({ userId, packType, currency }) {
             cancel_url: process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp?cancel=true` : 'https://telegramalam.onrender.com/miniapp/?cancel=true',
             client_reference_id: userId,
             metadata: {
+                userId: String(userId), // Ensure userId is in metadata
                 pack_type: packType,
                 points: String(pack.points),
-                credits: String(pack.points), // Add credits field for consistency
+                credits: String(pack.points),
                 source: 'telegram_bot'
             }
         });

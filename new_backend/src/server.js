@@ -83,7 +83,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     // Handle the event
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const userId = session.client_reference_id;
+        const userId = session.client_reference_id || (session.metadata && session.metadata.userId);
         const pointsFromMetadata = session.metadata && session.metadata.points ? parseInt(session.metadata.points) : 0;
         const creditsFromMetadata = session.metadata && session.metadata.credits ? parseInt(session.metadata.credits) : 0;
         const isWelcomeCredits = session.metadata && session.metadata.type === 'welcome_credits';
@@ -150,23 +150,16 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
             let pointsToAdd = pointsFromMetadata || creditsFromMetadata;
 
             if (!pointsToAdd) {
-                // Fallback logic if metadata is missing
-                // Check currency to handle non-USD amounts correctly
+                // Robust fallback: check amount and currency
                 const currency = (session.currency || 'usd').toLowerCase();
-                if (currency === 'usd') {
-                    if (amount >= 1499) pointsToAdd = demoCfg.packs.pro.points;
-                    else if (amount >= 899) pointsToAdd = demoCfg.packs.plus.points;
-                    else if (amount >= 499) pointsToAdd = demoCfg.packs.starter.points;
-                    else if (amount >= 99) pointsToAdd = demoCfg.packs.micro.points;
-                    else pointsToAdd = 80;
-                } else {
-                    // For non-USD, try to match by pack_type metadata first
-                    if (packType && demoCfg.packs[packType]) {
-                        pointsToAdd = demoCfg.packs[packType].points;
-                    } else {
-                        pointsToAdd = 80; // Safe fallback
-                    }
-                }
+                const exchangeRate = await fetchUsdRate(currency);
+                const amountInUsd = (amount / 100) / exchangeRate;
+
+                if (amountInUsd >= 14.0) pointsToAdd = demoCfg.packs.pro.points;
+                else if (amountInUsd >= 8.0) pointsToAdd = demoCfg.packs.plus.points;
+                else if (amountInUsd >= 4.0) pointsToAdd = demoCfg.packs.starter.points;
+                else if (amountInUsd >= 0.9) pointsToAdd = demoCfg.packs.micro.points;
+                else pointsToAdd = 80;
             }
 
             try {
