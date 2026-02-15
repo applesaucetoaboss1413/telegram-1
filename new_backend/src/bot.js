@@ -209,7 +209,7 @@ bot.command('start', async (ctx) => {
                     logger.info('69 free credits granted', { userId });
                     const credits = db.prepare('SELECT SUM(credits) as total FROM user_credits WHERE telegram_user_id = ?').get(userId).total;
                     return ctx.replyWithMarkdown(
-                        `🎉 *69 Free Credits Granted!*`\n\n` +
+                        `🎉 *69 Free Credits Granted!*\n\n` +
                         `💰 *New Balance:* ${credits} credits\n` +
                         `🎬 Enough for ~${Math.floor(credits / 60)} face swap videos!\n\n` +
                         `Use /start create to begin`
