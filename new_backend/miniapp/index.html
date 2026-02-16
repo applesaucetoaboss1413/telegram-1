@@ -662,7 +662,7 @@
         }
 
         function goBack() {
-            uploadedFiles = {};
+            for (const key in uploadedFiles) delete uploadedFiles[key];
             showView('services-view');
         }
 
