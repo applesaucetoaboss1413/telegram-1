@@ -707,6 +707,7 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
         // Send to Stripe
         const session = await stripe.checkout.sessions.create({
             currency: currency,
+            adaptive_pricing: { enabled: true },
             line_items: [{
                 price_data: {
                     currency: currency,
