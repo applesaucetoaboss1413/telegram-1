@@ -877,20 +877,20 @@ async function sendBuyPointsMenu(ctx) {
 
     let header = '*Choose your credit pack:*\n\n';
     if (firstPurchase) {
-        header = `*SPECIAL OFFER!*\n\nStart with just $${(p.micro.price_cents / 100).toFixed(2)}:\n\n`;
+        header = `*SPECIAL OFFER!*\n\nStart with just MX$${(p.micro.price_cents / 100).toFixed(0)}:\n\n`;
     }
 
     const text = `${header}` +
-        `*Try It* - ${p.micro.points} credits (~${approx5s(p.micro.points)} videos)\n   $${(p.micro.price_cents / 100).toFixed(2)}\n\n` +
-        `*Starter* - ${p.starter.points} credits (~${approx5s(p.starter.points)} videos)\n   $${(p.starter.price_cents / 100).toFixed(2)}\n\n` +
-        `*Plus* - ${p.plus.points} credits (~${approx5s(p.plus.points)} videos)\n   $${(p.plus.price_cents / 100).toFixed(2)} (Best value!)\n\n` +
-        `*Pro* - ${p.pro.points} credits (~${approx5s(p.pro.points)} videos)\n   $${(p.pro.price_cents / 100).toFixed(2)}`;
+        `*Try It* - ${p.micro.points} credits (~${approx5s(p.micro.points)} videos)\n   MX$${(p.micro.price_cents / 100).toFixed(0)}\n\n` +
+        `*Starter* - ${p.starter.points} credits (~${approx5s(p.starter.points)} videos)\n   MX$${(p.starter.price_cents / 100).toFixed(0)}\n\n` +
+        `*Plus* - ${p.plus.points} credits (~${approx5s(p.plus.points)} videos)\n   MX$${(p.plus.price_cents / 100).toFixed(0)} (Best value!)\n\n` +
+        `*Pro* - ${p.pro.points} credits (~${approx5s(p.pro.points)} videos)\n   MX$${(p.pro.price_cents / 100).toFixed(0)}`;
 
     return ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
-        [Markup.button.callback(`$${(p.micro.price_cents / 100).toFixed(2)} - ${p.micro.points} credits`, 'buy_pack_micro')],
-        [Markup.button.callback(`$${(p.starter.price_cents / 100).toFixed(2)} - ${p.starter.points} credits`, 'buy_pack_starter')],
-        [Markup.button.callback(`$${(p.plus.price_cents / 100).toFixed(2)} - ${p.plus.points} credits`, 'buy_pack_plus')],
-        [Markup.button.callback(`$${(p.pro.price_cents / 100).toFixed(2)} - ${p.pro.points} credits`, 'buy_pack_pro')],
+        [Markup.button.callback(`MX$${(p.micro.price_cents / 100).toFixed(0)} - ${p.micro.points} credits`, 'buy_pack_micro')],
+        [Markup.button.callback(`MX$${(p.starter.price_cents / 100).toFixed(0)} - ${p.starter.points} credits`, 'buy_pack_starter')],
+        [Markup.button.callback(`MX$${(p.plus.price_cents / 100).toFixed(0)} - ${p.plus.points} credits`, 'buy_pack_plus')],
+        [Markup.button.callback(`MX$${(p.pro.price_cents / 100).toFixed(0)} - ${p.pro.points} credits`, 'buy_pack_pro')],
     ]));
 }
 
