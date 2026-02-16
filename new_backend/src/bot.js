@@ -380,13 +380,32 @@ bot.command('start', async (ctx) => {
             case 'buy_points':
                 return sendBuyPointsMenu(ctx);
             case 'create':
+                // Go directly into faceswap flow - no template needed
+                const createCredits = getCredits({ telegramUserId: userId });
+                if (createCredits < (demoCfg.demoPrices['5'] || 60)) {
+                    return ctx.replyWithMarkdown(
+                        `You need at least *${demoCfg.demoPrices['5']} credits* to create a video.\nYou have *${createCredits} credits*.`,
+                        Markup.inlineKeyboard([
+                            [Markup.button.callback('Get Free Credits', 'get_free_credits')],
+                            [Markup.button.callback('Buy Credits', 'buy_points_menu')]
+                        ])
+                    );
+                }
+                ctx.session = {
+                    mode: 'demo',
+                    step: 'awaiting_base_video',
+                    duration: 5,
+                    price: demoCfg.demoPrices['5'] || 60
+                };
                 return ctx.replyWithMarkdown(
-                    '🎬 *Create Video*\n\nChoose video duration:',
+                    `*Create Face Swap Video*\n\n` +
+                    `Step 1: Send your video (max 5 seconds, MP4)\n` +
+                    `Step 2: Send the target face photo\n\n` +
+                    `Cost: ${demoCfg.demoPrices['5']} credits | Balance: ${createCredits} credits\n\n` +
+                    `Send your video now:`,
                     Markup.inlineKeyboard([
-                        [Markup.button.callback('5 Second Video', 'create_5s')],
-                        [Markup.button.callback('10 Second Video', 'create_10s')],
-                        [Markup.button.callback('20 Second Video', 'create_20s')],
-                        [Markup.button.callback('✨ Go to Studio for More Options', 'open_studio')]
+                        [Markup.button.callback('10s video instead (90 credits)', 'demo_len_10')],
+                        [Markup.button.callback('15s video instead (125 credits)', 'demo_len_15')]
                     ])
                 );
 
