@@ -101,3 +101,73 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Telegram bot @ImMoreThanJustSomeBot buttons in channel @FaceSwapVideoAi are not functional - deep link buttons and inline callbacks not working. Buy credits button should lead to Stripe checkout. Mini app has JS bug."
+
+backend:
+  - task: "Deep link handlers in /start command"
+    implemented: true
+    working: "NA"
+    file: "new_backend/src/bot.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Added 11 new deep link cases: buy_micro, buy_starter, buy_plus, buy_pro, lang_en, lang_es, promo, daily, success, cancel, examples + default fallback"
+
+  - task: "Missing action handlers (buy_points_menu, get_free_credits, claim_daily, change_language, etc)"
+    implemented: true
+    working: "NA"
+    file: "new_backend/src/bot.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Added 11 new action handlers: buy_points_menu, get_free_credits, claim_daily, change_language, set_lang_en, set_lang_es, upload_template, upload_help, view_templates, help, credits command"
+
+  - task: "fetchUsdRate crash bug in bot.js"
+    implemented: true
+    working: "NA"
+    file: "new_backend/src/bot.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Added fetchUsdRate function with axios, exchange rate cache, and fallback rates to bot.js"
+
+  - task: "Mini app goBack() const reassignment bug"
+    implemented: true
+    working: "NA"
+    file: "new_backend/miniapp/index.html"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "Fixed goBack() and goHome() to properly clear uploadedFiles object instead of reassigning const"
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Deep link handlers in /start command"
+    - "Missing action handlers"
+    - "fetchUsdRate crash bug"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+    - message: "All critical fixes implemented. Bot needs real Telegram/Stripe API keys to test - user has env vars on Render."
