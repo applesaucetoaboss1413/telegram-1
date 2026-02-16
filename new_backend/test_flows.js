@@ -197,8 +197,7 @@ test('Photo handler has demo mode processing with faceswap', () => {
 // ============================================================
 console.log('\n=== TEST GROUP 6: Payment Flow ===');
 
-test('All buy_pack actions use USD currency', () => {
-    // Check that no buy_pack action uses 'mxn'
+test('All buy_pack actions use MXN currency', () => {
     const buyPackRegex = /buy_pack_\w+.*?currency:\s*'(\w+)'/gs;
     let buyMatch;
     while ((buyMatch = buyPackRegex.exec(botCode)) !== null) {
