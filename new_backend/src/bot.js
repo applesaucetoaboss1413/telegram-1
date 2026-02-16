@@ -1278,19 +1278,26 @@ bot.action('create_5s', async (ctx) => {
     try {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
+        const price = demoCfg.demoPrices['5'] || 60;
+        const credits = getCredits({ telegramUserId: userId });
 
-        if (!checkUserHasTemplates(userId)) {
-            const { text, markup } = getTemplateMissingMessage();
-            return ctx.replyWithMarkdown(text, markup);
+        if (credits < price) {
+            return ctx.replyWithMarkdown(
+                `You need *${price} credits* for a 5s video. You have *${credits}*.`,
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('Get Free Credits', 'get_free_credits')],
+                    [Markup.button.callback('Buy Credits', 'buy_points_menu')]
+                ])
+            );
         }
 
         ctx.session = {
-            mode: 'create_video',
+            mode: 'demo',
             step: 'awaiting_base_video',
             duration: 5,
-            price: 60
+            price
         };
-        await ctx.reply(`📹 Please send a 5-second video to face swap:`);
+        await ctx.reply('Send your 5-second video now (MP4, max 5s):');
     } catch (e) {
         logger.error('create_5s action failed', { error: e.message });
     }
@@ -1300,19 +1307,26 @@ bot.action('create_10s', async (ctx) => {
     try {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
+        const price = demoCfg.demoPrices['10'] || 90;
+        const credits = getCredits({ telegramUserId: userId });
 
-        if (!checkUserHasTemplates(userId)) {
-            const { text, markup } = getTemplateMissingMessage();
-            return ctx.replyWithMarkdown(text, markup);
+        if (credits < price) {
+            return ctx.replyWithMarkdown(
+                `You need *${price} credits* for a 10s video. You have *${credits}*.`,
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('Get Free Credits', 'get_free_credits')],
+                    [Markup.button.callback('Buy Credits', 'buy_points_menu')]
+                ])
+            );
         }
 
         ctx.session = {
-            mode: 'create_video',
+            mode: 'demo',
             step: 'awaiting_base_video',
             duration: 10,
-            price: 90
+            price
         };
-        await ctx.reply(`📹 Please send a 10-second video to face swap:`);
+        await ctx.reply('Send your 10-second video now (MP4, max 10s):');
     } catch (e) {
         logger.error('create_10s action failed', { error: e.message });
     }
@@ -1322,19 +1336,26 @@ bot.action('create_20s', async (ctx) => {
     try {
         await ctx.answerCbQuery();
         const userId = String(ctx.from.id);
+        const price = demoCfg.demoPrices['20'] || 150;
+        const credits = getCredits({ telegramUserId: userId });
 
-        if (!checkUserHasTemplates(userId)) {
-            const { text, markup } = getTemplateMissingMessage();
-            return ctx.replyWithMarkdown(text, markup);
+        if (credits < price) {
+            return ctx.replyWithMarkdown(
+                `You need *${price} credits* for a 20s video. You have *${credits}*.`,
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('Get Free Credits', 'get_free_credits')],
+                    [Markup.button.callback('Buy Credits', 'buy_points_menu')]
+                ])
+            );
         }
 
         ctx.session = {
-            mode: 'create_video',
+            mode: 'demo',
             step: 'awaiting_base_video',
             duration: 20,
-            price: 120
+            price
         };
-        await ctx.reply(`📹 Please send a 20-second video to face swap:`);
+        await ctx.reply('Send your 20-second video now (MP4, max 20s):');
     } catch (e) {
         logger.error('create_20s action failed', { error: e.message });
     }
