@@ -126,6 +126,10 @@ const spendCredits = ({ telegramUserId, amount }) => {
         `).run(amount, now, record.id, amount);
 
         if (result.changes > 0) {
+            // Sync to users.points table
+            try {
+                db.prepare('UPDATE users SET points = points - ? WHERE id = ? AND points >= ?').run(amount, tId, amount);
+            } catch (_) {}
             logger.info('Credits spent', { telegramUserId: tId, amount, remaining: record.credits - amount });
             return true;
         }
