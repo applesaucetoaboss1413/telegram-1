@@ -206,12 +206,12 @@ test('All buy_pack actions use USD currency', () => {
     }
 });
 
-test('createStripeCheckoutSession uses USD', () => {
+test('createStripeCheckoutSession uses MXN (settlement currency)', () => {
     const fnIdx = botCode.indexOf('async function createStripeCheckoutSession');
     const fnEnd = botCode.indexOf('module.exports', fnIdx);
     const fnBlock = botCode.substring(fnIdx, fnEnd > -1 ? fnEnd : fnIdx + 3000);
     
-    assert(fnBlock.includes("sessionCurrency = 'usd'"), 'Should force USD currency');
+    assert(fnBlock.includes("sessionCurrency = 'mxn'"), 'Should force MXN currency (settlement currency)');
     assert(fnBlock.includes('unit_amount: pack.price_cents'), 'Should use pack.price_cents directly');
 });
 
