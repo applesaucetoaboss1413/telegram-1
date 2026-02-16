@@ -21,34 +21,34 @@ const cfg = {
     // Demo/video pricing by duration (in credits)
     demoPrices,
 
-    // MONETIZATION PACKS
+    // MONETIZATION PACKS - prices in MXN centavos (settlement currency)
     packs: {
         micro: {
             points: microPoints,
-            label: process.env.PACK_MICRO_LABEL || '🎯 Try It - 1 Video',
-            price_cents: Number(process.env.PACK_MICRO_PRICE_CENTS || 99),
+            label: process.env.PACK_MICRO_LABEL || 'Try It - 1 Video',
+            price_cents: Number(process.env.PACK_MICRO_PRICE_CENTS || 1900),
             badge: 'BEST FOR FIRST PURCHASE',
             approx5sDemos: Math.max(1, Math.floor(microPoints / demoPrices['5']))
         },
         starter: {
             points: starterPoints,
-            label: process.env.PACK_STARTER_LABEL || '⭐ Starter Pack',
-            price_cents: Number(process.env.PACK_STARTER_PRICE_CENTS || 499),
+            label: process.env.PACK_STARTER_LABEL || 'Starter Pack',
+            price_cents: Number(process.env.PACK_STARTER_PRICE_CENTS || 8900),
             badge: 'POPULAR',
             approx5sDemos: Math.max(1, Math.floor(starterPoints / demoPrices['5']))
         },
         plus: {
             points: plusPoints,
-            label: process.env.PACK_PLUS_LABEL || '🔥 Plus Pack',
-            price_cents: Number(process.env.PACK_PLUS_PRICE_CENTS || 899),
+            label: process.env.PACK_PLUS_LABEL || 'Plus Pack',
+            price_cents: Number(process.env.PACK_PLUS_PRICE_CENTS || 15900),
             badge: 'BEST VALUE',
             savings: '10%',
             approx5sDemos: Math.max(1, Math.floor(plusPoints / demoPrices['5']))
         },
         pro: {
             points: proPoints,
-            label: process.env.PACK_PRO_LABEL || '💎 Pro Pack',
-            price_cents: Number(process.env.PACK_PRO_PRICE_CENTS || 1499),
+            label: process.env.PACK_PRO_LABEL || 'Pro Pack',
+            price_cents: Number(process.env.PACK_PRO_PRICE_CENTS || 26900),
             badge: 'POWER USER',
             savings: '25%',
             approx5sDemos: Math.max(1, Math.floor(proPoints / demoPrices['5']))
