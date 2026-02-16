@@ -139,6 +139,7 @@ const spendCredits = ({ telegramUserId, amount }) => {
 
 /**
  * Grants credits to a user (general function).
+ * Syncs both user_credits table and users.points for consistency.
  */
 const grantCredits = ({ telegramUserId, amount }) => {
     try {
@@ -161,6 +162,12 @@ const grantCredits = ({ telegramUserId, amount }) => {
                 WHERE id = ?
             `).run(amount, now, record.id);
         }
+
+        // Sync to users.points table
+        try {
+            db.prepare('UPDATE users SET points = points + ? WHERE id = ?').run(amount, tId);
+        } catch (_) {}
+
         logger.info('Credits granted', { telegramUserId: tId, amount });
         return true;
     } catch (error) {
