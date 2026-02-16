@@ -14,6 +14,28 @@ const runImage2VideoFlow = require('../dist/ts/image2videoHandler.js').runImage2
 const demoCfg = require('./services/a2eConfig');
 const { t } = require('./config/translations');
 const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || null;
+const axios = require('axios');
+
+// Exchange rate helper (mirrors server.js implementation)
+const SAFE_RATES_BOT = { MXN: 18.0, CAD: 1.36, EUR: 0.92, GBP: 0.79 };
+const EXCHANGE_RATE_CACHE_BOT = {};
+const EXCHANGE_RATE_TTL_BOT = 3600000; // 1 hour
+
+async function fetchUsdRate(toCurrency) {
+    const key = toCurrency.toUpperCase();
+    if (EXCHANGE_RATE_CACHE_BOT[key] && EXCHANGE_RATE_CACHE_BOT._ts && Date.now() - EXCHANGE_RATE_CACHE_BOT._ts < EXCHANGE_RATE_TTL_BOT) {
+        return EXCHANGE_RATE_CACHE_BOT[key];
+    }
+    try {
+        const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD');
+        Object.assign(EXCHANGE_RATE_CACHE_BOT, response.data.rates);
+        EXCHANGE_RATE_CACHE_BOT._ts = Date.now();
+        return EXCHANGE_RATE_CACHE_BOT[key] || SAFE_RATES_BOT[key] || 1;
+    } catch (e) {
+        logger.error('Exchange rate fetch failed', { error: e.message });
+        return SAFE_RATES_BOT[key] || 1;
+    }
+}
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const UPLOADS_DIR = path.join(os.tmpdir(), 'telegram_uploads');
