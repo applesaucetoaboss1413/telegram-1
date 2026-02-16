@@ -1440,7 +1440,6 @@ async function createStripeCheckoutSession({ userId, packType, currency }) {
 
         const session = await stripe.checkout.sessions.create({
             mode: 'payment',
-            payment_method_types: ['card'],
             adaptive_pricing: { enabled: true },
             line_items: [{
                 price_data: {

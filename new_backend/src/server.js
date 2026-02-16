@@ -687,32 +687,14 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
     }
 
     try {
-        // Fetch live exchange rate
-        const rate = await fetchUsdRate(currency); // Dynamic rate from API
-
-        // Convert: cents → dollars → foreign currency → cents
-        const usdAmount = pack.price_cents / 100; // $0.99 from 99 cents
-
-        let amountInCurrency;
-        if (currency === 'usd') {
-            amountInCurrency = pack.price_cents; // Keep as cents: 99
-        } else {
-            // Apply exchange rate & 3% spread, then convert back to cents
-            const convertedAmount = usdAmount * rate * 1.03;
-            amountInCurrency = Math.round(convertedAmount * 100); // Now in cents
-        }
-
-        console.log(`💰 Conversion: $${usdAmount} USD → ${currency.toUpperCase()} ${amountInCurrency / 100} (${rate}x + 3% spread)`);
-
-        // Send to Stripe
+        // Use USD as settlement currency - Adaptive Pricing handles local currency conversion
         const session = await stripe.checkout.sessions.create({
-            currency: currency,
             adaptive_pricing: { enabled: true },
             line_items: [{
                 price_data: {
-                    currency: currency,
-                    product_data: { name: `${amountInCurrency / 100} credits` },
-                    unit_amount: amountInCurrency, // Amount in cents
+                    currency: 'usd',
+                    product_data: { name: `${pack.label} - ${pack.points} credits` },
+                    unit_amount: pack.price_cents,
                 },
                 quantity: 1,
             }],
@@ -722,11 +704,10 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
             client_reference_id: userId,
             metadata: {
                 points: String(pack.points),
-                credits: String(pack.points), // Add credits field for consistency
+                credits: String(pack.points),
                 pack_type: packType,
                 source: 'miniapp',
-                currency,
-                usd_equivalent: String(pack.price_cents)
+                userId: String(userId)
             }
         });
 
