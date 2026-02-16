@@ -11,7 +11,6 @@ const blurUrl = (url) => {
 // Main promotional message with all key info
 function getPromoMessage() {
     const p = demoCfg.packs;
-    // Fake the video counter with a larger, more impressive number
     const fakeVideoCount = 8400 + Math.floor(Math.random() * 600);
 
     return `🎭 *AI Face Swap Bot*
@@ -23,16 +22,16 @@ _Swap your face into any video in seconds!_
 💰 *CREDIT PACKS*
 ━━━━━━━━━━━━━━━━━━━━━
 
-🎯 *Try It* – ${p.micro.points} credits – *$0.99*
+🎯 *Try It* – ${p.micro.points} credits – *MX$${Math.round(p.micro.price_cents / 100)}*
    └ Perfect for your first video!
 
-⭐ *Starter* – ${p.starter.points} credits – $4.99
+⭐ *Starter* – ${p.starter.points} credits – MX$${Math.round(p.starter.price_cents / 100)}
    └ ~${p.starter.approx5sDemos} videos
 
-🔥 *Plus* – ${p.plus.points} credits – $8.99 ⭐ BEST VALUE
+🔥 *Plus* – ${p.plus.points} credits – MX$${Math.round(p.plus.price_cents / 100)} ⭐ BEST VALUE
    └ ~${p.plus.approx5sDemos} videos
 
-💎 *Pro* – ${p.pro.points} credits – $14.99
+💎 *Pro* – ${p.pro.points} credits – MX$${Math.round(p.pro.price_cents / 100)}
    └ ~${p.pro.approx5sDemos} videos (25% savings!)
 
 ━━━━━━━━━━━━━━━━━━━━━
@@ -51,9 +50,9 @@ _Swap your face into any video in seconds!_
 📹 *VIDEO PRICING*
 ━━━━━━━━━━━━━━━━━━━━━
 
-• 5 seconds – 60 credits (~$0.75)
-• 10 seconds – 90 credits (~$1.12)
-• 15 seconds – 125 credits (~$1.56)
+• 5 seconds – 60 credits (~MX$14)
+• 10 seconds – 90 credits (~MX$21)
+• 15 seconds – 125 credits (~MX$29)
 
 👇 *TAP BELOW TO GET STARTED* 👇`;
 }
@@ -65,9 +64,9 @@ function getBuyButtons() {
 
     return Markup.inlineKeyboard([
         [Markup.button.url('🎁 Get 69 FREE Credits', 'https://t.me/ImMoreThanJustSomeBot?start=get_credits')],
-        [Markup.button.url('🎯 Buy $0.99 Pack', 'https://t.me/ImMoreThanJustSomeBot?start=buy_micro')],
-        [Markup.button.url('⭐ Buy $4.99 Pack', 'https://t.me/ImMoreThanJustSomeBot?start=buy_starter')],
-        [Markup.button.url('🔥 Buy $8.99 Pack', 'https://t.me/ImMoreThanJustSomeBot?start=buy_plus')],
+        [Markup.button.url(`🎯 Buy MX$${Math.round(p.micro.price_cents / 100)} Pack`, 'https://t.me/ImMoreThanJustSomeBot?start=buy_micro')],
+        [Markup.button.url(`⭐ Buy MX$${Math.round(p.starter.price_cents / 100)} Pack`, 'https://t.me/ImMoreThanJustSomeBot?start=buy_starter')],
+        [Markup.button.url(`🔥 Buy MX$${Math.round(p.plus.price_cents / 100)} Pack`, 'https://t.me/ImMoreThanJustSomeBot?start=buy_plus')],
         [Markup.button.url('🎬 Create Video Now', 'https://t.me/ImMoreThanJustSomeBot?start=create')]
     ]);
 }
