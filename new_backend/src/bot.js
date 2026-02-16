@@ -1313,6 +1313,240 @@ bot.action('buy_pack_pro', async (ctx) => {
 });
 
 // Graceful Stop
+// ─── MISSING ACTION HANDLERS (FIXED) ────────────────────────────────────────
+
+bot.action('buy_points_menu', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        await sendBuyPointsMenu(ctx);
+    } catch (e) {
+        logger.error('buy_points_menu action failed', { error: e.message });
+        await ctx.reply('❌ Error loading buy menu. Please try /start and tap Buy Credits.');
+    }
+});
+
+bot.action('get_free_credits', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        logger.info('get_free_credits action triggered', { userId });
+
+        const hasWelcomeCredits = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ? AND welcome_granted = 1').get(userId);
+        if (!hasWelcomeCredits) {
+            const existing = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ?').get(userId);
+            if (!existing) {
+                db.prepare('INSERT INTO user_credits (telegram_user_id, credits, welcome_granted, created_at, updated_at) VALUES (?, 69, 1, ?, ?)').run(userId, Date.now(), Date.now());
+            } else {
+                db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1, updated_at = ? WHERE telegram_user_id = ?').run(Date.now(), userId);
+            }
+            db.prepare('UPDATE users SET points = points + 69 WHERE id = ?').run(userId);
+
+            const credits = db.prepare('SELECT SUM(credits) as total FROM user_credits WHERE telegram_user_id = ?').get(userId)?.total || 69;
+            return ctx.replyWithMarkdown(
+                `🎉 *69 Free Credits Granted!*\n\n` +
+                `💰 *New Balance:* ${credits} credits\n` +
+                `🎬 Enough for ~${Math.floor(credits / 60)} face swap videos!\n\n` +
+                `Use /start to begin creating!`
+            );
+        } else {
+            return ctx.replyWithMarkdown(
+                `🎁 *Offer Already Claimed*\n\n` +
+                `You've already received your 69 free welcome credits!\n` +
+                `Check your balance with /credits or /start`
+            );
+        }
+    } catch (e) {
+        logger.error('get_free_credits action failed', { error: e.message });
+        await ctx.reply('❌ Error processing free credits. Please try again.');
+    }
+});
+
+bot.action('claim_daily', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        const result = claimDailyCredits({ telegramUserId: userId });
+
+        if (result.granted) {
+            let msg = `🎁 *Daily Credits Claimed!*\n\n+${result.amount} credits added`;
+            if (result.streak > 1) {
+                msg += `\n🔥 *${result.streak}-day streak!* (+${result.streakBonus || 0} bonus)`;
+            }
+            msg += `\n\n_Come back tomorrow for more!_`;
+            await ctx.replyWithMarkdown(msg);
+        } else {
+            const hours = result.hoursLeft || 24;
+            await ctx.reply(`⏰ Already claimed today!\n\nCome back in ${hours} hours.\n🔥 Streak: ${result.streak || 0} days`);
+        }
+    } catch (e) {
+        logger.error('claim_daily action failed', { error: e.message });
+        await ctx.reply('❌ Error claiming daily credits. Please try /daily command.');
+    }
+});
+
+bot.action('change_language', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        const currentLang = getUserLanguage(userId);
+
+        await ctx.replyWithMarkdown(
+            '🌐 *Choose your language / Elige tu idioma:*',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🇺🇸 English' + (currentLang === 'en' ? ' ✅' : ''), 'set_lang_en')],
+                [Markup.button.callback('🇪🇸 Español' + (currentLang === 'es' ? ' ✅' : ''), 'set_lang_es')]
+            ])
+        );
+    } catch (e) {
+        logger.error('change_language action failed', { error: e.message });
+    }
+});
+
+bot.action('set_lang_en', async (ctx) => {
+    try {
+        await ctx.answerCbQuery('Language set to English ✅');
+        const userId = String(ctx.from.id);
+        setUserLanguage(userId, 'en');
+        await ctx.replyWithMarkdown('✅ Language changed to English');
+        await sendDemoMenuWithBuyButtons(ctx);
+    } catch (e) {
+        logger.error('set_lang_en action failed', { error: e.message });
+    }
+});
+
+bot.action('set_lang_es', async (ctx) => {
+    try {
+        await ctx.answerCbQuery('Idioma cambiado a Español ✅');
+        const userId = String(ctx.from.id);
+        setUserLanguage(userId, 'es');
+        await ctx.replyWithMarkdown('✅ Idioma cambiado a Español');
+        await sendDemoMenuWithBuyButtons(ctx);
+    } catch (e) {
+        logger.error('set_lang_es action failed', { error: e.message });
+    }
+});
+
+bot.action('upload_template', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        ctx.session = {
+            mode: 'template_upload',
+            step: 'awaiting_video',
+            userId: userId
+        };
+        await ctx.replyWithMarkdown(
+            `📹 *Template Upload*\n\nPlease send your **template video** (MP4 format, max 15MB, up to 30 seconds):`,
+            Markup.inlineKeyboard([
+                [Markup.button.callback('❌ Cancel', 'cancel_template_upload')],
+                [Markup.button.callback('ℹ️ Help', 'upload_help')]
+            ])
+        );
+    } catch (e) {
+        logger.error('upload_template action failed', { error: e.message });
+        await ctx.reply('❌ Error starting template upload. Please try /upload_template command.');
+    }
+});
+
+bot.action('upload_help', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        await ctx.replyWithMarkdown(
+            `📝 *Template Upload Guide*\n\n` +
+            `To create face-swap videos, you need to upload:\n` +
+            `1. A *video template* (MP4 format, max 15MB, 5-30 seconds)\n` +
+            `2. A *photo template* (JPEG/PNG, max 10MB, clear front-facing face)\n\n` +
+            `*Requirements:*\n` +
+            `- Video must show a consistent face throughout\n` +
+            `- Photo must be well-lit and high quality\n` +
+            `- Both files must meet size requirements\n\n` +
+            `Start with /upload_template or tap the button below:`,
+            Markup.inlineKeyboard([
+                [Markup.button.callback('📤 Start Template Upload', 'upload_template')]
+            ])
+        );
+    } catch (e) {
+        logger.error('upload_help action failed', { error: e.message });
+    }
+});
+
+bot.action('view_templates', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = String(ctx.from.id);
+        const templates = db.prepare(
+            'SELECT * FROM user_templates WHERE user_id = ? ORDER BY last_used DESC'
+        ).all(userId);
+
+        if (!templates || templates.length === 0) {
+            return ctx.replyWithMarkdown(
+                '❌ No templates found. Use /upload_template to upload your first template pair.',
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('📤 Upload Templates', 'upload_template')]
+                ])
+            );
+        }
+
+        const templateList = templates.map((t, i) => {
+            return `${i + 1}. Video: ${Math.round(t.video_size / 1024 / 1024)}MB, ${t.video_duration}s | Photo: ${Math.round(t.photo_size / 1024)}KB`;
+        }).join('\n');
+
+        await ctx.replyWithMarkdown(
+            `📂 *Your Templates*\n\n${templateList}\n\nUse /delete_template [number] to remove a template.`
+        );
+    } catch (e) {
+        logger.error('view_templates action failed', { error: e.message });
+        await ctx.reply('❌ Error loading templates. Please try /view_templates command.');
+    }
+});
+
+bot.action('help', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        await ctx.replyWithMarkdown(
+            '🆘 *Help Center*\n\n' +
+            '*How to use:*\n' +
+            '1. /upload_template - Add your video and photo\n' +
+            '2. Send /create to make videos\n\n' +
+            '*Commands:*\n' +
+            '• /start - Main menu\n' +
+            '• /daily - Claim free daily credits\n' +
+            '• /credits - Check your balance\n' +
+            '• /studio - Open full AI studio\n' +
+            '• /help - This help message\n\n' +
+            '*Requirements:*\n' +
+            '- Your own high-quality templates\n' +
+            '- Video: MP4, max 15MB\n' +
+            '- Photo: JPEG/PNG, max 10MB'
+        );
+    } catch (e) {
+        logger.error('help action failed', { error: e.message });
+    }
+});
+
+// Add /credits command for checking balance
+bot.command('credits', async (ctx) => {
+    const userId = String(ctx.from.id);
+    const user = getUser(userId);
+    const credits = getCredits({ telegramUserId: userId });
+    const balance = credits > 0 ? credits : user.points;
+    const videos = Math.floor(balance / 60);
+
+    await ctx.replyWithMarkdown(
+        `💰 *Your Balance*\n\n` +
+        `Credits: *${balance}*\n` +
+        `Enough for: *~${videos} videos*\n\n` +
+        `Need more?`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🎁 Claim Daily Free Credits', 'claim_daily')],
+            [Markup.button.callback('💳 Buy Credits', 'buy_points_menu')]
+        ])
+    );
+});
+
+// ─── END MISSING ACTION HANDLERS ────────────────────────────────────────────
+
+// Graceful Stop
 let stopped = false;
 async function safeStop(signal) {
     if (stopped) return;
