@@ -687,12 +687,12 @@ app.post('/api/miniapp/checkout', validateCurrency, async (req, res) => {
     }
 
     try {
-        // Use USD as settlement currency - Adaptive Pricing handles local currency conversion
+        // Use MXN (settlement currency) - Adaptive Pricing handles local currency conversion for customers
         const session = await stripe.checkout.sessions.create({
             adaptive_pricing: { enabled: true },
             line_items: [{
                 price_data: {
-                    currency: 'usd',
+                    currency: 'mxn',
                     product_data: { name: `${pack.label} - ${pack.points} credits` },
                     unit_amount: pack.price_cents,
                 },
