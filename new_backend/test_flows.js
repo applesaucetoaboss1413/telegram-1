@@ -254,6 +254,80 @@ test('render.yaml has correct build command', () => {
     assert(yaml.includes('npm install'), 'render.yaml should run npm install');
 });
 
+
+// ============================================================
+// TEST 7.5: Free Credits Security
+// ============================================================
+console.log('\n=== TEST GROUP 7.5: Free Credits Security ===');
+
+test('get_credits deep link does NOT grant credits directly', () => {
+    const caseIdx = botCode.indexOf("case 'get_credits':");
+    const nextCase = botCode.indexOf("case 'buy_points':", caseIdx);
+    const block = botCode.substring(caseIdx, nextCase);
+    
+    assert(!block.includes("credits + 69"), 'Should NOT directly add 69 credits');
+    assert(!block.includes("credits, 69, 1"), 'Should NOT insert 69 credits');
+    assert(block.includes("mode: 'setup'"), 'Should create Stripe setup session for card verification');
+    assert(block.includes('stripe.checkout.sessions.create'), 'Should call Stripe to verify card');
+});
+
+test('get_free_credits action does NOT grant credits directly', () => {
+    const actionIdx = botCode.indexOf("bot.action('get_free_credits'");
+    const nextAction = botCode.indexOf('bot.action(', actionIdx + 20);
+    const block = botCode.substring(actionIdx, nextAction);
+    
+    assert(!block.includes("credits + 69"), 'Should NOT directly add 69 credits');
+    assert(!block.includes("credits, 69, 1"), 'Should NOT insert 69 credits');
+    assert(block.includes("mode: 'setup'"), 'Should create Stripe setup session');
+    assert(block.includes('stripe.checkout.sessions.create'), 'Should call Stripe');
+});
+
+test('get_credits checks welcome_granted before proceeding', () => {
+    const caseIdx = botCode.indexOf("case 'get_credits':");
+    const nextCase = botCode.indexOf("case 'buy_points':", caseIdx);
+    const block = botCode.substring(caseIdx, nextCase);
+    
+    assert(block.includes('welcome_granted = 1'), 'Should check welcome_granted flag');
+    assert(block.includes('Already Claimed'), 'Should show already claimed message');
+});
+
+test('grantWelcomeCredits checks per-user (not just per-stripe-customer)', () => {
+    const creditsCode = fs.readFileSync('./src/services/creditsService.js', 'utf8');
+    const fnIdx = creditsCode.indexOf('const grantWelcomeCredits');
+    const fnEnd = creditsCode.indexOf('module.exports', fnIdx);
+    const block = creditsCode.substring(fnIdx, fnEnd);
+    
+    assert(block.includes("telegram_user_id = ? AND welcome_granted = 1"), 'Should check welcome_granted per telegram user');
+});
+
+test('Credits sync: grantCredits also updates users.points', () => {
+    const creditsCode = fs.readFileSync('./src/services/creditsService.js', 'utf8');
+    const fnIdx = creditsCode.indexOf('const grantCredits');
+    const fnEnd = creditsCode.indexOf('const deductCredits', fnIdx);
+    const block = creditsCode.substring(fnIdx, fnEnd);
+    
+    assert(block.includes("UPDATE users SET points = points +"), 'grantCredits should sync to users.points');
+});
+
+test('Credits sync: spendCredits also updates users.points', () => {
+    const creditsCode = fs.readFileSync('./src/services/creditsService.js', 'utf8');
+    const fnIdx = creditsCode.indexOf('const spendCredits');
+    const fnEnd = creditsCode.indexOf('const grantCredits', fnIdx);
+    const block = creditsCode.substring(fnIdx, fnEnd);
+    
+    assert(block.includes("UPDATE users SET points = points -"), 'spendCredits should sync to users.points');
+});
+
+test('Checkout uses MXN settlement currency in server.js', () => {
+    const serverCode = fs.readFileSync('./src/server.js', 'utf8');
+    const checkoutIdx = serverCode.indexOf("adaptive_pricing: { enabled: true }");
+    assert(checkoutIdx > -1, 'server.js should have adaptive_pricing enabled');
+    
+    // Find the nearby currency line
+    const block = serverCode.substring(checkoutIdx - 200, checkoutIdx + 200);
+    assert(block.includes("currency: 'mxn'"), 'server.js checkout should use MXN');
+});
+
 // ============================================================
 // TEST 8: Verify the complete flow chain
 // ============================================================
