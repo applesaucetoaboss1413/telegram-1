@@ -1,0 +1,70 @@
+services:
+  - type: web
+    name: telegram-faceswap-bot
+    env: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 18.18.0
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: A2E_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: MAGICAPI_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_SECRET
+        generateValue: true
+      - key: PUBLIC_URL
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: RATE_LIMIT_WINDOW
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+      - key: HEALTH_CHECK_INTERVAL
+        value: 30000
+      - key: ALERT_THRESHOLD_CPU
+        value: 80
+      - key: ALERT_THRESHOLD_MEMORY
+        value: 85
+    
+    # Auto-scaling configuration
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetCPUPercent: 70
+      targetMemoryPercent: 80
+    
+    # Resource limits
+    disk:
+      size: 1GB
+    
+    # Backup configuration
+    backup:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      retention: 7  # Keep 7 days of backups

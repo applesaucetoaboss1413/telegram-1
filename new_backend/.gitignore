@@ -1,0 +1,14 @@
+# Environment files - NEVER commit these
+.env
+.env.local
+.env.production
+.env.*.local
+*.env
+.env.test
+.env.development
+
+# EXCEPT the example file
+!.env.example
+!.env.production.example
+!.env.test.example
+!.env.development.example
