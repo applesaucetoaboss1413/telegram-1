@@ -1435,8 +1435,8 @@ async function createStripeCheckoutSession({ userId, packType, currency }) {
         const pack = demoCfg.packs[packType];
         if (!pack) throw new Error('Invalid pack type');
 
-        // Always use USD - Stripe auto-converts to user's local currency
-        const sessionCurrency = 'usd';
+        // Use MXN as settlement currency - Adaptive Pricing converts to customer's local currency
+        const sessionCurrency = 'mxn';
 
         const session = await stripe.checkout.sessions.create({
             mode: 'payment',
