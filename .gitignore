@@ -5,3 +5,7 @@ node_modules/
 *.log
 data/
 .DS_Store
+-e 
+# Environment files
+*.env
+*.env.*
