@@ -261,6 +261,108 @@ bot.command('start', async (ctx) => {
                         [Markup.button.callback('✨ Go to Studio for More Options', 'open_studio')]
                     ])
                 );
+
+            case 'buy_micro':
+                try {
+                    const sessionMicro = await createStripeCheckoutSession({ userId, packType: 'micro', currency: 'usd' });
+                    return ctx.reply('💳 Complete your purchase:', {
+                        reply_markup: { inline_keyboard: [[{ text: '💳 Pay $0.99 - 80 Credits', url: sessionMicro.url }]] }
+                    });
+                } catch (e) {
+                    logger.error('buy_micro deep link failed', { error: e.message, userId });
+                    return ctx.reply('❌ Payment system error. Please try again later.');
+                }
+
+            case 'buy_starter':
+                try {
+                    const sessionStarter = await createStripeCheckoutSession({ userId, packType: 'starter', currency: 'usd' });
+                    return ctx.reply('💳 Complete your purchase:', {
+                        reply_markup: { inline_keyboard: [[{ text: '💳 Pay $4.99 - 400 Credits', url: sessionStarter.url }]] }
+                    });
+                } catch (e) {
+                    logger.error('buy_starter deep link failed', { error: e.message, userId });
+                    return ctx.reply('❌ Payment system error. Please try again later.');
+                }
+
+            case 'buy_plus':
+                try {
+                    const sessionPlus = await createStripeCheckoutSession({ userId, packType: 'plus', currency: 'usd' });
+                    return ctx.reply('💳 Complete your purchase:', {
+                        reply_markup: { inline_keyboard: [[{ text: '💳 Pay $8.99 - 800 Credits', url: sessionPlus.url }]] }
+                    });
+                } catch (e) {
+                    logger.error('buy_plus deep link failed', { error: e.message, userId });
+                    return ctx.reply('❌ Payment system error. Please try again later.');
+                }
+
+            case 'buy_pro':
+                try {
+                    const sessionPro = await createStripeCheckoutSession({ userId, packType: 'pro', currency: 'usd' });
+                    return ctx.reply('💳 Complete your purchase:', {
+                        reply_markup: { inline_keyboard: [[{ text: '💳 Pay $14.99 - 1600 Credits', url: sessionPro.url }]] }
+                    });
+                } catch (e) {
+                    logger.error('buy_pro deep link failed', { error: e.message, userId });
+                    return ctx.reply('❌ Payment system error. Please try again later.');
+                }
+
+            case 'lang_en':
+                setUserLanguage(userId, 'en');
+                await ctx.replyWithMarkdown('✅ Language changed to English');
+                return sendDemoMenuWithBuyButtons(ctx);
+
+            case 'lang_es':
+                setUserLanguage(userId, 'es');
+                await ctx.replyWithMarkdown('✅ Idioma cambiado a Español');
+                return sendDemoMenuWithBuyButtons(ctx);
+
+            case 'promo':
+                return sendDemoMenuWithBuyButtons(ctx);
+
+            case 'daily': {
+                const dailyResult = claimDailyCredits({ telegramUserId: userId });
+                if (dailyResult.granted) {
+                    let dailyMsg = `🎁 *Daily Credits Claimed!*\n\n+${dailyResult.amount} credits added`;
+                    if (dailyResult.streak > 1) {
+                        dailyMsg += `\n🔥 *${dailyResult.streak}-day streak!* (+${dailyResult.streakBonus || 0} bonus)`;
+                    }
+                    dailyMsg += `\n\n_Come back tomorrow for more!_`;
+                    return ctx.replyWithMarkdown(dailyMsg);
+                } else {
+                    const hrs = dailyResult.hoursLeft || 24;
+                    return ctx.reply(`⏰ Already claimed today!\n\nCome back in ${hrs} hours.\n🔥 Streak: ${dailyResult.streak || 0} days`);
+                }
+            }
+
+            case 'success':
+                return ctx.replyWithMarkdown(
+                    '✅ *Payment Successful!*\n\nYour credits have been added to your account.\n\nUse /start to see your balance and create videos!'
+                );
+
+            case 'cancel':
+                return ctx.replyWithMarkdown(
+                    '❌ *Payment Cancelled*\n\nNo worries! You can try again anytime.\n\nUse /start to see available options.',
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('💳 Try Again', 'buy_points_menu')],
+                        [Markup.button.callback('🎬 Create Video', 'demo_new')]
+                    ])
+                );
+
+            case 'examples':
+                return ctx.replyWithMarkdown(
+                    '🎬 *See What You Can Create!*\n\n' +
+                    'Our AI can swap faces in any video:\n' +
+                    '• Music videos\n• Movie scenes\n• Funny clips\n• And more!\n\n' +
+                    'Ready to try?',
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('🎬 Create Video Now', 'demo_new')],
+                        [Markup.button.callback('💳 Buy Credits', 'buy_points_menu')]
+                    ])
+                );
+
+            default:
+                logger.info('Unknown deep link payload', { userId, payload });
+                return sendDemoMenuWithBuyButtons(ctx);
         }
     }
 
