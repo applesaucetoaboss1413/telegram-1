@@ -6,20 +6,8 @@
     "node": ">=18.18.0"
   },
   "scripts": {
-    "start": "node new_backend/index.js",
-    "build": "echo 'no build step'",
-    "postinstall": "cd new_backend && npm install --omit=dev"
-  },
-  "dependencies": {
-    "axios": "^1.13.2",
-    "better-sqlite3": "^12.5.0",
-    "cloudinary": "^1.41.1",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "multer": "^1.4.5-lts.1",
-    "stripe": "^20.0.0",
-    "telegraf": "^4.16.3",
-    "uuid": "^13.0.0",
-    "winston": "^3.19.0"
+    "start": "cd new_backend && node index.js",
+    "build": "cd new_backend && npm install",
+    "postinstall": "cd new_backend && npm install"
   }
 }
