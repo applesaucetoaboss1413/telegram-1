@@ -342,40 +342,50 @@ bot.command('start', async (ctx) => {
                 );
             case 'get_credits':
                 logger.info('Checking 69 free credits eligibility', { userId });
-                const stripeCustomer = db.prepare('SELECT stripe_customer_id FROM user_credits WHERE telegram_user_id = ? AND stripe_customer_id IS NOT NULL').get(userId);
+                // Check if already claimed
                 const hasWelcomeCredits = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ? AND welcome_granted = 1').get(userId);
-                if (!hasWelcomeCredits) {
-                    logger.info('User eligible for 69 free credits', { userId });
-                    // Ensure user_credits record exists
-                    const existing = db.prepare('SELECT 1 FROM user_credits WHERE telegram_user_id = ?').get(userId);
-                    if (!existing) {
-                        db.prepare('INSERT INTO user_credits (telegram_user_id, credits, welcome_granted, created_at, updated_at) VALUES (?, 69, 1, ?, ?)').run(userId, Date.now(), Date.now());
-                    } else {
-                        db.prepare('UPDATE user_credits SET credits = credits + 69, welcome_granted = 1, updated_at = ? WHERE telegram_user_id = ?').run(Date.now(), userId);
-                    }
-                    // Also update points in users table for consistency
-                    db.prepare('UPDATE users SET points = points + 69 WHERE id = ?').run(userId);
-                    
-                    logger.info('69 free credits granted', { userId });
-                    const credits = db.prepare('SELECT SUM(credits) as total FROM user_credits WHERE telegram_user_id = ?').get(userId).total;
+                if (hasWelcomeCredits) {
                     return ctx.replyWithMarkdown(
-                        `🎉 *69 Free Credits Granted!*\n\n` +
-                        `💰 *New Balance:* ${credits} credits\n` +
-                        `🎬 Enough for ~${Math.floor(credits / 60)} face swap videos!\n\n` +
-                        `Use /start create to begin`
-                    );
-                } else if (hasWelcomeCredits) {
-                    return ctx.replyWithMarkdown(
-                        `🎁 *Offer Already Claimed*\n\n` +
+                        `*Offer Already Claimed*\n\n` +
                         `You've already received your 69 free welcome credits!\n` +
                         `Check your balance with /credits`
                     );
-                } else {
+                }
+
+                // Require Stripe card verification — create a setup-mode Checkout Session
+                try {
+                    if (!checkRateLimit(userId, 'payment')) {
+                        return ctx.reply('Too many attempts. Please wait a minute.');
+                    }
+
+                    const setupSession = await stripe.checkout.sessions.create({
+                        mode: 'setup',
+                        adaptive_pricing: { enabled: true },
+                        success_url: process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp?welcome=true` : 'https://telegramalam.onrender.com/miniapp/?welcome=true',
+                        cancel_url: process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp?cancel=true` : 'https://telegramalam.onrender.com/miniapp/?cancel=true',
+                        client_reference_id: String(userId),
+                        metadata: {
+                            userId: String(userId),
+                            type: 'welcome_credits',
+                            credits: '69',
+                            source: 'telegram_bot'
+                        }
+                    });
+
+                    logger.info('Free credits setup session created', { userId, sessionId: setupSession.id });
+
                     return ctx.replyWithMarkdown(
-                        `🎁 *Eligibility Required*\n\n` +
-                        `The 69 free credits offer is for new Stripe subscribers only.\n` +
-                        `[Connect your Stripe account](${process.env.STRIPE_CONNECT_URL || 'https://stripe.com/connect'}) to qualify`
+                        `*Get 69 FREE Credits*\n\n` +
+                        `Verify your card to claim your welcome bonus.\n` +
+                        `No charge — just a quick verification.\n\n` +
+                        `Credits are added instantly after verification.`,
+                        Markup.inlineKeyboard([
+                            [Markup.button.url('Verify Card & Get Credits', setupSession.url)]
+                        ])
                     );
+                } catch (e) {
+                    logger.error('Free credits setup session failed', { error: e.message, userId });
+                    return ctx.reply('Could not start verification. Please try again later.');
                 }
             case 'buy_points':
                 return sendBuyPointsMenu(ctx);
