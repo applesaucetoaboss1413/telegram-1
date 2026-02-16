@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: telegram-faceswap-bot
+    env: node
+    plan: starter
+    buildCommand: cd new_backend && npm install
+    startCommand: cd new_backend && node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 18.18.0
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: A2E_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: MAGICAPI_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_SECRET
+        generateValue: true
+      - key: ADMIN_IDS
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: LOG_LEVEL
+        value: info
