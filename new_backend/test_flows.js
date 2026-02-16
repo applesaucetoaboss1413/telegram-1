@@ -220,7 +220,7 @@ test('All deep link buy handlers use USD', () => {
         const nextCase = botCode.indexOf("case '", caseIdx + 10);
         const block = botCode.substring(caseIdx, nextCase);
         
-        assert(block.includes("currency: 'usd'"), `buy_${pack} deep link should use USD`);
+        assert(block.includes("currency: 'usd'"), `buy_${pack} deep link should use USD for createStripeCheckoutSession call`);
     }
 });
 
