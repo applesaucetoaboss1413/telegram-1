@@ -9,55 +9,74 @@ const logger = winston.createLogger({
 
 /**
  * Grants 69 welcome credits to a new paying user.
- * Credits are only granted once per (telegramUserId, stripeCustomerId) pair.
+ * ONE TIME ONLY per telegram user — regardless of how many Stripe customers they create.
  */
 const grantWelcomeCredits = ({ telegramUserId, stripeCustomerId }) => {
     try {
         const now = Date.now();
         const tId = String(telegramUserId);
 
-        // Try to get existing record
-        let record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ? AND stripe_customer_id = ?')
-            .get(tId, stripeCustomerId);
+        // Check if ANY record for this telegram user already has welcome_granted
+        const alreadyClaimed = db.prepare(
+            'SELECT 1 FROM user_credits WHERE telegram_user_id = ? AND welcome_granted = 1'
+        ).get(tId);
+
+        if (alreadyClaimed) {
+            logger.info('Welcome credits already granted - blocked duplicate attempt', {
+                telegramUserId: tId,
+                stripeCustomerId
+            });
+            return false;
+        }
+
+        // Check if this exact stripe customer already used
+        if (stripeCustomerId) {
+            const customerUsed = db.prepare(
+                'SELECT 1 FROM user_credits WHERE stripe_customer_id = ? AND welcome_granted = 1'
+            ).get(stripeCustomerId);
+
+            if (customerUsed) {
+                logger.warn('Stripe customer already claimed welcome credits on different account', {
+                    telegramUserId: tId,
+                    stripeCustomerId
+                });
+                return false;
+            }
+        }
+
+        // Grant credits - find existing record or create new one
+        let record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(tId);
 
         if (!record) {
-            // Create new record and grant credits
             db.prepare(`
                 INSERT INTO user_credits (telegram_user_id, stripe_customer_id, credits, welcome_granted, created_at, updated_at)
                 VALUES (?, ?, 69, 1, ?, ?)
-            `).run(tId, stripeCustomerId, now, now);
-            logger.info('Welcome credits granted - new record', {
-                telegramUserId: tId,
-                stripeCustomerId,
-                amount: 69,
-                newRecord: true
-            });
-            return true;
-        }
-
-        if (!record.welcome_granted) {
-            // Update existing record to grant credits
+            `).run(tId, stripeCustomerId || null, now, now);
+        } else {
             db.prepare(`
                 UPDATE user_credits 
-                SET credits = credits + 69, welcome_granted = 1, updated_at = ?
-                WHERE id = ?
-            `).run(now, record.id);
-            logger.info('Welcome credits granted - existing record', {
-                telegramUserId: tId,
-                stripeCustomerId,
-                amount: 69,
-                previousCredits: record.credits,
-                newRecord: false
-            });
-            return true;
+                SET credits = credits + 69, welcome_granted = 1, stripe_customer_id = COALESCE(stripe_customer_id, ?), updated_at = ?
+                WHERE telegram_user_id = ? AND (welcome_granted = 0 OR welcome_granted IS NULL)
+            `).run(stripeCustomerId || null, now, tId);
+
+            // Verify it actually updated (wasn't already granted in a race condition)
+            const updated = db.prepare('SELECT welcome_granted FROM user_credits WHERE telegram_user_id = ?').get(tId);
+            if (updated && !updated.welcome_granted) {
+                return false;
+            }
         }
 
-        logger.info('Welcome credits already granted - no action taken', {
+        // Also sync to users.points table
+        try {
+            db.prepare('UPDATE users SET points = points + 69 WHERE id = ?').run(tId);
+        } catch (_) {}
+
+        logger.info('Welcome credits granted', {
             telegramUserId: tId,
             stripeCustomerId,
-            currentCredits: record.credits
+            amount: 69
         });
-        return false;
+        return true;
     } catch (error) {
         logger.error('Error granting welcome credits', {
             error: error.message,
