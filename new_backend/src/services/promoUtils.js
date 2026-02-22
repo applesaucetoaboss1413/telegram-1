@@ -4,10 +4,24 @@ const demoCfg = require('./a2eConfig');
 function getBilingualPromoMessage() {
     const p = demoCfg.packs;
     const fakeVideoCount = 8400 + Math.floor(Math.random() * 600);
+    const siteUrl = 'https://faceshot-chopshop-1.onrender.com';
 
     return `🎭 *AI Face Swap Studio*
-_Swap your face into any video in seconds!_
-_¡Cambia tu rostro en cualquier video en segundos!_
+_Simple Face Swaps Here in the Channel!_
+_¡Cambio de Rostro Simple Aquí en el Canal!_
+
+1️⃣ *Upload a Photo* (Your Face)
+   _Sube una Foto (Tu Rostro)_
+2️⃣ *Upload a Video* (5-15 seconds)
+   _Sube un Video (5-15 segundos)_
+3️⃣ *Wait for Magic!*
+   _¡Espera la Magia!_
+
+💡 *Want more AI tools? / ¿Quieres más herramientas IA?*
+👉 *Mini App:* diverse AI styles & templates
+   _Mini App: diversos estilos y plantillas IA_
+👉 *Full Suite:* [faceshot-chopshop-1.onrender.com](${siteUrl})
+   _Suite Completa: acceso total en la web_
 
 📊 *${fakeVideoCount.toLocaleString()}+ videos created!*
 

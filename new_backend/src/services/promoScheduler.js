@@ -106,9 +106,16 @@ async function postPromoBatch(bot) {
         }
 
         // Then send the full pricing/info message with buy buttons
-        await bot.telegram.sendMessage(channelId, getBilingualPromoMessage(), {
+        // Use the main bilingual promo message which now includes:
+        // 1. Instructions (Photo + Video)
+        // 2. Mini App upsell
+        // 3. Website upsell (full suite)
+        const msg = getBilingualPromoMessage();
+        const buttons = getBilingualBuyButtons(Markup);
+
+        await bot.telegram.sendMessage(channelId, msg, {
             parse_mode: 'Markdown',
-            reply_markup: getBilingualBuyButtons(Markup).reply_markup
+            reply_markup: buttons.reply_markup
         });
 
         console.log('Promo message with pricing posted to channel.');
