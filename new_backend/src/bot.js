@@ -780,12 +780,16 @@ _Swap your face into any video in seconds!_
 
 bot.command('help', async (ctx) => {
     await ctx.replyWithMarkdown(
-        '🆘 *Help Center*\n\n' +
-        '*How to use:*\n' +
-        '1. /upload_template - Add your video and photo\n' +
-        '2. Send /create to make videos\n\n' +
-        '*Requirements:*\n' +
-        '- Your own high-quality templates\n' +
+        '🆘 *Help Center / Ayuda*\n\n' +
+        '*How to create a Face Swap:*\n' +
+        '1️⃣ Upload a Photo (Your Face)\n' +
+        '2️⃣ Upload a Video (5-15 seconds)\n' +
+        '3️⃣ Wait for Magic!\n\n' +
+        '*Cómo crear un Face Swap:*\n' +
+        '1️⃣ Sube una Foto (Tu Rostro)\n' +
+        '2️⃣ Sube un Video (5-15 segundos)\n' +
+        '3️⃣ ¡Espera la Magia!\n\n' +
+        '*Requirements / Requisitos:*\n' +
         '- Video: MP4, max 15MB\n' +
         '- Photo: JPEG/PNG, max 10MB'
     );

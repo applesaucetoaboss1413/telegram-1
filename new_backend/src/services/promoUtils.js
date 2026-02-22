@@ -5,23 +5,33 @@ function getBilingualPromoMessage() {
     const p = demoCfg.packs;
     const fakeVideoCount = 8400 + Math.floor(Math.random() * 600);
     const siteUrl = 'https://faceshot-chopshop-1.onrender.com';
+    const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
 
     return `🎭 *AI Face Swap Studio*
-_Simple Face Swaps Here in the Channel!_
-_¡Cambio de Rostro Simple Aquí en el Canal!_
+⚠️ *SAMPLE VERSION / VERSIÓN DE PRUEBA* ⚠️
+_This channel bot allows basic Face Swaps only._
+_Este bot del canal solo permite cambios de cara básicos._
 
-1️⃣ *Upload a Photo* (Your Face)
-   _Sube una Foto (Tu Rostro)_
-2️⃣ *Upload a Video* (5-15 seconds)
-   _Sube un Video (5-15 segundos)_
-3️⃣ *Wait for Magic!*
-   _¡Espera la Magia!_
+👶 *HOW TO USE (Easy Mode) / CÓMO USAR (Modo Fácil):*
 
-💡 *Want more AI tools? / ¿Quieres más herramientas IA?*
-👉 *Mini App:* diverse AI styles & templates
-   _Mini App: diversos estilos y plantillas IA_
-👉 *Full Suite:* [faceshot-chopshop-1.onrender.com](${siteUrl})
-   _Suite Completa: acceso total en la web_
+1️⃣ *Tap the paperclip icon* 📎
+   _Toca el icono del clip_
+2️⃣ *Send a CLEAR Photo of a Face* 📸
+   _Envía una Foto CLARA de un Rostro_
+3️⃣ *Send a Short Video (5-15s)* 🎥
+   _Envía un Video Corto (5-15s)_
+4️⃣ *The Bot swaps the faces!* ✨
+   _¡El Bot cambia las caras!_
+
+� *WANT MORE POWER? / ¿QUIERES MÁS PODER?*
+� *Use the Mini App* for templates & styles:
+   _Usa la Mini App para plantillas y estilos:_
+   👉 *Tap "Open Studio App" below!*
+
+🌍 *NEED PROFESSIONAL TOOLS? / ¿HERRAMIENTAS PRO?*
+� *Visit our Full Web Suite:*
+   _Visita nuestra Suite Web Completa:_
+   👉 [faceshot-chopshop-1.onrender.com](${siteUrl})
 
 📊 *${fakeVideoCount.toLocaleString()}+ videos created!*
 

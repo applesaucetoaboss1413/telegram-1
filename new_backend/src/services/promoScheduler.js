@@ -15,68 +15,19 @@ async function postStartupVideos(bot) {
         const botName = process.env.BOT_USERNAME || 'ImMoreThanJustSomeBot';
         const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
 
-        // Message 1: Bilingual Welcome & Language
-        await bot.telegram.sendMessage(channelId,
-            `🌍 *Welcome / Bienvenido*\n\n` +
-            `Choose your preferred language:\n` +
-            `Selecciona tu idioma preferido:`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.url('🇺🇸 English', `https://t.me/${botName}?start=lang_en`)],
-                    [Markup.button.url('🇪🇸 Español', `https://t.me/${botName}?start=lang_es`)]
-                ]).reply_markup
-            }
-        );
+        // Unified Startup Message (Reduces spam, high impact)
+        // Includes: Welcome, Instructions, Mini App Upsell, and Pricing
+        const msg = getBilingualPromoMessage();
+        
+        // Use Bilingual Buy Buttons (URL buttons) for Channel context
+        const buttons = getBilingualBuyButtons(Markup);
 
-        // Message 2: Mini App Promotion (Bilingual)
-        await bot.telegram.sendMessage(channelId,
-            `🎨 *AI Face-Swap Studio*\n\n` +
-            `Your complete AI creative toolkit!\n` +
-            `_¡Tu kit creativo completo de IA!_\n\n` +
-            `✨ *5 Professional Tools / 5 Herramientas:*\n` +
-            `• Face Swap Videos / _Intercambio de Rostros_\n` +
-            `• Talking Avatars / _Avatares Parlantes_\n` +
-            `• Image Animation / _Animación de Fotos_\n` +
-            `• 4K Enhancement / _Mejora 4K_\n` +
-            `• Background Removal / _Eliminar Fondo_\n\n` +
-            `👇 *Tap to Launch / Toca para Abrir* 👇`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.webApp('🎨 OPEN STUDIO / ABRIR ESTUDIO', miniAppUrl)]
-                ]).reply_markup
-            }
-        );
+        await bot.telegram.sendMessage(channelId, msg, {
+            parse_mode: 'Markdown',
+            reply_markup: buttons.reply_markup
+        });
 
-        // Message 3: Free Credits Offer (Bilingual)
-        await bot.telegram.sendMessage(channelId,
-            `🎁 *FREE CREDITS / CRÉDITOS GRATIS*\n\n` +
-            `*New Users / Nuevos Usuarios:*\n` +
-            `✅ 69 FREE credits instantly / _instantáneos_\n` +
-            `✅ No payment required / _Sin pago requerido_\n` +
-            `✅ Just verify your card / _Solo verifica tarjeta_\n\n` +
-            `*Daily Bonus / Bono Diario:*\n` +
-            `✅ 10 FREE credits every 24h / _cada 24h_\n` +
-            `✅ Build streaks for bonus / _Rachas para bonos_`,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: Markup.inlineKeyboard([
-                    [Markup.button.url('🎁 Get 69 Free Credits / Obtener Créditos', `https://t.me/${botName}?start=get_credits`)]
-                ]).reply_markup
-            }
-        );
-
-        // Message 4: Pricing (Bilingual)
-        await bot.telegram.sendMessage(channelId,
-            getBilingualPromoMessage(), // Reuse logic
-            {
-                parse_mode: 'Markdown',
-                reply_markup: getBilingualBuyButtons(Markup).reply_markup
-            }
-        );
-
-        console.log('Startup intro messages posted to channel (Bilingual).');
+        console.log('Startup intro message posted to channel (Unified).');
     } catch (error) {
         console.error('Failed to post startup intro:', error.message);
     }
