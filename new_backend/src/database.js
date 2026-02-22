@@ -112,6 +112,13 @@ try {
             created_at INTEGER
         );
 
+        -- NEW: Persistent Sessions for Telegraf
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            session TEXT,
+            updated_at INTEGER
+        );
+
         -- Create indexes for performance
         CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
         CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);

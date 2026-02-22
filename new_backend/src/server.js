@@ -1,6 +1,6 @@
 const express = require('express');
 const app = express();
-const { getUser, updateUserPoints, addTransaction, markPurchased, trackEvent } = require('./database');
+const { getUser, addTransaction, markPurchased, trackEvent } = require('./database');
 const { grantWelcomeCredits, recordPurchase, grantCredits } = require('./services/creditsService');
 const demoCfg = require('./services/a2eConfig');
 const { bot } = require('./bot');
@@ -206,7 +206,6 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
 
             try {
                 // Add points to user account
-                updateUserPoints(userId, pointsToAdd);
                 addTransaction(userId, pointsToAdd, 'purchase_stripe');
 
                 // Also grant as credits for the new system
@@ -245,7 +244,6 @@ Tap /start to begin!`, { parse_mode: 'Markdown' });
                     const referrerId = user.referred_by;
                     const rewardPoints = demoCfg.referralReward || 60;
 
-                    updateUserPoints(referrerId, rewardPoints);
                     addTransaction(referrerId, rewardPoints, 'referral_reward');
                     grantCredits({ telegramUserId: referrerId, amount: rewardPoints });
                     markPurchased(userId);
@@ -273,20 +271,23 @@ Keep sharing to earn more!`, { parse_mode: 'Markdown' });
                 // Send purchase confirmation with upsell for next purchase
                 try {
                     const videosCount = Math.floor(pointsToAdd / 60);
-                    let successMsg = `✅ *¡Pago Exitoso!*
-
-+${pointsToAdd} créditos agregados a tu cuenta
-📹 ¡Son suficientes para ~${videosCount} videos!
-
-¿Listo para crear? Presiona /start`;
+                    let successMsg = `✅ *Payment Successful / Pago Exitoso!*\n\n` +
+                        `+${pointsToAdd} credits added to your account\n` +
+                        `_+${pointsToAdd} créditos agregados a tu cuenta_\n\n` +
+                        `📹 Enough for ~${videosCount} videos!\n` +
+                        `_¡Suficientes para ~${videosCount} videos!_\n\n` +
+                        `Ready to create? Press /start\n` +
+                        `_¿Listo para crear? Presiona /start_`;
 
                     // Add upsell for micro purchasers with MXN pricing
                     if (packType === 'micro') {
                         const rate = await fetchUsdRate('mxn');
                         const starterMxn = ((demoCfg.packs.starter.price_cents / 100) * rate).toFixed(2);
-                        successMsg += `
-
-💡 *Consejo:* ¿Te gustó? Actualiza al Paquete Starter para mejor valor - 400 créditos por MX$${starterMxn} (¡ahorra 40%!)`;
+                        successMsg += `\n\n` +
+                            `💡 *Tip:* Loved it? Upgrade to Starter Pack for better value\n` +
+                            `_💡 *Consejo:* ¿Te gustó? Actualiza al Paquete Starter para mejor valor_\n` +
+                            `400 credits for MX$${starterMxn} (save 40%!)\n` +
+                            `_400 créditos por MX$${starterMxn} (¡ahorra 40%!)_`;
                     }
 
                     await bot.telegram.sendMessage(userId, successMsg, { parse_mode: 'Markdown' });

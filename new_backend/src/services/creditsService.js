@@ -110,6 +110,9 @@ const spendCredits = ({ telegramUserId, amount }) => {
         const tId = String(telegramUserId);
         const now = Date.now();
 
+        // Ensure initialized (migrating legacy points if needed)
+        initializeUserCredits(tId);
+
         // Find the first available record with enough credits (simple logic for now)
         const record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ? AND credits >= ? ORDER BY updated_at DESC')
             .get(tId, amount);
@@ -150,22 +153,15 @@ const grantCredits = ({ telegramUserId, amount }) => {
         const tId = String(telegramUserId);
         const now = Date.now();
 
-        // Get existing record
-        let record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ? ORDER BY updated_at DESC').get(tId);
-        if (!record) {
-            // Create new
-            db.prepare(`
-                INSERT INTO user_credits (telegram_user_id, credits, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-            `).run(tId, amount, now, now);
-        } else {
-            // Update
-            db.prepare(`
-                UPDATE user_credits
-                SET credits = credits + ?, updated_at = ?
-                WHERE id = ?
-            `).run(amount, now, record.id);
-        }
+        // Ensure record exists (migrating legacy points if needed)
+        initializeUserCredits(tId);
+
+        // Update
+        db.prepare(`
+            UPDATE user_credits
+            SET credits = credits + ?, updated_at = ?
+            WHERE telegram_user_id = ?
+        `).run(amount, now, tId);
 
         // Sync to users.points table
         try {
@@ -188,18 +184,27 @@ const deductCredits = ({ telegramUserId, amount }) => {
 };
 
 /**
- * Initializes user credits record with 0 credits if not exists.
+ * Initializes user credits record with 0 (or legacy points) if not exists.
  */
 const initializeUserCredits = (telegramUserId) => {
     try {
         const tId = String(telegramUserId);
         const now = Date.now();
         let record = db.prepare('SELECT * FROM user_credits WHERE telegram_user_id = ?').get(tId);
+        
         if (!record) {
+            // Check legacy points first to avoid data loss
+            const user = db.prepare('SELECT points FROM users WHERE id = ?').get(tId);
+            const initialCredits = user ? (user.points || 0) : 0;
+            
             db.prepare(`
                 INSERT INTO user_credits (telegram_user_id, credits, created_at, updated_at)
-                VALUES (?, 0, ?, ?)
-            `).run(tId, now, now);
+                VALUES (?, ?, ?, ?)
+            `).run(tId, initialCredits, now, now);
+            
+            if (initialCredits > 0) {
+                logger.info('Initialized user_credits from legacy points', { telegramUserId: tId, credits: initialCredits });
+            }
         }
     } catch (error) {
         logger.error('Error initializing user credits', { error: error.message, telegramUserId });
