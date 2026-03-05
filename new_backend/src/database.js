@@ -10,12 +10,13 @@ const logger = winston.createLogger({
     transports: [new winston.transports.Console()]
 });
 
-const dbPath = path.join(__dirname, '..', 'data');
+const dbPath = process.env.DB_DIR || path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dbPath)) {
-    fs.mkdirSync(dbPath);
+    fs.mkdirSync(dbPath, { recursive: true });
 }
 
-const db = new Database(path.join(dbPath, 'faceswap.db'));
+const dbFile = process.env.DB_FILE || 'faceswap.db';
+const db = new Database(path.join(dbPath, dbFile));
 
 try {
     db.exec(`

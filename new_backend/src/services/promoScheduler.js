@@ -113,30 +113,31 @@ async function sendFlashyStudioButton(bot) {
 }
 
 async function startPromoScheduler(bot) {
-    // SEQUENTIAL execution - each waits for previous to complete
+    // Prevent duplicate schedulers on hot-reload or multiple starts
+    if (global.__PROMO_SCHEDULER_STARTED) {
+        return;
+    }
+    global.__PROMO_SCHEDULER_STARTED = true;
 
-    // Step 1: Promo batch with images and pricing
-    await postPromoBatch(bot);
+    // Determine interval in hours (defaults to 6)
+    const hours = Number(process.env.PROMO_INTERVAL_HOURS) || 6;
+    const intervalMs = Math.max(1, hours) * 60 * 60 * 1000;
 
-    // Step 2: Wait 2 seconds
-    await new Promise(r => setTimeout(r, 2000));
+    // Schedule promo posting strictly once per interval without immediate burst
+    const runPromo = async () => {
+        try {
+            await postPromoBatch(bot);
+        } catch (e) {
+            console.error('Scheduled promo run failed:', e.message);
+        }
+    };
 
-    // Step 3: Startup intro videos (5 blocks)
-    await postStartupVideos(bot);
+    // First run occurs after the first full interval to avoid startup spam
+    setTimeout(runPromo, intervalMs);
+    setInterval(runPromo, intervalMs);
 
-    // Step 4: Wait 2 seconds
-    await new Promise(r => setTimeout(r, 2000));
-
-    // Step 5: THE BIG FLASHY STUDIO BUTTON - ABSOLUTELY LAST
-    await sendFlashyStudioButton(bot);
-
-    // Schedule subsequent promo batches every 6 hours
-    setInterval(() => postPromoBatch(bot), 6 * 60 * 60 * 1000);
-
-    // Start re-engagement system - runs every 2 hours
+    // Re-engagement system remains on its existing cadence
     setInterval(() => sendReEngagementMessages(bot), 2 * 60 * 60 * 1000);
-
-    // Run first re-engagement after 5 minutes
     setTimeout(() => sendReEngagementMessages(bot), 5 * 60 * 1000);
 }
 
