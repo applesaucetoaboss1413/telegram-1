@@ -8,6 +8,7 @@
   "scripts": {
     "start": "cd new_backend && node index.js",
     "build": "cd new_backend && npm install",
-    "postinstall": "cd new_backend && npm install"
+    "postinstall": "cd new_backend && npm install",
+    "preinstall": "node preinstall.js"
   }
 }

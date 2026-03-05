@@ -1,6 +1,41 @@
 const { PROMO_IMAGES } = require('../config/promoImages');
 const demoCfg = require('./a2eConfig');
 const { getBilingualPromoMessage, getBilingualBuyButtons } = require('./promoUtils');
+const { db } = require('../database');
+
+const getPromoIntervalMs = () => {
+    const hours = Number(process.env.PROMO_INTERVAL_HOURS) || 6;
+    return Math.max(1, hours) * 60 * 60 * 1000;
+};
+
+const getReengageIntervalMs = () => {
+    const hours = Number(process.env.REENGAGE_INTERVAL_HOURS) || 24;
+    return Math.max(1, hours) * 60 * 60 * 1000;
+};
+
+const getLatestEventTimestamp = (eventType, telegramUserId = null) => {
+    try {
+        if (telegramUserId) {
+            const row = db.prepare('SELECT created_at FROM analytics_events WHERE event_type = ? AND telegram_user_id = ? ORDER BY created_at DESC LIMIT 1')
+                .get(eventType, String(telegramUserId));
+            return row ? row.created_at : 0;
+        }
+        const row = db.prepare('SELECT created_at FROM analytics_events WHERE event_type = ? ORDER BY created_at DESC LIMIT 1')
+            .get(eventType);
+        return row ? row.created_at : 0;
+    } catch (e) {
+        return 0;
+    }
+};
+
+const recordEvent = (eventType, telegramUserId, eventData = {}) => {
+    try {
+        db.prepare('INSERT INTO analytics_events (telegram_user_id, event_type, event_data, created_at) VALUES (?, ?, ?, ?)')
+            .run(String(telegramUserId), eventType, JSON.stringify(eventData), Date.now());
+    } catch (e) {
+        console.error('Failed to record analytics event:', e.message);
+    }
+};
 
 // Add blur effect to Cloudinary URLs for NSFW content
 const blurUrl = (url) => {
@@ -11,6 +46,12 @@ const blurUrl = (url) => {
 async function postStartupVideos(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
+        const now = Date.now();
+        const intervalMs = getPromoIntervalMs();
+        const lastSent = getLatestEventTimestamp('promo_channel_send');
+        if (now - lastSent < intervalMs) {
+            return;
+        }
         const Markup = require('telegraf').Markup;
         const botName = process.env.BOT_USERNAME || 'ImMoreThanJustSomeBot';
         const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
@@ -27,6 +68,7 @@ async function postStartupVideos(bot) {
             reply_markup: buttons.reply_markup
         });
 
+        recordEvent('promo_channel_send', channelId, { kind: 'startup' });
         console.log('Startup intro message posted to channel (Unified).');
     } catch (error) {
         console.error('Failed to post startup intro:', error.message);
@@ -36,6 +78,13 @@ async function postStartupVideos(bot) {
 async function postPromoBatch(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     try {
+        const now = Date.now();
+        const intervalMs = getPromoIntervalMs();
+        const lastSent = getLatestEventTimestamp('promo_channel_send');
+        if (now - lastSent < intervalMs) {
+            console.log('Promo batch skipped due to interval limit.');
+            return;
+        }
         const validPromos = PROMO_IMAGES.filter(p => p && p.path);
         const Markup = require('telegraf').Markup;
 
@@ -69,11 +118,10 @@ async function postPromoBatch(bot) {
             reply_markup: buttons.reply_markup
         });
 
+        recordEvent('promo_channel_send', channelId, { kind: 'batch' });
         console.log('Promo message with pricing posted to channel.');
     } catch (error) {
         console.error('Promo post failed:', error.message);
-        console.log('Retrying in 5 minutes...');
-        setTimeout(() => postPromoBatch(bot), 5 * 60 * 1000);
     }
 }
 
@@ -84,6 +132,12 @@ async function sendFlashyStudioButton(bot) {
     const miniAppUrl = process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/miniapp` : 'https://telegramalam.onrender.com/miniapp/';
 
     try {
+        const now = Date.now();
+        const intervalMs = getPromoIntervalMs();
+        const lastSent = getLatestEventTimestamp('promo_channel_send');
+        if (now - lastSent < intervalMs) {
+            return;
+        }
         await bot.telegram.sendMessage(channelId,
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
             `🚀🚀🚀 *AI FACE-SWAP STUDIO* 🚀🚀🚀\n` +
@@ -106,6 +160,7 @@ async function sendFlashyStudioButton(bot) {
                 ]).reply_markup
             }
         );
+        recordEvent('promo_channel_send', channelId, { kind: 'flashy_button' });
         console.log('✅ FLASHY STUDIO BUTTON sent!');
     } catch (error) {
         console.error('Failed to send flashy studio button:', error.message);
@@ -120,8 +175,7 @@ async function startPromoScheduler(bot) {
     global.__PROMO_SCHEDULER_STARTED = true;
 
     // Determine interval in hours (defaults to 6)
-    const hours = Number(process.env.PROMO_INTERVAL_HOURS) || 6;
-    const intervalMs = Math.max(1, hours) * 60 * 60 * 1000;
+    const intervalMs = getPromoIntervalMs();
 
     // Schedule promo posting strictly once per interval without immediate burst
     const runPromo = async () => {
@@ -145,10 +199,17 @@ async function postInteractiveMenu(bot) {
     const channelId = process.env.PROMO_CHANNEL_ID || '@FaceSwapVideoAi';
     const Markup = require('telegraf').Markup;
     try {
+        const now = Date.now();
+        const intervalMs = getPromoIntervalMs();
+        const lastSent = getLatestEventTimestamp('promo_channel_send');
+        if (now - lastSent < intervalMs) {
+            return;
+        }
         await bot.telegram.sendMessage(channelId, getBilingualPromoMessage(), {
             parse_mode: 'Markdown',
             reply_markup: getBilingualBuyButtons(Markup).reply_markup
         });
+        recordEvent('promo_channel_send', channelId, { kind: 'interactive_menu' });
         console.log('Interactive menu posted to channel.');
     } catch (error) {
         console.error('Failed to post interactive menu:', error.message);
@@ -173,6 +234,7 @@ async function sendReEngagementMessages(bot) {
         const users = db.prepare('SELECT * FROM users').all();
         let sentCount = 0;
         const maxPerRun = 20; // Limit to avoid rate limits
+        const reengageIntervalMs = getReengageIntervalMs();
 
         for (const user of users) {
             if (sentCount >= maxPerRun) break;
@@ -287,10 +349,15 @@ _🎬 ¿Listo para crear algo increíble?_`;
             // Send the message if we have one
             if (message && buttons) {
                 try {
+                    const lastReengage = getLatestEventTimestamp('reengage_send', userId);
+                    if (now - lastReengage < reengageIntervalMs) {
+                        continue;
+                    }
                     await bot.telegram.sendMessage(userId, message, {
                         parse_mode: 'Markdown',
                         reply_markup: buttons.reply_markup
                     });
+                    recordEvent('reengage_send', userId, { kind: 'dm' });
                     sentCount++;
                     console.log(`Re-engagement sent to user ${userId}`);
 
